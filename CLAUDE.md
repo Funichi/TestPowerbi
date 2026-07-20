@@ -37,6 +37,6 @@ Copia `.env.example` in `.env.local` e inserisci i valori veri (questo file non 
 - [x] 0. Scaffold iniziale del progetto
 - [x] 1. Autenticazione utente (registrazione, login, logout)
 - [x] 2. Creazione e gestione viaggi
-- [ ] 3. Salvataggio luoghi per categoria (in attesa di verifica)
+- [x] 3. Salvataggio luoghi per categoria
 - [ ] 4. Costruzione dell'itinerario
 - [ ] 5. Consultazione durante il viaggio (mobile + navigazione)

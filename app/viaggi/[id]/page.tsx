@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { RouteMap } from "@/components/RouteMap";
 import { deletePlace, deleteTripAndRedirect, updatePlace } from "./actions";
 import { AddPlaceForm } from "./add-place-form";
+import { AddStopForm } from "./add-stop-form";
+import { moveStop, removeStop } from "./itinerary-actions";
 
 function formatDate(value: string | null) {
   if (!value) return null;
@@ -77,6 +80,74 @@ function PlaceCard({ luogo, viaggioId }: { luogo: Luogo; viaggioId: string }) {
   );
 }
 
+type Tappa = {
+  id: string;
+  giorno: number;
+  posizione: number;
+  luogo: { id: string; nome: string; lat: number | null; lng: number | null } | null;
+};
+
+function ItineraryDay({
+  giorno,
+  tappe,
+  viaggioId,
+}: {
+  giorno: number;
+  tappe: Tappa[];
+  viaggioId: string;
+}) {
+  const stopsConCoordinate = tappe
+    .filter((t) => t.luogo?.lat != null && t.luogo?.lng != null)
+    .map((t) => ({ lat: t.luogo!.lat!, lng: t.luogo!.lng!, nome: t.luogo!.nome }));
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-black/[.08] bg-white p-4 dark:border-white/[.145] dark:bg-zinc-950">
+      <h3 className="font-medium text-zinc-950 dark:text-zinc-50">Giorno {giorno}</h3>
+      <ol className="flex flex-col gap-2">
+        {tappe.map((tappa, index) => (
+          <li
+            key={tappa.id}
+            className="flex items-center justify-between gap-3 rounded-md border border-black/[.08] px-3 py-2 dark:border-white/[.145]"
+          >
+            <span className="text-sm text-zinc-950 dark:text-zinc-50">
+              {index + 1}. {tappa.luogo?.nome ?? "Luogo eliminato"}
+            </span>
+            <div className="flex items-center gap-1">
+              <form action={moveStop.bind(null, tappa.id, viaggioId, "up")}>
+                <button
+                  type="submit"
+                  disabled={index === 0}
+                  className="rounded-full border border-black/[.08] px-2 py-1 text-xs disabled:opacity-30 dark:border-white/[.145]"
+                >
+                  ▲
+                </button>
+              </form>
+              <form action={moveStop.bind(null, tappa.id, viaggioId, "down")}>
+                <button
+                  type="submit"
+                  disabled={index === tappe.length - 1}
+                  className="rounded-full border border-black/[.08] px-2 py-1 text-xs disabled:opacity-30 dark:border-white/[.145]"
+                >
+                  ▼
+                </button>
+              </form>
+              <form action={removeStop.bind(null, tappa.id, viaggioId)}>
+                <button
+                  type="submit"
+                  className="rounded-full border border-black/[.08] px-2 py-1 text-xs dark:border-white/[.145]"
+                >
+                  Rimuovi
+                </button>
+              </form>
+            </div>
+          </li>
+        ))}
+      </ol>
+      {stopsConCoordinate.length > 0 && <RouteMap stops={stopsConCoordinate} />}
+    </div>
+  );
+}
+
 export default async function ViaggioPage({
   params,
 }: {
@@ -100,6 +171,16 @@ export default async function ViaggioPage({
     .select("id, nome, categoria, indirizzo, nota")
     .eq("viaggio_id", id)
     .order("created_at", { ascending: true });
+
+  const { data: tappe } = await supabase
+    .from("tappe_itinerario")
+    .select("id, giorno, posizione, luogo:luoghi(id, nome, lat, lng)")
+    .eq("viaggio_id", id)
+    .order("giorno", { ascending: true })
+    .order("posizione", { ascending: true })
+    .returns<Tappa[]>();
+
+  const giorni = Array.from(new Set((tappe ?? []).map((t) => t.giorno)));
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
@@ -150,6 +231,28 @@ export default async function ViaggioPage({
             </section>
           );
         })}
+
+        <section className="flex flex-col gap-4">
+          <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-50">
+            Itinerario
+          </h2>
+          <AddStopForm viaggioId={viaggio.id} luoghi={(luoghi ?? []).map((l) => ({ id: l.id, nome: l.nome }))} />
+
+          {giorni.length === 0 ? (
+            <p className="text-sm text-zinc-500 dark:text-zinc-500">
+              Nessuna tappa pianificata. Aggiungi un luogo salvato a un giorno con il modulo qui sopra.
+            </p>
+          ) : (
+            giorni.map((giorno) => (
+              <ItineraryDay
+                key={giorno}
+                giorno={giorno}
+                tappe={(tappe ?? []).filter((t) => t.giorno === giorno)}
+                viaggioId={viaggio.id}
+              />
+            ))
+          )}
+        </section>
       </main>
     </div>
   );
