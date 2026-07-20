@@ -1,27 +1,51 @@
 "use client";
 
 import { useActionState } from "react";
-import { addStop } from "./itinerary-actions";
+import { addStop } from "../itinerary-actions";
 
 const inputClass =
   "rounded-md border border-black/[.08] bg-white px-3 py-2 text-zinc-950 dark:border-white/[.145] dark:bg-black dark:text-zinc-50";
 
+const SENZA_CITTA = "Altri luoghi";
+
+export type LuogoOpzione = {
+  id: string;
+  nome: string;
+  citta: string | null;
+  giaAggiunto: boolean;
+};
+
 export function AddStopForm({
   viaggioId,
+  giorno,
   luoghi,
 }: {
   viaggioId: string;
-  luoghi: { id: string; nome: string }[];
+  giorno: number;
+  luoghi: LuogoOpzione[];
 }) {
   const [state, formAction, pending] = useActionState(addStop, undefined);
 
   if (luoghi.length === 0) {
     return (
       <p className="text-sm text-zinc-500 dark:text-zinc-500">
-        Salva prima almeno un luogo per poterlo aggiungere all&apos;itinerario.
+        Salva prima almeno un luogo nella pagina &quot;Luoghi&quot; per poterlo aggiungere all&apos;itinerario.
       </p>
     );
   }
+
+  const gruppi = new Map<string, LuogoOpzione[]>();
+  for (const luogo of luoghi) {
+    const chiave = luogo.citta ?? SENZA_CITTA;
+    const gruppo = gruppi.get(chiave) ?? [];
+    gruppo.push(luogo);
+    gruppi.set(chiave, gruppo);
+  }
+  const gruppiOrdinati = Array.from(gruppi.entries()).sort(([a], [b]) => {
+    if (a === SENZA_CITTA) return 1;
+    if (b === SENZA_CITTA) return -1;
+    return a.localeCompare(b);
+  });
 
   return (
     <form
@@ -36,10 +60,15 @@ export function AddStopForm({
           <option value="" disabled>
             Scegli un luogo salvato
           </option>
-          {luoghi.map((luogo) => (
-            <option key={luogo.id} value={luogo.id}>
-              {luogo.nome}
-            </option>
+          {gruppiOrdinati.map(([citta, opzioni]) => (
+            <optgroup key={citta} label={citta}>
+              {opzioni.map((luogo) => (
+                <option key={luogo.id} value={luogo.id} disabled={luogo.giaAggiunto}>
+                  {luogo.nome}
+                  {luogo.giaAggiunto ? " (già nell'itinerario)" : ""}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </label>
@@ -51,7 +80,7 @@ export function AddStopForm({
           name="giorno"
           min={1}
           required
-          defaultValue={1}
+          defaultValue={giorno}
           className={`${inputClass} w-24`}
         />
       </label>

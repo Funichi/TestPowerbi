@@ -39,14 +39,14 @@ export async function addStop(_prevState: unknown, formData: FormData) {
     return { error: "Non è stato possibile aggiungere la tappa. Riprova." };
   }
 
-  revalidatePath(`/viaggi/${viaggioId}`);
+  revalidatePath(`/viaggi/${viaggioId}/itinerario`);
   return { error: null };
 }
 
 export async function removeStop(id: string, viaggioId: string) {
   const supabase = await createClient();
   await supabase.from("tappe_itinerario").delete().eq("id", id);
-  revalidatePath(`/viaggi/${viaggioId}`);
+  revalidatePath(`/viaggi/${viaggioId}/itinerario`);
 }
 
 export async function moveStop(id: string, viaggioId: string, direction: "up" | "down") {
@@ -78,5 +78,5 @@ export async function moveStop(id: string, viaggioId: string, direction: "up" | 
   await supabase.from("tappe_itinerario").update({ posizione: vicina.posizione }).eq("id", tappa.id);
   await supabase.from("tappe_itinerario").update({ posizione: tappa.posizione }).eq("id", vicina.id);
 
-  revalidatePath(`/viaggi/${viaggioId}`);
+  revalidatePath(`/viaggi/${viaggioId}/itinerario`);
 }

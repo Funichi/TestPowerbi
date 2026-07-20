@@ -18,6 +18,7 @@ export async function addPlace(_prevState: unknown, formData: FormData) {
   const categoria = String(formData.get("categoria") ?? "");
   const nota = String(formData.get("nota") ?? "").trim();
   const indirizzo = String(formData.get("indirizzo") ?? "");
+  const citta = String(formData.get("citta") ?? "").trim();
   const lat = formData.get("lat");
   const lng = formData.get("lng");
   const googlePlaceId = String(formData.get("google_place_id") ?? "");
@@ -39,6 +40,7 @@ export async function addPlace(_prevState: unknown, formData: FormData) {
     categoria,
     nota: nota || null,
     indirizzo: indirizzo || null,
+    citta: citta || null,
     lat: Number(lat),
     lng: Number(lng),
     google_place_id: googlePlaceId || null,
@@ -48,7 +50,8 @@ export async function addPlace(_prevState: unknown, formData: FormData) {
     return { error: "Non è stato possibile salvare il luogo. Riprova." };
   }
 
-  revalidatePath(`/viaggi/${viaggioId}`);
+  revalidatePath(`/viaggi/${viaggioId}/luoghi`);
+  revalidatePath(`/viaggi/${viaggioId}/itinerario`);
   return { error: null };
 }
 
@@ -67,11 +70,13 @@ export async function updatePlace(id: string, viaggioId: string, formData: FormD
     .update({ nome, categoria, nota: nota || null })
     .eq("id", id);
 
-  revalidatePath(`/viaggi/${viaggioId}`);
+  revalidatePath(`/viaggi/${viaggioId}/luoghi`);
+  revalidatePath(`/viaggi/${viaggioId}/itinerario`);
 }
 
 export async function deletePlace(id: string, viaggioId: string) {
   const supabase = await createClient();
   await supabase.from("luoghi").delete().eq("id", id);
-  revalidatePath(`/viaggi/${viaggioId}`);
+  revalidatePath(`/viaggi/${viaggioId}/luoghi`);
+  revalidatePath(`/viaggi/${viaggioId}/itinerario`);
 }

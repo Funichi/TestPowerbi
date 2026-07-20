@@ -52,7 +52,7 @@ export default async function ViaggiPage() {
                 key={viaggio.id}
                 className="flex items-center justify-between gap-4 rounded-lg border border-black/[.08] bg-white p-4 dark:border-white/[.145] dark:bg-zinc-950"
               >
-                <Link href={`/viaggi/${viaggio.id}`} className="flex flex-1 flex-col">
+                <Link href={`/viaggi/${viaggio.id}/luoghi`} className="flex flex-1 flex-col">
                   <span className="font-medium text-zinc-950 dark:text-zinc-50">
                     {viaggio.nome}
                   </span>

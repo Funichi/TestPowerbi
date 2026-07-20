@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { PlaceAutocompleteInput, type SelectedPlace } from "@/components/PlaceAutocompleteInput";
-import { addPlace } from "./actions";
+import { addPlace } from "../actions";
 
 const inputClass =
   "rounded-md border border-black/[.08] bg-white px-3 py-2 text-zinc-950 dark:border-white/[.145] dark:bg-black dark:text-zinc-50";
@@ -19,6 +19,7 @@ export function AddPlaceForm({ viaggioId }: { viaggioId: string }) {
     >
       <input type="hidden" name="viaggio_id" value={viaggioId} />
       <input type="hidden" name="indirizzo" value={selected?.indirizzo ?? ""} />
+      <input type="hidden" name="citta" value={selected?.citta ?? ""} />
       <input type="hidden" name="lat" value={selected?.lat ?? ""} />
       <input type="hidden" name="lng" value={selected?.lng ?? ""} />
       <input type="hidden" name="google_place_id" value={selected?.googlePlaceId ?? ""} />

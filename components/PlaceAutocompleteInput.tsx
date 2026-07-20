@@ -6,10 +6,20 @@ import { loadPlacesLibrary } from "@/lib/googleMaps";
 export type SelectedPlace = {
   nome: string;
   indirizzo: string;
+  citta: string | null;
   lat: number;
   lng: number;
   googlePlaceId: string;
 };
+
+function estraiCitta(addressComponents: google.maps.places.AddressComponent[] | undefined) {
+  if (!addressComponents) return null;
+  const componente =
+    addressComponents.find((c) => c.types.includes("locality")) ??
+    addressComponents.find((c) => c.types.includes("postal_town")) ??
+    addressComponents.find((c) => c.types.includes("administrative_area_level_3"));
+  return componente?.longText ?? null;
+}
 
 export function PlaceAutocompleteInput({
   onPlaceSelected,
@@ -31,11 +41,14 @@ export function PlaceAutocompleteInput({
 
     const handleSelect = async (event: google.maps.places.PlacePredictionSelectEvent) => {
       const place = event.placePrediction.toPlace();
-      await place.fetchFields({ fields: ["displayName", "formattedAddress", "location", "id"] });
+      await place.fetchFields({
+        fields: ["displayName", "formattedAddress", "addressComponents", "location", "id"],
+      });
       if (!place.location) return;
       callbackRef.current({
         nome: place.displayName ?? "",
         indirizzo: place.formattedAddress ?? "",
+        citta: estraiCitta(place.addressComponents),
         lat: place.location.lat(),
         lng: place.location.lng(),
         googlePlaceId: place.id,
