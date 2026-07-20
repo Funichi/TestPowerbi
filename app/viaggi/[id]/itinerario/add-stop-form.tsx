@@ -50,11 +50,11 @@ export function AddStopForm({
   return (
     <form
       action={formAction}
-      className="flex flex-col gap-3 rounded-lg border border-black/[.08] bg-white p-4 dark:border-white/[.145] dark:bg-zinc-950 sm:flex-row sm:items-end sm:flex-wrap"
+      className="flex flex-col gap-3 rounded-lg border border-black/[.08] bg-white p-4 dark:border-white/[.145] dark:bg-zinc-950"
     >
       <input type="hidden" name="viaggio_id" value={viaggioId} />
 
-      <label className="flex flex-1 min-w-[200px] flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
+      <label className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
         Luogo
         <select name="luogo_id" required defaultValue="" className={inputClass}>
           <option value="" disabled>

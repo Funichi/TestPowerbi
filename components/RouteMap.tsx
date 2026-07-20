@@ -9,7 +9,7 @@ export type MapStop = {
   nome: string;
 };
 
-export function RouteMap({ stops }: { stops: MapStop[] }) {
+export function RouteMap({ stops, className }: { stops: MapStop[]; className?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,5 +55,10 @@ export function RouteMap({ stops }: { stops: MapStop[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(stops)]);
 
-  return <div ref={containerRef} className="h-64 w-full rounded-lg border border-black/[.08] dark:border-white/[.145]" />;
+  return (
+    <div
+      ref={containerRef}
+      className={className ?? "h-64 w-full rounded-lg border border-black/[.08] dark:border-white/[.145]"}
+    />
+  );
 }

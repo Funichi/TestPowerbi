@@ -8,10 +8,43 @@ type Tappa = {
   id: string;
   giorno: number;
   posizione: number;
-  luogo: { id: string; nome: string; lat: number | null; lng: number | null } | null;
+  luogo: {
+    id: string;
+    nome: string;
+    categoria: string;
+    lat: number | null;
+    lng: number | null;
+    google_place_id: string | null;
+  } | null;
 };
 
-function DayTabs({ viaggioId, giorni, giornoSelezionato }: { viaggioId: string; giorni: number[]; giornoSelezionato: number }) {
+const ICONA_CATEGORIA: Record<string, string> = {
+  visitare: "📍",
+  mangiare: "🍴",
+  dormire: "🛏️",
+};
+
+function mapsNavigationUrl(luogo: NonNullable<Tappa["luogo"]>) {
+  if (luogo.lat == null || luogo.lng == null) return null;
+  const params = new URLSearchParams({
+    api: "1",
+    destination: `${luogo.lat},${luogo.lng}`,
+  });
+  if (luogo.google_place_id) {
+    params.set("destination_place_id", luogo.google_place_id);
+  }
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+function DayTabs({
+  viaggioId,
+  giorni,
+  giornoSelezionato,
+}: {
+  viaggioId: string;
+  giorni: number[];
+  giornoSelezionato: number;
+}) {
   const prossimoGiorno = Math.max(giornoSelezionato, ...giorni, 0) + 1;
 
   return (
@@ -59,7 +92,7 @@ export default async function ItinerarioPage({
 
   const { data: tappe } = await supabase
     .from("tappe_itinerario")
-    .select("id, giorno, posizione, luogo:luoghi(id, nome, lat, lng)")
+    .select("id, giorno, posizione, luogo:luoghi(id, nome, categoria, lat, lng, google_place_id)")
     .eq("viaggio_id", id)
     .order("giorno", { ascending: true })
     .order("posizione", { ascending: true })
@@ -88,61 +121,94 @@ export default async function ItinerarioPage({
     .map((t) => ({ lat: t.luogo!.lat!, lng: t.luogo!.lng!, nome: t.luogo!.nome }));
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-8">
-      <DayTabs viaggioId={id} giorni={giorniTab} giornoSelezionato={giornoSelezionato} />
+    <div className="flex flex-1 flex-col lg:flex-row">
+      <aside className="flex w-full flex-col gap-4 border-b border-black/[.08] p-6 dark:border-white/[.145] lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+        <DayTabs viaggioId={id} giorni={giorniTab} giornoSelezionato={giornoSelezionato} />
 
-      <AddStopForm viaggioId={id} giorno={giornoSelezionato} luoghi={opzioniLuoghi} />
+        <AddStopForm viaggioId={id} giorno={giornoSelezionato} luoghi={opzioniLuoghi} />
 
-      <div className="flex flex-col gap-3 rounded-lg border border-black/[.08] bg-white p-4 dark:border-white/[.145] dark:bg-zinc-950">
-        <h2 className="font-medium text-zinc-950 dark:text-zinc-50">Giorno {giornoSelezionato}</h2>
-        {tappeDelGiorno.length === 0 ? (
-          <p className="text-sm text-zinc-500 dark:text-zinc-500">
-            Nessuna tappa per questo giorno. Aggiungine una con il modulo qui sopra.
-          </p>
+        <div className="flex flex-col gap-3">
+          <h2 className="font-medium text-zinc-950 dark:text-zinc-50">Giorno {giornoSelezionato}</h2>
+          {tappeDelGiorno.length === 0 ? (
+            <p className="text-sm text-zinc-500 dark:text-zinc-500">
+              Nessuna tappa per questo giorno. Aggiungine una con il modulo qui sopra.
+            </p>
+          ) : (
+            <ol className="flex flex-col gap-2">
+              {tappeDelGiorno.map((tappa, index) => {
+                const url = tappa.luogo ? mapsNavigationUrl(tappa.luogo) : null;
+                return (
+                  <li
+                    key={tappa.id}
+                    className="flex items-center justify-between gap-3 rounded-md border border-black/[.08] px-3 py-2 dark:border-white/[.145]"
+                  >
+                    <span className="text-sm text-zinc-950 dark:text-zinc-50">
+                      {index + 1}.{" "}
+                      {tappa.luogo && (
+                        <span aria-hidden="true">
+                          {ICONA_CATEGORIA[tappa.luogo.categoria] ?? "📍"}{" "}
+                        </span>
+                      )}
+                      {url ? (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline decoration-dotted underline-offset-2"
+                        >
+                          {tappa.luogo?.nome}
+                        </a>
+                      ) : (
+                        (tappa.luogo?.nome ?? "Luogo eliminato")
+                      )}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <form action={moveStop.bind(null, tappa.id, id, "up")}>
+                        <button
+                          type="submit"
+                          disabled={index === 0}
+                          className="rounded-full border border-black/[.08] px-2 py-1 text-xs disabled:opacity-30 dark:border-white/[.145]"
+                        >
+                          ▲
+                        </button>
+                      </form>
+                      <form action={moveStop.bind(null, tappa.id, id, "down")}>
+                        <button
+                          type="submit"
+                          disabled={index === tappeDelGiorno.length - 1}
+                          className="rounded-full border border-black/[.08] px-2 py-1 text-xs disabled:opacity-30 dark:border-white/[.145]"
+                        >
+                          ▼
+                        </button>
+                      </form>
+                      <form action={removeStop.bind(null, tappa.id, id)}>
+                        <button
+                          type="submit"
+                          className="rounded-full border border-black/[.08] px-2 py-1 text-xs dark:border-white/[.145]"
+                        >
+                          Rimuovi
+                        </button>
+                      </form>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+      </aside>
+
+      <div className="h-[70vh] flex-1 lg:h-auto">
+        {stopsConCoordinate.length > 0 ? (
+          <RouteMap stops={stopsConCoordinate} className="h-full w-full" />
         ) : (
-          <ol className="flex flex-col gap-2">
-            {tappeDelGiorno.map((tappa, index) => (
-              <li
-                key={tappa.id}
-                className="flex items-center justify-between gap-3 rounded-md border border-black/[.08] px-3 py-2 dark:border-white/[.145]"
-              >
-                <span className="text-sm text-zinc-950 dark:text-zinc-50">
-                  {index + 1}. {tappa.luogo?.nome ?? "Luogo eliminato"}
-                </span>
-                <div className="flex items-center gap-1">
-                  <form action={moveStop.bind(null, tappa.id, id, "up")}>
-                    <button
-                      type="submit"
-                      disabled={index === 0}
-                      className="rounded-full border border-black/[.08] px-2 py-1 text-xs disabled:opacity-30 dark:border-white/[.145]"
-                    >
-                      ▲
-                    </button>
-                  </form>
-                  <form action={moveStop.bind(null, tappa.id, id, "down")}>
-                    <button
-                      type="submit"
-                      disabled={index === tappeDelGiorno.length - 1}
-                      className="rounded-full border border-black/[.08] px-2 py-1 text-xs disabled:opacity-30 dark:border-white/[.145]"
-                    >
-                      ▼
-                    </button>
-                  </form>
-                  <form action={removeStop.bind(null, tappa.id, id)}>
-                    <button
-                      type="submit"
-                      className="rounded-full border border-black/[.08] px-2 py-1 text-xs dark:border-white/[.145]"
-                    >
-                      Rimuovi
-                    </button>
-                  </form>
-                </div>
-              </li>
-            ))}
-          </ol>
+          <div className="flex h-full w-full items-center justify-center bg-zinc-100 dark:bg-zinc-900">
+            <p className="text-sm text-zinc-500 dark:text-zinc-500">
+              Aggiungi almeno una tappa con una posizione per vedere la mappa.
+            </p>
+          </div>
         )}
-        {stopsConCoordinate.length > 0 && <RouteMap stops={stopsConCoordinate} />}
       </div>
-    </main>
+    </div>
   );
 }
