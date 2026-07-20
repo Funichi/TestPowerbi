@@ -14,13 +14,11 @@ export type SelectedPlace = {
 export function PlaceAutocompleteInput({
   onPlaceSelected,
   placeholder = "Cerca un luogo su Google Maps",
-  className,
 }: {
   onPlaceSelected: (place: SelectedPlace) => void;
   placeholder?: string;
-  className?: string;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const callbackRef = useRef(onPlaceSelected);
 
   useEffect(() => {
@@ -28,44 +26,37 @@ export function PlaceAutocompleteInput({
   }, [onPlaceSelected]);
 
   useEffect(() => {
-    let listener: google.maps.MapsEventListener | undefined;
     let cancelled = false;
+    let element: google.maps.places.PlaceAutocompleteElement | undefined;
+
+    const handleSelect = async (event: google.maps.places.PlacePredictionSelectEvent) => {
+      const place = event.placePrediction.toPlace();
+      await place.fetchFields({ fields: ["displayName", "formattedAddress", "location", "id"] });
+      if (!place.location) return;
+      callbackRef.current({
+        nome: place.displayName ?? "",
+        indirizzo: place.formattedAddress ?? "",
+        lat: place.location.lat(),
+        lng: place.location.lng(),
+        googlePlaceId: place.id,
+      });
+    };
 
     loadPlacesLibrary().then((places) => {
-      if (cancelled || !inputRef.current) return;
+      if (cancelled || !containerRef.current) return;
 
-      const autocomplete = new places.Autocomplete(inputRef.current, {
-        fields: ["place_id", "name", "formatted_address", "geometry"],
-      });
-
-      listener = autocomplete.addListener("place_changed", () => {
-        const result = autocomplete.getPlace();
-        if (!result.geometry?.location) return;
-        callbackRef.current({
-          nome: result.name ?? "",
-          indirizzo: result.formatted_address ?? "",
-          lat: result.geometry.location.lat(),
-          lng: result.geometry.location.lng(),
-          googlePlaceId: result.place_id ?? "",
-        });
-      });
+      element = new places.PlaceAutocompleteElement();
+      element.placeholder = placeholder;
+      containerRef.current.appendChild(element);
+      element.addEventListener("gmp-select", handleSelect);
     });
 
     return () => {
       cancelled = true;
-      listener?.remove();
+      element?.remove();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return (
-    <input
-      ref={inputRef}
-      type="text"
-      placeholder={placeholder}
-      className={
-        className ??
-        "rounded-md border border-black/[.08] bg-white px-3 py-2 text-zinc-950 dark:border-white/[.145] dark:bg-black dark:text-zinc-50"
-      }
-    />
-  );
+  return <div ref={containerRef} />;
 }
