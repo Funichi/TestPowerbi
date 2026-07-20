@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { RouteMap } from "@/components/RouteMap";
+import { googleMapsDirectionsUrl } from "@/lib/googleMapsLinks";
 import { moveStop, removeStop } from "../itinerary-actions";
 import { AddStopForm, type LuogoOpzione } from "./add-stop-form";
 
@@ -23,18 +24,6 @@ const ICONA_CATEGORIA: Record<string, string> = {
   mangiare: "🍴",
   dormire: "🛏️",
 };
-
-function mapsNavigationUrl(luogo: NonNullable<Tappa["luogo"]>) {
-  if (luogo.lat == null || luogo.lng == null) return null;
-  const params = new URLSearchParams({
-    api: "1",
-    destination: `${luogo.lat},${luogo.lng}`,
-  });
-  if (luogo.google_place_id) {
-    params.set("destination_place_id", luogo.google_place_id);
-  }
-  return `https://www.google.com/maps/dir/?${params.toString()}`;
-}
 
 function DayTabs({
   viaggioId,
@@ -136,7 +125,13 @@ export default async function ItinerarioPage({
           ) : (
             <ol className="flex flex-col gap-2">
               {tappeDelGiorno.map((tappa, index) => {
-                const url = tappa.luogo ? mapsNavigationUrl(tappa.luogo) : null;
+                const url = tappa.luogo
+                  ? googleMapsDirectionsUrl({
+                      lat: tappa.luogo.lat,
+                      lng: tappa.luogo.lng,
+                      googlePlaceId: tappa.luogo.google_place_id,
+                    })
+                  : null;
                 return (
                   <li
                     key={tappa.id}
