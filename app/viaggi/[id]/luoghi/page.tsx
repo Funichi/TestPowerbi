@@ -103,40 +103,38 @@ export default async function LuoghiPage({
     .eq("viaggio_id", id)
     .order("created_at", { ascending: true });
 
+  const gruppiCitta = raggruppaPerCitta(luoghi ?? []);
+
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-6 py-8">
       <AddPlaceForm viaggioId={id} />
 
-      {CATEGORIE.map(({ key, label }) => {
-        const luoghiCategoria = (luoghi ?? []).filter((l) => l.categoria === key);
-        const gruppiCitta = raggruppaPerCitta(luoghiCategoria);
+      {(luoghi ?? []).length === 0 ? (
+        <p className="text-sm text-zinc-500 dark:text-zinc-500">
+          Non hai ancora salvato nessun luogo. Cercane uno con il modulo qui sopra.
+        </p>
+      ) : (
+        gruppiCitta.map(([citta, luoghiCitta]) => (
+          <section key={citta} className="flex flex-col gap-4">
+            <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-50">{citta}</h2>
+            {CATEGORIE.map(({ key, label }) => {
+              const luoghiCategoria = luoghiCitta.filter((l) => l.categoria === key);
+              if (luoghiCategoria.length === 0) return null;
 
-        return (
-          <section key={key} className="flex flex-col gap-4">
-            <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-50">{label}</h2>
-            {luoghiCategoria.length === 0 ? (
-              <p className="text-sm text-zinc-500 dark:text-zinc-500">
-                Nessun luogo salvato in questa categoria.
-              </p>
-            ) : (
-              gruppiCitta.map(([citta, luoghiGruppo]) => (
-                <div key={citta} className="flex flex-col gap-2">
-                  {gruppiCitta.length > 1 && (
-                    <h3 className="text-sm font-medium text-zinc-500 dark:text-zinc-500">
-                      {citta}
-                    </h3>
-                  )}
+              return (
+                <div key={key} className="flex flex-col gap-2">
+                  <h3 className="text-sm font-medium text-zinc-500 dark:text-zinc-500">{label}</h3>
                   <ul className="flex flex-col gap-3">
-                    {luoghiGruppo.map((luogo) => (
+                    {luoghiCategoria.map((luogo) => (
                       <PlaceCard key={luogo.id} luogo={luogo} viaggioId={id} />
                     ))}
                   </ul>
                 </div>
-              ))
-            )}
+              );
+            })}
           </section>
-        );
-      })}
+        ))
+      )}
     </main>
   );
 }

@@ -29,7 +29,7 @@ export function AddPlaceForm({ viaggioId }: { viaggioId: string }) {
         <PlaceAutocompleteInput
           onPlaceSelected={(place) => {
             setSelected(place);
-            setNome((current) => current || place.nome);
+            setNome(place.nome);
           }}
         />
         {selected && (
@@ -40,7 +40,7 @@ export function AddPlaceForm({ viaggioId }: { viaggioId: string }) {
       </label>
 
       <label className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
-        Nome
+        Nome (compilato automaticamente dalla ricerca, puoi modificarlo)
         <input
           type="text"
           name="nome"
