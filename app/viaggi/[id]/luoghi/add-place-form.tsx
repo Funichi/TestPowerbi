@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { PlaceAutocompleteInput, type SelectedPlace } from "@/components/PlaceAutocompleteInput";
+import { PlaceDetailsCard } from "@/components/PlaceDetailsCard";
 import { addPlace } from "../actions";
 
 const inputClass = "rounded-md border border-line bg-surface px-3 py-2 text-foreground";
@@ -30,7 +31,7 @@ export function AddPlaceForm({ viaggioId }: { viaggioId: string }) {
 
       <dialog
         ref={dialogRef}
-        className="w-full max-w-md rounded-xl border border-line bg-surface p-6 text-foreground backdrop:bg-black/40"
+        className="fixed inset-0 m-auto h-fit max-h-[85vh] w-full max-w-md overflow-y-auto rounded-xl border border-line bg-surface p-6 text-foreground backdrop:bg-black/40"
         onClose={() => {
           setSelected(null);
           setNome("");
@@ -64,10 +65,9 @@ export function AddPlaceForm({ viaggioId }: { viaggioId: string }) {
                 setNome(place.nome);
               }}
             />
-            {selected && (
-              <span className="text-xs text-foreground/50">Selezionato: {selected.indirizzo}</span>
-            )}
           </label>
+
+          {selected?.googlePlaceId && <PlaceDetailsCard placeId={selected.googlePlaceId} />}
 
           <label className="flex flex-col gap-1 text-sm text-foreground/80">
             Nome (compilato automaticamente dalla ricerca, puoi modificarlo)
