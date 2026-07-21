@@ -193,7 +193,7 @@ export default async function ItinerarioPage({
         </div>
       </aside>
 
-      <div className="h-[70vh] flex-1 lg:h-auto">
+      <div className="h-[70dvh] flex-1 lg:h-auto">
         {stopsConCoordinate.length > 0 ? (
           <RouteMap stops={stopsConCoordinate} className="h-full w-full" />
         ) : (

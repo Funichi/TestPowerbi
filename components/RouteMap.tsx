@@ -14,6 +14,7 @@ export function RouteMap({ stops, className }: { stops: MapStop[]; className?: s
 
   useEffect(() => {
     let cancelled = false;
+    let resizeObserver: ResizeObserver | undefined;
     const markers: google.maps.Marker[] = [];
 
     Promise.all([loadMapsLibrary(), loadMarkerLibrary()]).then(([mapsLib, markerLib]) => {
@@ -46,10 +47,21 @@ export function RouteMap({ stops, className }: { stops: MapStop[]; className?: s
         strokeOpacity: 0.8,
         strokeWeight: 3,
       });
+
+      // Su mobile l'altezza del contenitore può cambiare dopo il primo
+      // disegno (barra degli indirizzi che appare/scompare, layout
+      // flessibile non ancora stabile): senza questo, la mappa può restare
+      // vuota o mal ridimensionata.
+      resizeObserver = new ResizeObserver(() => {
+        google.maps.event.trigger(map, "resize");
+        map.fitBounds(bounds, 40);
+      });
+      resizeObserver.observe(containerRef.current);
     });
 
     return () => {
       cancelled = true;
+      resizeObserver?.disconnect();
       markers.forEach((marker) => marker.setMap(null));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
