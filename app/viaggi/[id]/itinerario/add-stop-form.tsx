@@ -4,7 +4,7 @@ import { useActionState } from "react";
 import { addStop } from "../itinerary-actions";
 
 const inputClass =
-  "rounded-md border border-black/[.08] bg-white px-3 py-2 text-zinc-950 dark:border-white/[.145] dark:bg-black dark:text-zinc-50";
+  "rounded-md border border-line bg-surface px-3 py-2 text-foreground";
 
 const SENZA_CITTA = "Altri luoghi";
 
@@ -28,7 +28,7 @@ export function AddStopForm({
 
   if (luoghi.length === 0) {
     return (
-      <p className="text-sm text-zinc-500 dark:text-zinc-500">
+      <p className="text-sm text-foreground/50">
         Salva prima almeno un luogo nella pagina &quot;Luoghi&quot; per poterlo aggiungere all&apos;itinerario.
       </p>
     );
@@ -50,11 +50,11 @@ export function AddStopForm({
   return (
     <form
       action={formAction}
-      className="flex flex-col gap-3 rounded-lg border border-black/[.08] bg-white p-4 dark:border-white/[.145] dark:bg-zinc-950"
+      className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4"
     >
       <input type="hidden" name="viaggio_id" value={viaggioId} />
 
-      <label className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
+      <label className="flex flex-col gap-1 text-sm text-foreground/80">
         Luogo
         <select name="luogo_id" required defaultValue="" className={inputClass}>
           <option value="" disabled>
@@ -73,7 +73,7 @@ export function AddStopForm({
         </select>
       </label>
 
-      <label className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
+      <label className="flex flex-col gap-1 text-sm text-foreground/80">
         Giorno
         <input
           type="number"
@@ -90,7 +90,7 @@ export function AddStopForm({
       <button
         type="submit"
         disabled={pending}
-        className="rounded-full bg-foreground px-5 py-2.5 text-sm font-medium text-background transition-colors hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
+        className="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover disabled:opacity-50"
       >
         {pending ? "Aggiunta…" : "Aggiungi all'itinerario"}
       </button>

@@ -1,21 +1,60 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f3ec;
+  --foreground: #2b2620;
+
+  --surface: #ffffff;
+  --line: rgba(43, 38, 32, 0.1);
+
+  --primary: #24422f;
+  --primary-hover: #1a3122;
+  --primary-foreground: #ffffff;
+
+  --badge-visit-bg: #dbe9dc;
+  --badge-visit-fg: #24422f;
+  --badge-eat-bg: #f3ddd2;
+  --badge-eat-fg: #7a3b1e;
+  --badge-sleep-bg: #ecdfc2;
+  --badge-sleep-fg: #6b4f18;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-line: var(--line);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-badge-visit-bg: var(--badge-visit-bg);
+  --color-badge-visit-fg: var(--badge-visit-fg);
+  --color-badge-eat-bg: var(--badge-eat-bg);
+  --color-badge-eat-fg: var(--badge-eat-fg);
+  --color-badge-sleep-bg: var(--badge-sleep-bg);
+  --color-badge-sleep-fg: var(--badge-sleep-fg);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #171512;
+    --foreground: #ede8df;
+
+    --surface: #211f1b;
+    --line: rgba(237, 232, 223, 0.145);
+
+    --primary: #4a7a5b;
+    --primary-hover: #5b8d6c;
+    --primary-foreground: #0d1a10;
+
+    --badge-visit-bg: #24402c;
+    --badge-visit-fg: #cdeacf;
+    --badge-eat-bg: #47301f;
+    --badge-eat-fg: #f3d3bb;
+    --badge-sleep-bg: #40371c;
+    --badge-sleep-fg: #f0e2ae;
   }
 }
 

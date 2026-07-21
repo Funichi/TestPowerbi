@@ -44,8 +44,8 @@ function DayTabs({
           href={`/viaggi/${viaggioId}/itinerario?giorno=${giorno}`}
           className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
             giorno === giornoSelezionato
-              ? "border-zinc-950 bg-zinc-950 text-white dark:border-zinc-50 dark:bg-zinc-50 dark:text-black"
-              : "border-black/[.08] text-zinc-950 hover:bg-black/[.04] dark:border-white/[.145] dark:text-zinc-50 dark:hover:bg-[#1a1a1a]"
+              ? "border-primary bg-primary text-primary-foreground"
+              : "border-line text-foreground hover:bg-foreground/5"
           }`}
         >
           Giorno {giorno}
@@ -53,7 +53,7 @@ function DayTabs({
       ))}
       <Link
         href={`/viaggi/${viaggioId}/itinerario?giorno=${prossimoGiorno}`}
-        className="rounded-full border border-dashed border-black/[.2] px-4 py-1.5 text-sm font-medium text-zinc-500 hover:bg-black/[.04] dark:border-white/[.3] dark:text-zinc-400 dark:hover:bg-[#1a1a1a]"
+        className="rounded-full border border-dashed border-line px-4 py-1.5 text-sm font-medium text-foreground/50 hover:bg-foreground/5"
       >
         + Aggiungi giorno
       </Link>
@@ -111,15 +111,15 @@ export default async function ItinerarioPage({
 
   return (
     <div className="flex flex-1 flex-col lg:flex-row">
-      <aside className="flex w-full flex-col gap-4 border-b border-black/[.08] p-6 dark:border-white/[.145] lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+      <aside className="flex w-full flex-col gap-4 border-b border-line p-6 lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-r">
         <DayTabs viaggioId={id} giorni={giorniTab} giornoSelezionato={giornoSelezionato} />
 
         <AddStopForm viaggioId={id} giorno={giornoSelezionato} luoghi={opzioniLuoghi} />
 
         <div className="flex flex-col gap-3">
-          <h2 className="font-medium text-zinc-950 dark:text-zinc-50">Giorno {giornoSelezionato}</h2>
+          <h2 className="font-medium text-foreground">Giorno {giornoSelezionato}</h2>
           {tappeDelGiorno.length === 0 ? (
-            <p className="text-sm text-zinc-500 dark:text-zinc-500">
+            <p className="text-sm text-foreground/50">
               Nessuna tappa per questo giorno. Aggiungine una con il modulo qui sopra.
             </p>
           ) : (
@@ -135,9 +135,9 @@ export default async function ItinerarioPage({
                 return (
                   <li
                     key={tappa.id}
-                    className="flex items-center justify-between gap-3 rounded-md border border-black/[.08] px-3 py-2 dark:border-white/[.145]"
+                    className="flex items-center justify-between gap-3 rounded-md border border-line px-3 py-2"
                   >
-                    <span className="text-sm text-zinc-950 dark:text-zinc-50">
+                    <span className="text-sm text-foreground">
                       {index + 1}.{" "}
                       {tappa.luogo && (
                         <span aria-hidden="true">
@@ -162,7 +162,7 @@ export default async function ItinerarioPage({
                         <button
                           type="submit"
                           disabled={index === 0}
-                          className="rounded-full border border-black/[.08] px-2 py-1 text-xs disabled:opacity-30 dark:border-white/[.145]"
+                          className="rounded-full border border-line px-2 py-1 text-xs disabled:opacity-30"
                         >
                           ▲
                         </button>
@@ -171,7 +171,7 @@ export default async function ItinerarioPage({
                         <button
                           type="submit"
                           disabled={index === tappeDelGiorno.length - 1}
-                          className="rounded-full border border-black/[.08] px-2 py-1 text-xs disabled:opacity-30 dark:border-white/[.145]"
+                          className="rounded-full border border-line px-2 py-1 text-xs disabled:opacity-30"
                         >
                           ▼
                         </button>
@@ -179,7 +179,7 @@ export default async function ItinerarioPage({
                       <form action={removeStop.bind(null, tappa.id, id)}>
                         <button
                           type="submit"
-                          className="rounded-full border border-black/[.08] px-2 py-1 text-xs dark:border-white/[.145]"
+                          className="rounded-full border border-line px-2 py-1 text-xs"
                         >
                           Rimuovi
                         </button>
@@ -197,8 +197,8 @@ export default async function ItinerarioPage({
         {stopsConCoordinate.length > 0 ? (
           <RouteMap stops={stopsConCoordinate} className="h-full w-full" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-zinc-100 dark:bg-zinc-900">
-            <p className="text-sm text-zinc-500 dark:text-zinc-500">
+          <div className="flex h-full w-full items-center justify-center bg-surface">
+            <p className="text-sm text-foreground/50">
               Aggiungi almeno una tappa con una posizione per vedere la mappa.
             </p>
           </div>

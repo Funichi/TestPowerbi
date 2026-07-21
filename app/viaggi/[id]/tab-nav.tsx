@@ -12,7 +12,7 @@ export function TabNav({ viaggioId }: { viaggioId: string }) {
   ];
 
   return (
-    <nav className="flex gap-1 border-b border-black/[.08] px-6 dark:border-white/[.145]">
+    <nav className="flex gap-1 border-b border-line px-6">
       {tabs.map((tab) => {
         const attivo = pathname.startsWith(tab.href);
         return (
@@ -21,8 +21,8 @@ export function TabNav({ viaggioId }: { viaggioId: string }) {
             href={tab.href}
             className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
               attivo
-                ? "border-zinc-950 text-zinc-950 dark:border-zinc-50 dark:text-zinc-50"
-                : "border-transparent text-zinc-500 hover:text-zinc-950 dark:text-zinc-500 dark:hover:text-zinc-50"
+                ? "border-primary text-primary"
+                : "border-transparent text-foreground/50 hover:text-foreground"
             }`}
           >
             {tab.label}

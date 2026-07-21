@@ -13,20 +13,20 @@ export default async function Home() {
   }
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 bg-zinc-50 px-4 text-center dark:bg-black">
-      <h1 className="max-w-md text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+    <div className="flex flex-1 flex-col items-center justify-center gap-6 bg-background px-4 text-center">
+      <h1 className="max-w-md text-3xl font-semibold tracking-tight text-foreground">
         Il tuo diario di viaggio e itinerario, in un&apos;unica app
       </h1>
       <div className="flex gap-4">
         <Link
           href="/signup"
-          className="rounded-full bg-foreground px-5 py-2.5 text-sm font-medium text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]"
+          className="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
         >
           Inizia
         </Link>
         <Link
           href="/login"
-          className="rounded-full border border-black/[.08] px-5 py-2.5 text-sm font-medium text-zinc-950 transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:text-zinc-50 dark:hover:bg-[#1a1a1a]"
+          className="rounded-full border border-line px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground/5"
         >
           Accedi
         </Link>

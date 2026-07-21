@@ -17,32 +17,32 @@ export function NewTripForm() {
     <form
       ref={formRef}
       action={formAction}
-      className="flex flex-col gap-3 rounded-lg border border-black/[.08] bg-white p-4 dark:border-white/[.145] dark:bg-zinc-950 sm:flex-row sm:items-end sm:flex-wrap"
+      className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 sm:flex-row sm:items-end sm:flex-wrap"
     >
-      <label className="flex flex-1 min-w-[160px] flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
+      <label className="flex flex-1 min-w-[160px] flex-col gap-1 text-sm text-foreground/80">
         Nome viaggio
         <input
           type="text"
           name="nome"
           required
           placeholder="Es. Giappone 2026"
-          className="rounded-md border border-black/[.08] bg-white px-3 py-2 text-zinc-950 dark:border-white/[.145] dark:bg-black dark:text-zinc-50"
+          className="rounded-md border border-line bg-surface px-3 py-2 text-foreground"
         />
       </label>
-      <label className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
+      <label className="flex flex-col gap-1 text-sm text-foreground/80">
         Data inizio (opzionale)
         <input
           type="date"
           name="data_inizio"
-          className="rounded-md border border-black/[.08] bg-white px-3 py-2 text-zinc-950 dark:border-white/[.145] dark:bg-black dark:text-zinc-50"
+          className="rounded-md border border-line bg-surface px-3 py-2 text-foreground"
         />
       </label>
-      <label className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
+      <label className="flex flex-col gap-1 text-sm text-foreground/80">
         Data fine (opzionale)
         <input
           type="date"
           name="data_fine"
-          className="rounded-md border border-black/[.08] bg-white px-3 py-2 text-zinc-950 dark:border-white/[.145] dark:bg-black dark:text-zinc-50"
+          className="rounded-md border border-line bg-surface px-3 py-2 text-foreground"
         />
       </label>
       {state?.error && (
@@ -51,7 +51,7 @@ export function NewTripForm() {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-full bg-foreground px-5 py-2.5 text-sm font-medium text-background transition-colors hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
+        className="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover disabled:opacity-50"
       >
         {pending ? "Creazione…" : "Crea viaggio"}
       </button>

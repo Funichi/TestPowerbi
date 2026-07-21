@@ -58,7 +58,7 @@ export function RouteMap({ stops, className }: { stops: MapStop[]; className?: s
   return (
     <div
       ref={containerRef}
-      className={className ?? "h-64 w-full rounded-lg border border-black/[.08] dark:border-white/[.145]"}
+      className={className ?? "h-64 w-full rounded-lg border border-line"}
     />
   );
 }
