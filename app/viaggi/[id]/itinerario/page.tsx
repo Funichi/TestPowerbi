@@ -193,11 +193,11 @@ export default async function ItinerarioPage({
         </div>
       </aside>
 
-      <div className="h-[70dvh] flex-1 lg:h-auto">
+      <div className="h-96 flex-1 overflow-hidden rounded-lg border border-line bg-surface lg:h-auto">
         {stopsConCoordinate.length > 0 ? (
           <RouteMap stops={stopsConCoordinate} className="h-full w-full" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-surface">
+          <div className="flex h-full w-full items-center justify-center">
             <p className="text-sm text-foreground/50">
               Aggiungi almeno una tappa con una posizione per vedere la mappa.
             </p>
