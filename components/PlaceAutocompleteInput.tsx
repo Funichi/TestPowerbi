@@ -10,6 +10,10 @@ export type SelectedPlace = {
   lat: number;
   lng: number;
   googlePlaceId: string;
+  rating: number | null;
+  numeroRecensioni: number | null;
+  tipo: string | null;
+  fotoUrl: string | null;
 };
 
 function estraiCitta(addressComponents: google.maps.places.AddressComponent[] | undefined) {
@@ -42,9 +46,20 @@ export function PlaceAutocompleteInput({
     const handleSelect = async (event: google.maps.places.PlacePredictionSelectEvent) => {
       const place = event.placePrediction.toPlace();
       await place.fetchFields({
-        fields: ["displayName", "formattedAddress", "addressComponents", "location", "id"],
+        fields: [
+          "displayName",
+          "formattedAddress",
+          "addressComponents",
+          "location",
+          "id",
+          "rating",
+          "userRatingCount",
+          "primaryTypeDisplayName",
+          "photos",
+        ],
       });
       if (!place.location) return;
+      const foto = place.photos?.[0];
       callbackRef.current({
         nome: place.displayName ?? "",
         indirizzo: place.formattedAddress ?? "",
@@ -52,6 +67,10 @@ export function PlaceAutocompleteInput({
         lat: place.location.lat(),
         lng: place.location.lng(),
         googlePlaceId: place.id,
+        rating: place.rating ?? null,
+        numeroRecensioni: place.userRatingCount ?? null,
+        tipo: place.primaryTypeDisplayName ?? null,
+        fotoUrl: foto ? foto.getURI({ maxWidth: 480 }) : null,
       });
     };
 
