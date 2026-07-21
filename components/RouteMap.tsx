@@ -9,6 +9,24 @@ export type MapStop = {
   nome: string;
 };
 
+function haDimensioniValide(el: HTMLElement) {
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function aspettaDimensioni(el: HTMLElement): Promise<void> {
+  if (haDimensioniValide(el)) return Promise.resolve();
+  return new Promise((resolve) => {
+    const observer = new ResizeObserver(() => {
+      if (haDimensioniValide(el)) {
+        observer.disconnect();
+        resolve();
+      }
+    });
+    observer.observe(el);
+  });
+}
+
 export function RouteMap({ stops, className }: { stops: MapStop[]; className?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -17,47 +35,56 @@ export function RouteMap({ stops, className }: { stops: MapStop[]; className?: s
     let resizeObserver: ResizeObserver | undefined;
     const markers: google.maps.Marker[] = [];
 
-    Promise.all([loadMapsLibrary(), loadMarkerLibrary()]).then(([mapsLib, markerLib]) => {
-      if (cancelled || !containerRef.current || stops.length === 0) return;
+    Promise.all([loadMapsLibrary(), loadMarkerLibrary()])
+      .then(async ([mapsLib, markerLib]) => {
+        if (cancelled || !containerRef.current || stops.length === 0) return;
 
-      const bounds = new google.maps.LatLngBounds();
-      stops.forEach((stop) => bounds.extend({ lat: stop.lat, lng: stop.lng }));
+        // Se il contenitore non ha ancora una dimensione reale (layout
+        // flessibile non ancora stabile, tipico su mobile), la mappa di
+        // Google può restare vuota se creata troppo presto: si aspetta che
+        // abbia una larghezza/altezza misurabile prima di crearla.
+        await aspettaDimensioni(containerRef.current);
+        if (cancelled || !containerRef.current) return;
 
-      const map = new mapsLib.Map(containerRef.current, {
-        center: bounds.getCenter(),
-        zoom: 13,
-      });
-      map.fitBounds(bounds, 40);
+        const bounds = new google.maps.LatLngBounds();
+        stops.forEach((stop) => bounds.extend({ lat: stop.lat, lng: stop.lng }));
 
-      stops.forEach((stop, index) => {
-        markers.push(
-          new markerLib.Marker({
-            map,
-            position: { lat: stop.lat, lng: stop.lng },
-            label: String(index + 1),
-            title: stop.nome,
-          }),
-        );
-      });
-
-      new mapsLib.Polyline({
-        map,
-        path: stops.map((stop) => ({ lat: stop.lat, lng: stop.lng })),
-        strokeColor: "#111827",
-        strokeOpacity: 0.8,
-        strokeWeight: 3,
-      });
-
-      // Su mobile l'altezza del contenitore può cambiare dopo il primo
-      // disegno (barra degli indirizzi che appare/scompare, layout
-      // flessibile non ancora stabile): senza questo, la mappa può restare
-      // vuota o mal ridimensionata.
-      resizeObserver = new ResizeObserver(() => {
-        google.maps.event.trigger(map, "resize");
+        const map = new mapsLib.Map(containerRef.current, {
+          center: bounds.getCenter(),
+          zoom: 13,
+        });
         map.fitBounds(bounds, 40);
+
+        stops.forEach((stop, index) => {
+          markers.push(
+            new markerLib.Marker({
+              map,
+              position: { lat: stop.lat, lng: stop.lng },
+              label: String(index + 1),
+              title: stop.nome,
+            }),
+          );
+        });
+
+        new mapsLib.Polyline({
+          map,
+          path: stops.map((stop) => ({ lat: stop.lat, lng: stop.lng })),
+          strokeColor: "#111827",
+          strokeOpacity: 0.8,
+          strokeWeight: 3,
+        });
+
+        resizeObserver = new ResizeObserver(() => {
+          google.maps.event.trigger(map, "resize");
+          map.fitBounds(bounds, 40);
+        });
+        resizeObserver.observe(containerRef.current);
+      })
+      .catch((err) => {
+        if (cancelled || !containerRef.current) return;
+        const messaggio = err instanceof Error ? err.message : String(err);
+        containerRef.current.textContent = `Errore nel caricamento della mappa: ${messaggio}`;
       });
-      resizeObserver.observe(containerRef.current);
-    });
 
     return () => {
       cancelled = true;
