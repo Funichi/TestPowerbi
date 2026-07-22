@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { googleMapsPlaceUrl } from "@/lib/googleMapsLinks";
 import { deletePlace, updatePlace } from "../actions";
+import { SuggestPlacesDialog } from "./suggest-places-dialog";
 
 const CATEGORIE = [
   { key: "visitare", label: "Da visitare", icona: "📍", badgeBg: "bg-badge-visit-bg", badgeFg: "text-badge-visit-fg" },
@@ -106,9 +107,22 @@ function PlaceCard({ luogo, viaggioId }: { luogo: Luogo; viaggioId: string }) {
   );
 }
 
+function centroCitta(luoghi: Luogo[]) {
+  const conCoordinate = luoghi.filter((l) => l.lat != null && l.lng != null);
+  if (conCoordinate.length === 0) return null;
+  const lat = conCoordinate.reduce((tot, l) => tot + l.lat!, 0) / conCoordinate.length;
+  const lng = conCoordinate.reduce((tot, l) => tot + l.lng!, 0) / conCoordinate.length;
+  return { lat, lng };
+}
+
 export function LuoghiList({ luoghi, viaggioId }: { luoghi: Luogo[]; viaggioId: string }) {
   const [categoriaFiltro, setCategoriaFiltro] = useState<string>("tutte");
   const [cittaFiltro, setCittaFiltro] = useState<string>("tutte");
+
+  const placeIdsEsistenti = useMemo(
+    () => luoghi.map((l) => l.google_place_id).filter((id): id is string => id != null),
+    [luoghi],
+  );
 
   const citta = useMemo(() => {
     const insieme = new Set(luoghi.map((l) => l.citta ?? SENZA_CITTA));
@@ -190,9 +204,21 @@ export function LuoghiList({ luoghi, viaggioId }: { luoghi: Luogo[]; viaggioId: 
       {luoghiFiltrati.length === 0 ? (
         <p className="text-sm text-foreground/50">Nessun luogo corrisponde ai filtri scelti.</p>
       ) : (
-        gruppiCitta.map(([citta, luoghiCitta]) => (
+        gruppiCitta.map(([citta, luoghiCitta]) => {
+          const centro = centroCitta(luoghiCitta);
+          return (
           <section key={citta} className="flex flex-col gap-5">
-            <h2 className="text-lg font-semibold text-foreground">{citta}</h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold text-foreground">{citta}</h2>
+              {citta !== SENZA_CITTA && centro && (
+                <SuggestPlacesDialog
+                  viaggioId={viaggioId}
+                  citta={citta}
+                  centro={centro}
+                  placeIdsEsistenti={placeIdsEsistenti}
+                />
+              )}
+            </div>
             {CATEGORIE.map(({ key, label, icona, badgeBg, badgeFg }) => {
               const luoghiCategoria = luoghiCitta.filter((l) => l.categoria === key);
               if (luoghiCategoria.length === 0) return null;
@@ -217,7 +243,8 @@ export function LuoghiList({ luoghi, viaggioId }: { luoghi: Luogo[]; viaggioId: 
               );
             })}
           </section>
-        ))
+          );
+        })
       )}
     </div>
   );
