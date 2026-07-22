@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { fetchWikipediaImage } from "@/lib/wikipedia";
 
 const CATEGORIE = ["visitare", "mangiare", "dormire"] as const;
 
@@ -33,6 +34,11 @@ export async function addPlace(_prevState: unknown, formData: FormData) {
     return { error: "Cerca il luogo e scegli un suggerimento dalla lista di Google Maps." };
   }
 
+  // Foto solo per "da visitare": Wikipedia copre bene monumenti e attrazioni,
+  // quasi mai ristoranti o hotel. È gratuita e non richiede nessuna chiave.
+  const fotoUrl =
+    categoria === "visitare" ? await fetchWikipediaImage(Number(lat), Number(lng)) : null;
+
   const supabase = await createClient();
   const { error } = await supabase.from("luoghi").insert({
     viaggio_id: viaggioId,
@@ -44,6 +50,7 @@ export async function addPlace(_prevState: unknown, formData: FormData) {
     lat: Number(lat),
     lng: Number(lng),
     google_place_id: googlePlaceId || null,
+    foto_url: fotoUrl,
   });
 
   if (error) {

@@ -25,6 +25,7 @@ export type Luogo = {
   lat: number | null;
   lng: number | null;
   google_place_id: string | null;
+  foto_url: string | null;
 };
 
 function raggruppaPerCitta(luoghi: Luogo[]) {
@@ -53,14 +54,24 @@ function PlaceCard({ luogo, viaggioId }: { luogo: Luogo; viaggioId: string }) {
   return (
     <li className="rounded-xl border border-line bg-surface p-4">
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="font-medium text-foreground">{luogo.nome}</p>
-          {luogo.indirizzo && <p className="truncate text-xs text-foreground/50">{luogo.indirizzo}</p>}
-          {luogo.nota && (
-            <blockquote className="mt-2 border-l-2 border-primary/30 pl-3 text-sm italic text-foreground/70">
-              &quot;{luogo.nota}&quot;
-            </blockquote>
+        <div className="flex min-w-0 gap-3">
+          {luogo.foto_url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={luogo.foto_url}
+              alt={luogo.nome}
+              className="h-16 w-16 flex-shrink-0 rounded-md object-cover"
+            />
           )}
+          <div className="min-w-0">
+            <p className="font-medium text-foreground">{luogo.nome}</p>
+            {luogo.indirizzo && <p className="truncate text-xs text-foreground/50">{luogo.indirizzo}</p>}
+            {luogo.nota && (
+              <blockquote className="mt-2 border-l-2 border-primary/30 pl-3 text-sm italic text-foreground/70">
+                &quot;{luogo.nota}&quot;
+              </blockquote>
+            )}
+          </div>
         </div>
         <div className="flex flex-shrink-0 flex-col items-end gap-2">
           {mapsUrl && (

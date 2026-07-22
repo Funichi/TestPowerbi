@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { loadPlacesLibrary } from "@/lib/googleMaps";
+import { googleMapsPlaceUrl } from "@/lib/googleMapsLinks";
 import { addPlace } from "../actions";
 
 const CATEGORIE_GOOGLE = {
@@ -144,6 +145,12 @@ export function SuggestPlacesDialog({
         <ul className="flex flex-col gap-3">
           {risultati.map((r) => {
             const giaSalvato = esistentiSet.has(r.googlePlaceId);
+            const mapsUrl = googleMapsPlaceUrl({
+              lat: r.lat,
+              lng: r.lng,
+              googlePlaceId: r.googlePlaceId,
+              nome: r.nome,
+            });
             return (
               <li
                 key={r.googlePlaceId}
@@ -158,7 +165,18 @@ export function SuggestPlacesDialog({
                   />
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="font-medium text-foreground">{r.nome}</p>
+                  {mapsUrl ? (
+                    <a
+                      href={mapsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-foreground underline decoration-dotted underline-offset-2 hover:text-primary"
+                    >
+                      {r.nome}
+                    </a>
+                  ) : (
+                    <p className="font-medium text-foreground">{r.nome}</p>
+                  )}
                   {r.rating != null && (
                     <p className="text-sm text-foreground/70">
                       ⭐ {r.rating.toFixed(1)}

@@ -12,7 +12,7 @@ export default async function LuoghiPage({
 
   const { data: luoghi } = await supabase
     .from("luoghi")
-    .select("id, nome, categoria, indirizzo, citta, nota, lat, lng, google_place_id")
+    .select("id, nome, categoria, indirizzo, citta, nota, lat, lng, google_place_id, foto_url")
     .eq("viaggio_id", id)
     .order("created_at", { ascending: true });
 
