@@ -20,6 +20,8 @@ type Suggerimento = {
   lng: number;
   rating: number | null;
   numeroRecensioni: number | null;
+  descrizione: string | null;
+  fotoUrl: string | null;
 };
 
 async function aggiungiLuogoRapido(formData: FormData) {
@@ -51,7 +53,16 @@ export function SuggestPlacesDialog({
     try {
       const places = await loadPlacesLibrary();
       const { places: risultatiGoogle } = await places.Place.searchNearby({
-        fields: ["displayName", "formattedAddress", "location", "id", "rating", "userRatingCount"],
+        fields: [
+          "displayName",
+          "formattedAddress",
+          "location",
+          "id",
+          "rating",
+          "userRatingCount",
+          "editorialSummary",
+          "photos",
+        ],
         locationRestriction: { center: centro, radius: 5000 },
         includedPrimaryTypes: [CATEGORIE_GOOGLE[categoriaScelta].tipo],
         maxResultCount: 10,
@@ -67,6 +78,8 @@ export function SuggestPlacesDialog({
             lng: p.location!.lng(),
             rating: p.rating ?? null,
             numeroRecensioni: p.userRatingCount ?? null,
+            descrizione: p.editorialSummary ?? null,
+            fotoUrl: p.photos?.[0] ? p.photos[0].getURI({ maxWidth: 200 }) : null,
           })),
       );
     } catch {
@@ -134,9 +147,17 @@ export function SuggestPlacesDialog({
             return (
               <li
                 key={r.googlePlaceId}
-                className="flex items-start justify-between gap-3 rounded-lg border border-line p-3"
+                className="flex items-start gap-3 rounded-lg border border-line p-3"
               >
-                <div className="min-w-0">
+                {r.fotoUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={r.fotoUrl}
+                    alt={r.nome}
+                    className="h-16 w-16 flex-shrink-0 rounded-md object-cover"
+                  />
+                )}
+                <div className="min-w-0 flex-1">
                   <p className="font-medium text-foreground">{r.nome}</p>
                   {r.rating != null && (
                     <p className="text-sm text-foreground/70">
@@ -144,28 +165,33 @@ export function SuggestPlacesDialog({
                       {r.numeroRecensioni != null && ` (${r.numeroRecensioni})`}
                     </p>
                   )}
+                  {r.descrizione && (
+                    <p className="mt-1 line-clamp-2 text-sm text-foreground/70">{r.descrizione}</p>
+                  )}
                   <p className="truncate text-xs text-foreground/50">{r.indirizzo}</p>
                 </div>
-                {giaSalvato ? (
-                  <span className="whitespace-nowrap text-xs text-foreground/40">Già salvato</span>
-                ) : (
-                  <form action={aggiungiLuogoRapido}>
-                    <input type="hidden" name="viaggio_id" value={viaggioId} />
-                    <input type="hidden" name="nome" value={r.nome} />
-                    <input type="hidden" name="categoria" value={categoria} />
-                    <input type="hidden" name="indirizzo" value={r.indirizzo} />
-                    <input type="hidden" name="citta" value={citta} />
-                    <input type="hidden" name="lat" value={r.lat} />
-                    <input type="hidden" name="lng" value={r.lng} />
-                    <input type="hidden" name="google_place_id" value={r.googlePlaceId} />
-                    <button
-                      type="submit"
-                      className="whitespace-nowrap rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
-                    >
-                      + Aggiungi
-                    </button>
-                  </form>
-                )}
+                <div className="flex-shrink-0">
+                  {giaSalvato ? (
+                    <span className="whitespace-nowrap text-xs text-foreground/40">Già salvato</span>
+                  ) : (
+                    <form action={aggiungiLuogoRapido}>
+                      <input type="hidden" name="viaggio_id" value={viaggioId} />
+                      <input type="hidden" name="nome" value={r.nome} />
+                      <input type="hidden" name="categoria" value={categoria} />
+                      <input type="hidden" name="indirizzo" value={r.indirizzo} />
+                      <input type="hidden" name="citta" value={citta} />
+                      <input type="hidden" name="lat" value={r.lat} />
+                      <input type="hidden" name="lng" value={r.lng} />
+                      <input type="hidden" name="google_place_id" value={r.googlePlaceId} />
+                      <button
+                        type="submit"
+                        className="whitespace-nowrap rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
+                      >
+                        + Aggiungi
+                      </button>
+                    </form>
+                  )}
+                </div>
               </li>
             );
           })}
