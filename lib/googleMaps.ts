@@ -26,3 +26,8 @@ export function loadMarkerLibrary() {
   ensureInitialized();
   return importLibrary("marker");
 }
+
+export function loadRoutesLibrary() {
+  ensureInitialized();
+  return importLibrary("routes");
+}
