@@ -20,6 +20,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(CONFIG_PATH), "backup")
 
 app = Flask(__name__, static_folder=os.path.join(RES_DIR, "static"), static_url_path="/static")
 _cache = {"key": None, "data": None}
+DEFAULT_EXCEL_PATH = r"C:\Users\ngrando\OneDrive - Engineering Ingegneria Informatica S.p.A\Solution - Documenti\Clienti\01 Amministrazione\HISTORY.xlsx"
 
 
 # ------------------------------------------------------------------ config e dati
@@ -38,8 +39,8 @@ def save_config(cfg):
 
 
 def excel_path():
-    p = load_config().get("excel_path")
-    return p if p and os.path.isfile(p) else None
+    p = load_config().get("excel_path") or DEFAULT_EXCEL_PATH
+    return p if os.path.isfile(p) else None
 
 
 def get_data(force=False):
@@ -89,7 +90,7 @@ def favicon():
 @app.get("/api/state")
 def state():
     cfg = load_config()
-    p = cfg.get("excel_path")
+    p = cfg.get("excel_path") or DEFAULT_EXCEL_PATH
     return jsonify({"path": p, "exists": bool(excel_path()), "loaded": _cache.get("loaded"), "writer": cfg.get("writer", "auto"), "oggi": dt.date.today().isoformat()})
 
 
