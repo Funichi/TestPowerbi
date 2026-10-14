@@ -7,22 +7,35 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<header class="top">
-  <div class="brand">Gare <span>&amp;</span> Offerte</div>
-  <nav id="nav">
-    <button data-view="dash" class="active">Cruscotto</button>
-    <button data-view="table">Tabella</button>
-    <button data-view="kanban">Schede</button>
-    <button data-view="clean">Pulizia dati</button>
-  </nav>
-  <div class="actions">
-    <button id="btn-new" class="primary">+ Nuova offerta</button>
-    <button id="btn-reload" title="Rilegge il file Excel">Ricarica</button>
-    <button id="btn-settings" title="Impostazioni">⚙</button>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-9"/><path d="M15 6h6v6"/></svg>
+      <span>Gare <em>&amp;</em> Offerte</span>
+    </div>
+    <div class="side-label">Menu</div>
+    <nav id="nav">
+      <button data-view="dash" class="active"><i data-ico="grid"></i>Cruscotto</button>
+      <button data-view="table"><i data-ico="table"></i>Tabella</button>
+      <button data-view="kanban"><i data-ico="kanban"></i>Schede</button>
+      <button data-view="clean"><i data-ico="sparkle"></i>Pulizia dati</button>
+    </nav>
+    <div class="side-foot">
+      <div class="file-card"><div class="fc-t">File Excel</div><div id="status" class="fc-s">…</div></div>
+      <button id="btn-settings" class="side-btn"><i data-ico="gear"></i>Impostazioni</button>
+    </div>
+  </aside>
+  <div class="content">
+    <header class="top">
+      <div><h1 id="page-title">Cruscotto</h1><div id="page-sub" class="sub0"></div></div>
+      <div class="actions">
+        <button id="btn-reload" class="ghost" title="Rilegge il file Excel"><i data-ico="refresh"></i>Ricarica</button>
+        <button id="btn-new" class="primary"><i data-ico="plus"></i>Nuova offerta</button>
+      </div>
+    </header>
+    <main id="main"><p class="muted pad">Caricamento…</p></main>
   </div>
-</header>
-<div id="status" class="status"></div>
-<main id="main"><p class="muted pad">Caricamento…</p></main>
+</div>
 <div id="modal-root"></div>
 <div id="toast" class="toast" hidden></div>
 <div id="busy" class="busy" hidden><div>Salvataggio nell'Excel…</div></div>

@@ -6,6 +6,23 @@ const S = {data: null, dash: null, view: "dash", months: "12", trendMode: "inser
   filt: {q: "", stato: "", vertical: "", solution: "", anno: ""}, sort: {k: "Data ins.", dir: -1},
   kanban: {months: "12", solution: ""}, clean: null, state: null};
 
+const ICONS = {
+  grid: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
+  table: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 10v10"/>',
+  kanban: '<rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="10" rx="1.5"/><rect x="17" y="4" width="4" height="13" rx="1.5"/>',
+  sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 16v4M17 18h4"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+  bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  cal: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 21a2 2 0 0 0 4 0"/>',
+  alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/>',
+};
+const ico = n => `<svg class="ico" viewBox="0 0 24 24">${ICONS[n] || ""}</svg>`;
+function hydrateIcons(root = document) { root.querySelectorAll("i[data-ico]").forEach(i => i.outerHTML = ico(i.dataset.ico)); }
+const TITLES = {dash: ["Cruscotto", "Scadenze, attenzioni e andamento delle offerte"], table: ["Tabella", "Tutte le offerte: filtra, ordina, clicca una riga per modificarla"], kanban: ["Schede", "Offerte per stato: trascina una scheda per cambiare stato"], clean: ["Pulizia dati", "Uniforma gli stati e correggi i dati nel file Excel"]};
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const fmt = iso => iso ? iso.split("-").reverse().join("/") : "";
@@ -38,7 +55,8 @@ async function loadAll(force) {
     S.data = await api("/api/data" + (force ? "?force=1" : ""));
     S.dash = await api("/api/dashboard?months=" + S.months);
   } catch (e) { toast(e.message, true); openSettings(true, e.message); return; }
-  $("#status").innerHTML = `File: <b>${esc(S.state.path)}</b> · ${S.data.rows.length} righe · letto alle ${esc((S.data.loaded || "").slice(11))}`;
+  $("#status").innerHTML = `${esc(S.state.path.split(/[\\/]/).pop())}<br>${S.data.rows.length} righe · letto alle ${esc((S.data.loaded || "").slice(11, 16))}`;
+  $("#status").title = S.state.path;
   render();
 }
 async function reloadDash() { S.dash = await api("/api/dashboard?months=" + S.months); }
@@ -46,6 +64,7 @@ function rowByNum(n) { return S.data.rows.find(r => r._row === n); }
 
 function render() {
   document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.view === S.view));
+  $("#page-title").textContent = TITLES[S.view][0]; $("#page-sub").textContent = TITLES[S.view][1];
   const m = $("#main");
   ({dash: renderDash, table: renderTable, kanban: renderKanban, clean: renderClean})[S.view](m);
 }
@@ -59,30 +78,37 @@ function miniTable(items, cols) {
   if (!items.length) return `<div class="empty">Nessuna voce.</div>`;
   return `<table><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead><tbody>${items.map(x => `<tr class="click" data-row="${x._row}">${cols.map(c => `<td>${c[1](x)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
+const offer = x => `<div class="offer"><b>${esc(x.Cliente)}</b><span>${esc((x.Oggetto || "").slice(0, 90))}</span></div>`;
+function tile(cls, icon, n, label, attrs) { return `<div class="tile ${cls}" ${attrs}><div class="ico-c">${ico(icon)}</div><div><div class="n">${n}</div><div class="l">${label}</div></div></div>`; }
 function renderDash(m) {
   const d = S.dash, t = d.tiles, so = d.soglie;
   m.innerHTML = `
-  <div class="toolbar">${periodSelect()}<div class="muted" style="padding-bottom:8px">Oggi: ${fmt(d.oggi)} · WIP: sempre tutte le righe in corso; il resto rispetta il periodo (per Data ins.).</div></div>
+  <div class="toolbar">${periodSelect()}<div class="muted" style="padding-bottom:10px">Oggi ${fmt(d.oggi)} · WIP: tutte le offerte in corso; il resto segue il periodo (per Data ins.)</div></div>
   <div class="tiles">
-    <div class="tile" data-go="WIP"><div class="n">${t.wip}</div><div class="l">In corso (WIP)</div></div>
-    <div class="tile" data-go="Waiting For response"><div class="n">${t.waiting}</div><div class="l">In attesa di risposta</div></div>
-    <div class="tile ${t.scadute ? "alert" : ""}" data-scroll="sec-scad"><div class="n">${t.scadute} <small class="muted">+ ${t.imminenti}</small></div><div class="l">Consegne scadute · entro ${so.scadenza} gg</div></div>
-    <div class="tile" data-scroll="sec-soll"><div class="n">${t.solleciti}</div><div class="l">Da sollecitare (${so.sollecito}–${so.riclassifica} gg)</div></div>
-    <div class="tile ${t.attenzioni ? "alert" : ""}" data-scroll="sec-att"><div class="n">${t.attenzioni}</div><div class="l">Punti di attenzione</div></div>
+    ${tile("c-blue", "bolt", t.wip, "In corso (WIP)", 'data-go="WIP"')}
+    ${tile("c-violet", "clock", t.waiting, "In attesa di risposta", 'data-go="Waiting For response"')}
+    ${tile("c-coral", "cal", `${t.scadute} <small>+ ${t.imminenti}</small>`, `Consegne scadute · entro ${so.scadenza} gg`, 'data-scroll="sec-scad"')}
+    ${tile("c-orange", "bell", t.solleciti, `Da sollecitare (${so.sollecito}–${so.riclassifica} gg)`, 'data-scroll="sec-soll"')}
+    ${tile("c-pink", "alert", t.attenzioni, "Punti di attenzione", 'data-scroll="sec-att"')}
   </div>
-  <div class="card" id="sec-scad"><h2>Scadenze</h2><div class="sub">Offerte in corso (WIP) con Data consegna scaduta o nei prossimi ${so.scadenza} giorni.</div>
-    ${miniTable(d.scadenze, [["Quando", x => dayLabel(x.giorni)], ["Consegna", x => fmt(x["Data consegna"])], ["Cliente", x => `<b>${esc(x.Cliente)}</b>`], ["Oggetto", x => esc(x.Oggetto)], ["Solution D&A", x => esc(x["Solution D&A"])]])}</div>
-  <div class="card" id="sec-soll"><h2>Da sollecitare</h2><div class="sub">Abbiamo consegnato (Waiting For response) e sono passati ${so.sollecito}–${so.riclassifica} giorni dalla Data ins.</div>
-    ${miniTable(d.solleciti, [["Giorni", x => `<span class="tag soon">${x.giorni} gg</span>`], ["Data ins.", x => fmt(x["Data ins."])], ["Cliente", x => `<b>${esc(x.Cliente)}</b>`], ["Oggetto", x => esc(x.Oggetto)], ["Solution D&A", x => esc(x["Solution D&A"])]])}
-    <details><summary>Oltre ${so.riclassifica} giorni <span class="cnt">— ${d.riclassificare.length} nel periodo (${d.riclassificare_totale} in tutto lo storico): probabilmente da portare a Sospeso</span></summary>
-    ${miniTable(d.riclassificare, [["Giorni", x => `${x.giorni} gg`], ["Data ins.", x => fmt(x["Data ins."])], ["Cliente", x => `<b>${esc(x.Cliente)}</b>`], ["Oggetto", x => esc(x.Oggetto)], ["Solution D&A", x => esc(x["Solution D&A"])]])}</details></div>
-  <div class="card" id="sec-att"><h2>Punti di attenzione</h2><div class="sub">Dati mancanti o anomali da sistemare.</div>
-    ${d.attenzioni.length ? d.attenzioni.map(a => `<details><summary>${esc(a.titolo)} <span class="cnt">(${a.righe.length})</span></summary>${miniTable(a.righe, [["Seq", x => x.Seq], ["Cliente", x => `<b>${esc(x.Cliente)}</b>`], ["Oggetto", x => esc(x.Oggetto)], ["Stato", x => badge(x.Stato)], ["Data ins.", x => fmt(x["Data ins."])], ["", x => esc(x.dettaglio || "")]])}</details>`).join("") : `<div class="empty">Tutto in ordine.</div>`}</div>
-  <div class="card"><h2>Pipeline per solution</h2><div class="sub">Numero di offerte. Se lavorano in più persone la riga conta per ciascuna. Clicca un numero per vedere l'elenco.</div>
+  <div class="grid2">
+    <div class="card" id="sec-scad"><h2>Scadenze</h2><div class="sub">Offerte in corso (WIP) con consegna scaduta o entro ${so.scadenza} giorni.</div>
+      ${miniTable(d.scadenze, [["Quando", x => dayLabel(x.giorni) + `<span class="sm">${fmt(x["Data consegna"])}</span>`], ["Offerta", offer], ["Solution", x => esc(x["Solution D&A"])]])}</div>
+    <div class="card" id="sec-soll"><h2>Da sollecitare</h2><div class="sub">Consegnate (Waiting For response) da ${so.sollecito}–${so.riclassifica} giorni dalla Data ins.</div>
+      ${miniTable(d.solleciti, [["Giorni", x => `<span class="tag soon">${x.giorni} gg</span><span class="sm">${fmt(x["Data ins."])}</span>`], ["Offerta", offer], ["Solution", x => esc(x["Solution D&A"])]])}
+      <details><summary>Oltre ${so.riclassifica} giorni <span class="cnt">— ${d.riclassificare.length} nel periodo (${d.riclassificare_totale} in tutto): probabili Sospeso</span></summary>
+      ${miniTable(d.riclassificare, [["Giorni", x => `${x.giorni} gg`], ["Offerta", offer], ["Solution", x => esc(x["Solution D&A"])]])}</details></div>
+  </div>
+  <div class="grid3">
+    <div class="card"><div class="row"><div><h2>Trend mensile</h2><div class="sub">Per mese di Data ins. (inserite) o Data consegna (consegnate)</div></div>
+      <div class="seg" style="margin-left:auto"><button data-tm="inserite" class="${S.trendMode === "inserite" ? "on" : ""}">Inserite</button><button data-tm="consegnate" class="${S.trendMode === "consegnate" ? "on" : ""}">Consegnate</button></div></div>
+      <div id="trend"></div></div>
+    <div class="card"><h2>Offerte per stato</h2><div class="sub">Nel periodo scelto</div><div id="donut" class="donut"></div></div>
+  </div>
+  <div class="card"><h2>Pipeline per solution</h2><div class="sub">Numero di offerte; se lavorano in più persone la riga conta per ciascuna. Clicca un numero per vedere l'elenco.</div>
     ${pipelineTable(d.pipeline)}</div>
-  <div class="card"><div class="row"><div><h2>Trend mensile</h2><div class="sub">Per mese di Data ins. (inserite) o di Data consegna (consegnate).</div></div>
-    <div class="seg" style="margin-left:auto"><button data-tm="inserite" class="${S.trendMode === "inserite" ? "on" : ""}">Inserite per stato</button><button data-tm="consegnate" class="${S.trendMode === "consegnate" ? "on" : ""}">Consegnate</button></div></div>
-    <div id="trend"></div></div>`;
+  <div class="card" id="sec-att"><h2>Punti di attenzione</h2><div class="sub">Dati mancanti o anomali da sistemare.</div>
+    ${d.attenzioni.length ? d.attenzioni.map(a => `<details><summary>${esc(a.titolo)} <span class="cnt">(${a.righe.length})</span></summary>${miniTable(a.righe, [["Seq", x => x.Seq], ["Offerta", offer], ["Stato", x => badge(x.Stato)], ["Data ins.", x => fmt(x["Data ins."])], ["", x => esc(x.dettaglio || "")]])}</details>`).join("") : `<div class="empty">Tutto in ordine.</div>`}</div>`;
   $("#period").onchange = async e => { S.months = e.target.value; await reloadDash(); render(); };
   m.querySelectorAll("tr[data-row]").forEach(tr => tr.onclick = () => openForm(rowByNum(+tr.dataset.row)));
   m.querySelectorAll(".tile[data-go]").forEach(t => t.onclick = () => goTable({stato: t.dataset.go}));
@@ -90,6 +116,16 @@ function renderDash(m) {
   m.querySelectorAll("[data-sol]").forEach(c => c.onclick = () => goTable({solution: c.dataset.sol, stato: c.dataset.st}));
   m.querySelectorAll("[data-tm]").forEach(b => b.onclick = () => { S.trendMode = b.dataset.tm; render(); });
   drawTrend($("#trend"), d.trend);
+  drawDonut($("#donut"), d.stati);
+}
+function drawDonut(el, st) {
+  const tot = STATI.reduce((a, s) => a + (st[s] || 0), 0) || 1, R = 70, C = 2 * Math.PI * R, gap = 5;
+  let off = 0, arcs = "";
+  STATI.forEach(s => { const v = st[s] || 0; if (!v) return; const len = Math.max(C * v / tot - gap, 1);
+    arcs += `<circle cx="100" cy="100" r="${R}" fill="none" stroke="${COLOR[s]}" stroke-width="22" stroke-linecap="round" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 100 100)"><title>${s}: ${v}</title></circle>`; off += C * v / tot; });
+  el.innerHTML = `<svg viewBox="0 0 200 200" role="img" aria-label="Offerte per stato"><circle cx="100" cy="100" r="${R}" fill="none" stroke="var(--field)" stroke-width="22"/>${arcs}
+    <text x="100" y="104" text-anchor="middle" style="font-size:30px;font-weight:700;fill:var(--ink)">${tot === 1 && !STATI.some(s => st[s]) ? 0 : tot}</text><text x="100" y="124" text-anchor="middle">offerte</text></svg>
+    <div class="dl">${STATI.map(s => `<div><b>${Math.round(100 * (st[s] || 0) / tot)}%</b><span><i style="background:${COLOR[s]}"></i>${s === "Waiting For response" ? "Waiting" : s} (${st[s] || 0})</span></div>`).join("")}</div>`;
 }
 function pipelineTable(p) {
   if (!p.length) return `<div class="empty">Nessun dato.</div>`;
@@ -99,7 +135,7 @@ function pipelineTable(p) {
   <tr><td><b>Totale</b></td>${STATI.map(s => `<td class="num"><b>${tot[s]}</b></td>`).join("")}<td class="num"><b>${p.reduce((a, x) => a + x.totale, 0)}</b></td></tr></tbody></table>`;
 }
 function drawTrend(el, tr) {
-  const W = 900, H = 270, L = 34, B = 28, T = 10, n = tr.mesi.length;
+  const W = 640, H = 300, L = 34, B = 28, T = 10, n = tr.mesi.length;
   const mode = S.trendMode;
   const stacks = tr.mesi.map((_, i) => mode === "inserite" ? [...STATI, "Altro"].map(s => [s, tr.inserite[i][s]]) : [["Consegnate", tr.consegnate[i]]]);
   const max = Math.max(1, ...stacks.map(st => st.reduce((a, x) => a + x[1], 0)));
@@ -109,7 +145,7 @@ function drawTrend(el, tr) {
   stacks.forEach((st, i) => {
     let acc = 0; const x = L + i * bw + bw * .12, w = bw * .76;
     st.forEach(([s, v]) => { if (!v) return; const y0 = y(acc + v), h = y(acc) - y0; acc += v;
-      g += `<rect x="${x}" y="${y0}" width="${w}" height="${h}" fill="${COLOR[s] || "var(--accent)"}" rx="2"><title>${tr.mesi[i]} · ${s}: ${v}</title></rect>`; });
+      g += `<rect x="${x}" y="${y0}" width="${w}" height="${h}" fill="${COLOR[s] || "var(--accent)"}" rx="5"><title>${tr.mesi[i]} · ${s}: ${v}</title></rect>`; });
     if (acc) g += `<text x="${x + w / 2}" y="${y(acc) - 4}" text-anchor="middle">${acc}</text>`;
     if (n <= 14 || i % 2 === 0) g += `<text x="${x + w / 2}" y="${H - 10}" text-anchor="middle">${tr.mesi[i].slice(5)}/${tr.mesi[i].slice(2, 4)}</text>`;
   });
@@ -310,4 +346,5 @@ document.querySelectorAll("#nav button").forEach(b => b.onclick = () => { S.view
 $("#btn-new").onclick = () => S.data ? openForm(null) : toast("Prima scegli il file Excel", true);
 $("#btn-reload").onclick = async () => { await loadAll(true); toast("File riletto"); };
 $("#btn-settings").onclick = () => openSettings(false);
+hydrateIcons();
 loadAll(false);

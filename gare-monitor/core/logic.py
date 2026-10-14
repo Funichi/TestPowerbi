@@ -245,6 +245,7 @@ def dashboard(rows, domini, today, months):
             "solleciti": len(solleciti),
             "attenzioni": sum(len(a["righe"]) for a in attenzioni),
         },
+        "stati": {st: sum(1 for r in scope if stato[r["_row"]] == st) for st in STATI},
         "pipeline": pipeline, "scadenze": scadenze, "solleciti": solleciti, "riclassificare": riclass,
         "riclassificare_totale": riclass_totale, "attenzioni": attenzioni, "trend": trend,
         "soglie": {"sollecito": GIORNI_SOLLECITO, "riclassifica": GIORNI_RICLASSIFICA, "scadenza": GIORNI_SCADENZA},
