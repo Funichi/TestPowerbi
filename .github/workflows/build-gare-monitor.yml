@@ -1,0 +1,23 @@
+name: Build Gare Monitor (exe Windows)
+on:
+  workflow_dispatch:
+  push:
+    paths: ["gare-monitor/**", ".github/workflows/build-gare-monitor.yml"]
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: gare-monitor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pyinstaller pytest
+      - run: python -m pytest -q tests
+      - run: pyinstaller --onefile --name GareOfferte --add-data "static;static" --hidden-import win32timezone --hidden-import pythoncom --hidden-import win32com.client app.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GareOfferte-windows
+          path: gare-monitor/dist/GareOfferte.exe

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gare e Offerte</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">Gare <span>&amp;</span> Offerte</div>
+  <nav id="nav">
+    <button data-view="dash" class="active">Cruscotto</button>
+    <button data-view="table">Tabella</button>
+    <button data-view="kanban">Schede</button>
+    <button data-view="clean">Pulizia dati</button>
+  </nav>
+  <div class="actions">
+    <button id="btn-new" class="primary">+ Nuova offerta</button>
+    <button id="btn-reload" title="Rilegge il file Excel">Ricarica</button>
+    <button id="btn-settings" title="Impostazioni">⚙</button>
+  </div>
+</header>
+<div id="status" class="status"></div>
+<main id="main"><p class="muted pad">Caricamento…</p></main>
+<div id="modal-root"></div>
+<div id="toast" class="toast" hidden></div>
+<div id="busy" class="busy" hidden><div>Salvataggio nell'Excel…</div></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
