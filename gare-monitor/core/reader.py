@@ -78,7 +78,18 @@ def read_workbook(path):
     tmp = tempfile.mkdtemp(prefix="gare_")
     try:
         copy = os.path.join(tmp, "copia.xlsx")
-        shutil.copyfile(path, copy)
+        try:
+            shutil.copyfile(path, copy)
+        except OSError as e:
+            if os.name != "nt":
+                raise
+            try:
+                from .snapshot import snapshot_via_excel
+                snapshot_via_excel(path, copy)
+            except Exception as e2:
+                raise PermissionError(
+                    f"Non riesco a leggere il file ({e}). Provato anche tramite Excel: {e2}. "
+                    "Controlla che il file sia scaricato da OneDrive ('Mantieni sempre su questo dispositivo') e non bloccato.") from e2
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             wb = openpyxl.load_workbook(copy, data_only=True)
