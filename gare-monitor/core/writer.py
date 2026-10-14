@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 import warnings
 
 from .reader import DATE_FIELDS, SHEET_MAIN, clean_text, row_sig, to_date
@@ -23,6 +24,23 @@ _lock = threading.Lock()
 
 class WriteError(Exception):
     pass
+
+
+_BUSY = (-2147418111, -2147417846)  # RPC_E_CALL_REJECTED, RPC_E_SERVERCALL_RETRYLATER
+BUSY_MSG = ("Excel è occupato: probabilmente hai una cella in modifica o una finestra di dialogo aperta "
+            "(o OneDrive sta sincronizzando). Esci dalla modifica della cella, chiudi le finestre e riprova.")
+
+
+def _retry(fn, tries=20, delay=0.75):
+    """Excel rifiuta le chiamate COM mentre è occupato: si riprova per qualche secondo."""
+    for i in range(tries):
+        try:
+            return fn()
+        except Exception as e:
+            if getattr(e, "hresult", None) in _BUSY and i < tries - 1:
+                time.sleep(delay)
+                continue
+            raise
 
 
 def make_backup_name(path, backup_dir):
@@ -73,16 +91,18 @@ class ExcelWriter:
         base = os.path.basename(target)
         try:
             app = win32com.client.GetActiveObject("Excel.Application")
-            for wb in app.Workbooks:
-                full = os.path.normcase(str(wb.FullName))
-                if full == target or (full.startswith("http") and os.path.normcase(str(wb.Name)) == base):
+            for i in range(1, _retry(lambda: app.Workbooks.Count) + 1):
+                wb = _retry(lambda: app.Workbooks(i))
+                full = os.path.normcase(str(_retry(lambda: wb.FullName)))
+                if full == target or (full.startswith("http") and os.path.normcase(str(_retry(lambda: wb.Name))) == base):
                     return app, wb, False
-        except Exception:
-            pass
+        except Exception as e:
+            if getattr(e, "hresult", None) in _BUSY:
+                raise
         app = win32com.client.DispatchEx("Excel.Application")
         app.Visible = False
         app.DisplayAlerts = False
-        wb = app.Workbooks.Open(self.path, UpdateLinks=0)
+        wb = _retry(lambda: app.Workbooks.Open(self.path, UpdateLinks=0))
         return app, wb, True
 
     def _close(self, app, wb, owned):
@@ -100,19 +120,21 @@ class ExcelWriter:
             owned = False
             try:
                 app, wb, owned = self._open()
-                if wb.ReadOnly:
+                if _retry(lambda: wb.ReadOnly):
                     raise WriteError("Il file è aperto in sola lettura (bloccato da un altro utente o da SharePoint). Chiudilo dove è aperto e riprova.")
-                ws = wb.Worksheets(SHEET_MAIN)
-                lo = self._table(ws)
-                cols = {str(lo.ListColumns(i).Name).strip(): lo.ListColumns(i).Range.Column for i in range(1, lo.ListColumns.Count + 1)}
-                wb.SaveCopyAs(make_backup_name(self.path, self.backup_dir))
+                ws = _retry(lambda: wb.Worksheets(SHEET_MAIN))
+                lo = _retry(lambda: self._table(ws))
+                cols = _retry(lambda: {str(lo.ListColumns(i).Name).strip(): lo.ListColumns(i).Range.Column for i in range(1, lo.ListColumns.Count + 1)})
+                _retry(lambda: wb.SaveCopyAs(make_backup_name(self.path, self.backup_dir)))
                 prune_backups(self.backup_dir)
                 res = fn(ws, lo, cols)
-                wb.Save()
+                _retry(lambda: wb.Save())
                 return res
             except WriteError:
                 raise
             except Exception as e:  # errori COM
+                if getattr(e, "hresult", None) in _BUSY:
+                    raise WriteError(BUSY_MSG) from e
                 raise WriteError(f"Errore di Excel: {e}") from e
             finally:
                 if app is not None:
@@ -130,23 +152,28 @@ class ExcelWriter:
     def _cell_val(v):
         return v.date().isoformat() if hasattr(v, "year") and hasattr(v, "hour") else v
 
+    @staticmethod
+    def _set(ws, row, col, value):
+        _retry(lambda: setattr(ws.Cells(row, col), "Value", value))
+
     def _check(self, ws, cols, row, sig):
-        g = lambda f: self._cell_val(ws.Cells(row, cols[f]).Value) if f in cols else None
+        g = lambda f: self._cell_val(_retry(lambda: ws.Cells(row, cols[f]).Value)) if f in cols else None
         _check_sig(g("Cliente"), g("Oggetto"), g("Data ins."), sig, row)
 
     def append(self, values):
         def fn(ws, lo, cols):
-            lr = lo.ListRows.Add()
-            row = lr.Range.Row
+            lr = _retry(lambda: lo.ListRows.Add())
+            row = _retry(lambda: lr.Range.Row)
             for f, v in values.items():
                 if f in cols:
-                    ws.Cells(row, cols[f]).Value = _value_for(f, v)
-            if "Seq" in cols and not ws.Cells(row, cols["Seq"]).HasFormula:
-                ws.Cells(row, cols["Seq"]).Formula = "=ROW()-1"
-            if "Valore" in cols and not ws.Cells(row, cols["Valore"]).HasFormula:
+                    self._set(ws, row, cols[f], _value_for(f, v))
+            if "Seq" in cols and not _retry(lambda: ws.Cells(row, cols["Seq"]).HasFormula):
+                _retry(lambda: setattr(ws.Cells(row, cols["Seq"]), "Formula", "=ROW()-1"))
+            if "Valore" in cols and not _retry(lambda: ws.Cells(row, cols["Valore"]).HasFormula):
                 for r in range(row - 1, max(row - 30, 1), -1):
-                    if ws.Cells(r, cols["Valore"]).HasFormula:
-                        ws.Cells(row, cols["Valore"]).Formula = ws.Cells(r, cols["Valore"]).Formula
+                    if _retry(lambda: ws.Cells(r, cols["Valore"]).HasFormula):
+                        frm = _retry(lambda: ws.Cells(r, cols["Valore"]).Formula)
+                        _retry(lambda: setattr(ws.Cells(row, cols["Valore"]), "Formula", frm))
                         break
             return row
         return self._run(fn)
@@ -159,7 +186,7 @@ class ExcelWriter:
             for row, sig, changes in items:
                 for f, v in changes.items():
                     if f in cols:
-                        ws.Cells(row, cols[f]).Value = _value_for(f, v)
+                        self._set(ws, row, cols[f], _value_for(f, v))
             return len(items)
         return self._run(fn)
 
