@@ -83,33 +83,62 @@ class ExcelWriter:
     def __init__(self, path, backup_dir, table_name=TABLE_NAME):
         self.path, self.backup_dir, self.table_name = path, backup_dir, table_name
 
+    def _find_open_workbook(self, target, base):
+        """Cerca il file tra quelli già aperti in QUALSIASI istanza di Excel (tabella degli oggetti in esecuzione)."""
+        import pythoncom
+        import win32com.client
+        try:
+            rot = pythoncom.GetRunningObjectTable()
+            ctx = pythoncom.CreateBindCtx(0)
+            for mk in rot.EnumRunning():
+                try:
+                    name = mk.GetDisplayName(ctx, None)
+                except Exception:
+                    continue
+                low = os.path.normcase(name)
+                from urllib.parse import unquote
+                if not (low == target or (low.startswith("http") and unquote(low).endswith(base))):
+                    continue
+                    obj = rot.GetObject(mk).QueryInterface(pythoncom.IID_IDispatch)
+                    wb = win32com.client.Dispatch(obj)
+                    if str(wb.Name).lower() == base:
+                        return wb.Application, wb
+        except Exception as e:
+            if getattr(e, "hresult", None) in _BUSY:
+                raise
+        return None, None
+
     def _open(self):
         import pythoncom
         import win32com.client
         pythoncom.CoInitialize()
         target = os.path.normcase(os.path.abspath(self.path))
         base = os.path.basename(target)
-        try:
-            app = win32com.client.GetActiveObject("Excel.Application")
-            for i in range(1, _retry(lambda: app.Workbooks.Count) + 1):
-                wb = _retry(lambda: app.Workbooks(i))
-                full = os.path.normcase(str(_retry(lambda: wb.FullName)))
-                if full == target or (full.startswith("http") and os.path.normcase(str(_retry(lambda: wb.Name))) == base):
-                    return app, wb, False
-        except Exception as e:
-            if getattr(e, "hresult", None) in _BUSY:
-                raise
+        app, wb = self._find_open_workbook(target, base)
+        if wb is not None:
+            # se l'istanza è invisibile (rimasta in background) la chiudiamo noi a fine lavoro
+            return app, wb, not _retry(lambda: app.Visible)
         app = win32com.client.DispatchEx("Excel.Application")
-        app.Visible = False
-        app.DisplayAlerts = False
-        wb = _retry(lambda: app.Workbooks.Open(self.path, UpdateLinks=0))
+        try:
+            app.Visible = False
+            app.DisplayAlerts = False
+            wb = _retry(lambda: app.Workbooks.Open(self.path, UpdateLinks=0))
+        except Exception:
+            try:
+                app.Quit()
+            except Exception:
+                pass
+            raise
         return app, wb, True
 
     def _close(self, app, wb, owned):
         try:
             if owned:
-                wb.Close(SaveChanges=False)
-                app.Quit()
+                try:
+                    wb.Close(SaveChanges=False)
+                finally:
+                    if app.Workbooks.Count == 0:
+                        app.Quit()
         finally:
             import pythoncom
             pythoncom.CoUninitialize()
@@ -135,6 +164,9 @@ class ExcelWriter:
             except Exception as e:  # errori COM
                 if getattr(e, "hresult", None) in _BUSY:
                     raise WriteError(BUSY_MSG) from e
+                if "Impossibile accedere al file" in str(e):
+                    raise WriteError("Il file è aperto o bloccato da un altro Excel. Chiudi il file in Excel; se non basta, apri Gestione attività, "
+                                     "termina eventuali processi 'Microsoft Excel' rimasti in background e riprova.") from e
                 raise WriteError(f"Errore di Excel: {e}") from e
             finally:
                 if app is not None:
