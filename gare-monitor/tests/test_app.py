@@ -51,7 +51,7 @@ def client(tmp_path, monkeypatch):
     x = tmp_path / "t.xlsx"
     make_xlsx(x)
     cfg = tmp_path / "config.json"
-    cfg.write_text(json.dumps({"excel_path": str(x), "writer": "openpyxl"}))
+    cfg.write_text(json.dumps({"excel_path": str(x), "db_path": str(tmp_path / "monitoraggio.db"), "writer": "openpyxl"}))
     monkeypatch.setenv("GARE_CONFIG", str(cfg))
     import importlib
     import app as appmod
@@ -60,62 +60,126 @@ def client(tmp_path, monkeypatch):
     return appmod.app.test_client(), x, tmp_path
 
 
-def test_data_and_suggest(client):
-    c, x, _ = client
-    d = c.get("/api/data").get_json()
-    assert len(d["rows"]) == 6
+def sheet(x):
+    return openpyxl.load_workbook(x)["gare e offerte"]
+
+
+NEW = {"Cliente": "Terna", "Vertical": "enterprise", "Market": "Finance", "Oggetto": "Nuova", "tipo": "Gara",
+       "Data ins.": "2026-10-10", "Data consegna": "2026-10-20", "Solution D&A": "Grando", "Stato": "WIP", "SS": "TER3", "Commessa": "$EII4506"}
+
+
+def rows_by_cliente(c):
+    return {r["Cliente"]: r for r in c.get("/api/data").get_json()["rows"]}
+
+
+def test_primo_import_e_suggerimenti(client):
+    c, x, tmp = client
+    d = c.get("/api/data").get_json()                         # al primo avvio carica l'Excel nel database
+    assert len(d["rows"]) == 6 and (tmp / "monitoraggio.db").exists()
     assert d["domini"]["vertical"] == ["Enterprise", "Public sector", "Finance"]
+    st = c.get("/api/state").get_json()
+    assert st["imported"] and st["pending"] == {"new": 0, "mod": 0}
     s = c.post("/api/suggest", json={"Cliente": "terna", "Vertical": "Enterprise", "Data consegna": "2026-11-01"}).get_json()
     assert s["ss"] == "TER3" and s["commessa"] == "$EII4506"
-    s = c.post("/api/suggest", json={"Cliente": "Nuovo Cliente"}).get_json()
-    assert s["ss"] == "NUO1"
+    assert c.post("/api/suggest", json={"Cliente": "Nuovo Cliente"}).get_json()["ss"] == "NUO1"
 
 
-def test_create_update_and_backup(client):
+def test_modifiche_locali_non_toccano_l_excel(client):
     c, x, tmp = client
-    body = {"Cliente": "Terna", "Vertical": "enterprise", "Market": "Finance", "Oggetto": "Nuova", "tipo": "Gara",
-            "Data ins.": "2026-10-10", "Data consegna": "2026-10-20", "Solution D&A": "Grando", "Stato": "WIP", "SS": "TER3", "Commessa": "$EII4506"}
-    r = c.post("/api/rows", json=body)
+    before = sheet(x).max_row
+    assert c.post("/api/rows", json=NEW).status_code == 200
+    assert c.post("/api/rows", json=NEW).status_code == 409            # duplicato
+    new = [r for r in c.get("/api/data").get_json()["rows"] if r["Oggetto"] == "Nuova"][0]
+    assert new["_state"] == "new" and new["Vertical"] == "Enterprise" and new["Seq"] is None
+    gen = rows_by_cliente(c)["Generali"]
+    assert c.put(f"/api/rows/{gen['_row']}", json={"changes": {"Stato": "Won", "Note": "ok"}}).status_code == 200
+    assert c.get("/api/state").get_json()["pending"] == {"new": 1, "mod": 1}
+    assert sheet(x).max_row == before and sheet(x).cell(4, 15).value == "Waiting For response"      # Excel intatto
+    # annulla modifiche e elimina la riga nuova
+    assert c.post(f"/api/rows/{gen['_row']}/revert").status_code == 200
+    assert c.delete(f"/api/rows/{new['_row']}").status_code == 200
+    assert c.get("/api/state").get_json()["pending"] == {"new": 0, "mod": 0}
+    assert c.delete(f"/api/rows/{gen['_row']}").status_code == 400    # le righe dell'Excel non si eliminano da qui
+    assert c.post("/api/rows", json={**NEW, "Stato": "Boh", "Oggetto": "x"}).status_code == 400
+
+
+def test_modificare_e_rimettere_il_valore_originale_non_e_una_modifica(client):
+    c, x, _ = client
+    gen = rows_by_cliente(c)["Generali"]
+    c.put(f"/api/rows/{gen['_row']}", json={"changes": {"Stato": "Won"}})
+    assert c.get("/api/state").get_json()["pending"]["mod"] == 1
+    c.put(f"/api/rows/{gen['_row']}", json={"changes": {"Stato": "Waiting For response"}})
+    assert c.get("/api/state").get_json()["pending"]["mod"] == 0
+
+
+def test_export_accoda_e_aggiorna_poi_rilegge(client):
+    c, x, tmp = client
+    c.post("/api/rows", json=NEW)
+    gen = rows_by_cliente(c)["Generali"]
+    c.put(f"/api/rows/{gen['_row']}", json={"changes": {"Stato": "Won", "Note": "chiusa"}})
+    p = c.get("/api/pending").get_json()
+    assert len(p["nuove"]) == 1 and p["modificate"][0]["campi"][0]["campo"] in ("Stato", "Note")
+    r = c.post("/api/export")
     assert r.status_code == 200, r.get_json()
-    assert c.post("/api/rows", json=body).status_code == 409  # duplicato
-    d = c.get("/api/data").get_json()
-    new = d["rows"][-1]
-    assert new["Cliente"] == "Terna" and new["SS"] == "TER3" and new["Data consegna"] == "2026-10-20" and new["Vertical"] == "Enterprise"
+    assert (r.get_json()["nuove"], r.get_json()["modificate"], r.get_json()["righe"]) == (1, 1, [8])
+    ws = sheet(x)
+    assert ws.tables["Tabella4"].ref == "A1:S8" and ws.cell(8, 4).value == "Terna" and ws.cell(8, 8).value == "Nuova"
+    assert ws.cell(8, 1).value == "=ROW()-1" and ws.cell(8, 15).value == "WIP"
+    assert ws.cell(4, 15).value == "Won" and ws.cell(4, 19).value == "chiusa"          # riga esistente aggiornata
+    assert ws.cell(3, 4).value == "TERNA "                                           # le altre righe non si toccano
+    assert len(list((tmp / "backup").glob("*.xlsx"))) == 1                          # backup dell'Excel prima di scrivere
+    assert c.get("/api/state").get_json()["pending"] == {"new": 0, "mod": 0}          # database di nuovo uguale al file
+    assert len(c.get("/api/data").get_json()["rows"]) == 7
+
+
+def test_export_si_ferma_se_la_riga_nel_file_e_cambiata(client):
+    c, x, _ = client
+    gen = rows_by_cliente(c)["Generali"]
+    c.put(f"/api/rows/{gen['_row']}", json={"changes": {"Stato": "Won"}})
+    c.post("/api/rows", json=NEW)
     wb = openpyxl.load_workbook(x)
-    assert wb["gare e offerte"].tables["Tabella4"].ref == "A1:S8"
-    assert wb["gare e offerte"].cell(8, 1).value == "=ROW()-1"
-    assert len(list((tmp / "backup").glob("*.xlsx"))) >= 1
-    # modifica con firma sbagliata -> rifiutata
-    u = c.put(f"/api/rows/{new['_row']}", json={"sig": "sbagliata", "changes": {"Stato": "Won"}})
-    assert u.status_code == 409
-    u = c.put(f"/api/rows/{new['_row']}", json={"changes": {"Stato": "Won", "Note": "ok"}})
-    assert u.status_code == 200
-    d = c.get("/api/data").get_json()
-    assert d["rows"][-1]["Stato"] == "Won" and d["rows"][-1]["Note"] == "ok"
-    assert c.post("/api/rows", json={**body, "Stato": "Boh", "Oggetto": "x"}).status_code == 400
+    wb["gare e offerte"].cell(4, 4).value = "Altro cliente"                          # qualcuno ha cambiato il file
+    wb.save(x)
+    r = c.post("/api/export")
+    assert r.status_code == 409 and "cambiata" in r.get_json()["error"]
+    ws = sheet(x)
+    assert ws.max_row == 7 and ws.cell(4, 15).value == "Waiting For response"          # nessuna scrittura parziale
 
 
-def test_dashboard_and_clean(client):
+def test_aggiorna_dall_excel_chiede_conferma_e_scarta(client):
+    c, x, tmp = client
+    c.post("/api/rows", json=NEW)
+    r = c.post("/api/import", json={})
+    assert r.status_code == 409 and r.get_json()["conferma"]
+    r = c.post("/api/import", json={"force": True})
+    assert r.status_code == 200 and r.get_json()["backup"]
+    assert len(list((tmp / "backup").glob("monitoraggio_*.db"))) == 1                # copia del database prima di scartare
+    assert c.get("/api/state").get_json()["pending"] == {"new": 0, "mod": 0}
+    assert len(c.get("/api/data").get_json()["rows"]) == 6
+    # modifica fatta nel file Excel -> si vede dopo "Aggiorna"
+    wb = openpyxl.load_workbook(x)
+    wb["gare e offerte"].cell(4, 15).value = "Lost"
+    wb.save(x)
+    assert rows_by_cliente(c)["Generali"]["Stato"] == "Waiting For response"
+    c.post("/api/import", json={})
+    assert rows_by_cliente(c)["Generali"]["Stato"] == "Lost"
+
+
+def test_pulizia_solo_suggerimenti(client):
     c, x, _ = client
     p = c.get("/api/clean/preview").get_json()
     kinds = {(i["kind"], i["new"]) for i in p}
     assert ("Stato uniformato", "Won") in kinds and ("Stato uniformato", "NoBID") in kinds
     assert not any(k[1] == "Sospeso" for k in kinds)          # Closed resta uno stato a sé
     assert ("Maiuscole/elenco", "Public Sector") in kinds
-    assert any(i["kind"] == "Cliente scritto in modi diversi" for i in p)
-    sel = [i for i in p if i["default"]]
-    r = c.post("/api/clean/apply", json={"items": sel})
-    assert r.status_code == 200
-    d = c.get("/api/data").get_json()
-    assert {r["Stato"] for r in d["rows"]} <= set(d["domini"]["stato"])
-    db = c.get("/api/dashboard?months=all").get_json()
-    assert db["kpi"]["wip"] == 1
-    assert any(a["titolo"] == "Senza Data ins." for a in db["attenzioni"])
+    assert all(i["xl"] for i in p) and any(i["cliente"] == "Generali" for i in p) is False
+    assert c.post("/api/clean/apply", json={"items": p}).status_code in (404, 405)      # non scrive più nell'Excel
+    assert sheet(x).cell(3, 15).value == "won"
 
 
 def test_normalizzazione_in_lettura(client):
     c, x, _ = client
-    rows = {r["Cliente"]: r for r in c.get("/api/data").get_json()["rows"]}
+    rows = rows_by_cliente(c)
     assert rows["Terna"]["Stato"] == "WIP" and rows["TERNA"]["Stato"] == "Won"
     assert rows["Inps"]["Stato"] == "NoBID" and rows["Inps"]["Market"] == "Public Sector"
     assert rows["Intesa"]["Stato"] == "Closed"                  # stato a sé, non Sospeso
@@ -123,17 +187,18 @@ def test_normalizzazione_in_lettura(client):
     summ = c.get("/api/clean/summary").get_json()
     assert {"campo": "Stato", "da": "No bid", "a": "NoBID", "righe": 1, "scrivibile": True} in summ
     assert {"campo": "Market", "da": "(vuoto)", "a": "(non indicato)", "righe": 1, "scrivibile": False} in summ
-    import openpyxl
-    ws = openpyxl.load_workbook(x)["gare e offerte"]
-    assert ws.cell(6, 15).value == "No bid"                      # il file non è stato toccato dalla lettura
+    assert sheet(x).cell(6, 15).value == "No bid"                # il file non è stato toccato dalla lettura
 
 
-def test_cruscotto_kpi_trend_esito_eta(client):
+def test_cruscotto_kpi_trend_esito_eta(client, tmp_path):
     import datetime as dt
-    from core.reader import read_workbook
+    from core.db import Store
     from core.logic import dashboard
+    from core.reader import read_excel
     c, x, _ = client
-    d = read_workbook(str(x))
+    st = Store(str(tmp_path / "x.db"))
+    st.import_all(read_excel(str(x)), str(x))
+    d = st.load()
     db = dashboard(d["rows"], d["domini"], dt.date(2026, 10, 15), 12)
     k = db["kpi"]
     assert k["wip"] == 1 and k["waiting"] == 1
@@ -145,5 +210,5 @@ def test_cruscotto_kpi_trend_esito_eta(client):
     assert tipi["Gara"]["totale"] == 3 and tipi["Gara"]["rate"] is None      # meno di 5 chiuse: nessun win rate
     assert tipi["RFI"]["Closed"] == 1 and tipi["Offerta diretta"]["Lost"] == 1
     eta = {f["k"]: f["n"] for f in db["eta_attesa"]["fasce"]}
-    assert eta["31-90"] == 1 and eta["nd"] == 0 and db["eta_attesa"]["totale"] == 1   # Generali: consegna 10/08 -> 66 gg
+    assert eta["31-90"] == 1 and eta["nd"] == 0 and db["eta_attesa"]["totale"] == 1
     assert db["pillole"]["imminenti"] == 1 and db["pillole"]["scadute"] == 0

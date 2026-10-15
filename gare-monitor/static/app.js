@@ -5,7 +5,7 @@ const COLOR = {"WIP": "var(--st-wip)", "Waiting For response": "var(--st-waiting
 const STATO_COL = {"WIP": "s-WIP", "Waiting For response": "s-Waiting", "Won": "s-Won", "Lost": "s-Lost", "NoBID": "s-NoBID", "Sospeso": "s-Sospeso", "Closed": "s-Closed", "Altro": "s-Altro"};
 const S = {data: null, dash: null, view: "dash", months: "12", trendSeries: "inserite", trendCum: true, pipeBy: "market",
   filt: {q: "", stato: "", vertical: "", market: "", solution: "", anno: ""}, sort: {k: "Data ins.", dir: -1}, clean: null, state: null};
-const EMPTY_FILT = () => ({q: "", stato: "", vertical: "", market: "", tipo: "", solution: "", anno: "", rows: null, rowsLabel: ""});
+const EMPTY_FILT = () => ({q: "", stato: "", vertical: "", market: "", tipo: "", solution: "", anno: "", loc: "", rows: null, rowsLabel: ""});
 
 // icone Lucide (definite in icons.js)
 const ico = n => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ""}</svg>`;
@@ -49,8 +49,8 @@ async function api(url, opts = {}) {
   if (!r.ok) { const e = new Error(j.error || r.statusText); e.status = r.status; e.body = j; throw e; }
   return j;
 }
-async function withBusy(fn) {
-  $("#busy").hidden = false;
+async function withBusy(fn, msg = "Un momento…") {
+  $("#busy-t").textContent = msg; $("#busy").hidden = false;
   try { return await fn(); } finally { $("#busy").hidden = true; }
 }
 
@@ -61,12 +61,43 @@ async function loadAll(force) {
   try {
     S.data = await api("/api/data" + (force ? "?force=1" : ""));
     S.dash = await api("/api/dashboard?months=" + S.months);
+    S.state = await api("/api/state");                  // dopo il primo import automatico: data e righe da esportare aggiornate
   } catch (e) { toast(e.message, true); openSettings(true, e.message); return; }
-  const name = S.state.path.split(/[\\/]/).pop(), hh = (S.data.loaded || "").slice(11, 16);
-  $("#status").innerHTML = `${esc(name)}<br>${S.data.rows.length} righe · letto alle ${esc(hh)}`;
-  $("#file-box").title = `${name}\n${S.data.rows.length} righe · letto alle ${hh}`;
+  const name = S.state.path.split(/[\\/]/).pop(), hh = (S.state.imported_at || "").slice(11, 16);
+  $("#status").innerHTML = `${esc(name)}<br>${S.data.rows.length} righe · importato alle ${esc(hh)}`;
+  $("#file-box").title = `${name}\n${S.data.rows.length} righe · importato alle ${hh}`;
+  updateExportBtn();
   $("#file-dot").classList.add("ok");
   render();
+}
+function updateExportBtn() {
+  const p = S.state.pending || {new: 0, mod: 0}, n = p.new + p.mod, b = $("#exp-n");
+  b.hidden = !n; b.textContent = n; $("#btn-export").classList.toggle("has", n > 0);
+  $("#btn-export").title = n ? `${p.new} righe nuove e ${p.mod} modificate da scrivere nell'Excel` : "Niente da esportare: nessuna modifica locale";
+}
+async function importNow() {
+  const p = S.state.pending || {new: 0, mod: 0}, n = p.new + p.mod;
+  if (n && !confirm(`Ci sono ${n} modifiche non ancora esportate (${p.new} nuove, ${p.mod} modificate).\nAggiornando dall'Excel verranno ELIMINATE (ne viene fatta una copia di sicurezza del database).\n\nContinuare?`)) return;
+  try { await withBusy(() => api("/api/import", {method: "POST", body: {force: true}}), "Rileggo il file Excel…"); await loadAll(true); toast("Database aggiornato dall'Excel"); }
+  catch (e) { toast(e.message, true); }
+}
+async function exportFlow() {
+  let p; try { p = await api("/api/pending"); } catch (e) { toast(e.message, true); return; }
+  if (!p.nuove.length && !p.modificate.length) { toast("Non c'è niente da esportare"); return; }
+  const el = modal(`<h2>Esporta in Excel</h2>
+    <p class="muted">Verrà scritto direttamente nel file Excel: le righe nuove dopo l'ultima riga, le modifiche sulle righe esistenti. Prima viene fatta una copia di backup. Alla fine il database viene riletto dal file.</p>
+    ${p.nuove.length ? `<h3 class="mh">${p.nuove.length === 1 ? "1 riga nuova" : p.nuove.length + " righe nuove"}</h3><ul class="plist">${p.nuove.map(x => `<li><b>${esc(x.Cliente)}</b> — ${esc((x.Oggetto || "").slice(0, 80))} ${badge(x.Stato)}</li>`).join("")}</ul>` : ""}
+    ${p.modificate.length ? `<h3 class="mh">${p.modificate.length === 1 ? "1 riga modificata" : p.modificate.length + " righe modificate"}</h3><ul class="plist">${p.modificate.map(x => `<li><b>${esc(x.Cliente)}</b> — ${esc((x.Oggetto || "").slice(0, 60))} <span class="muted">(riga Excel ${x.xl})</span>${x.campi.map(c => `<div class="chg"><span>${esc(c.campo)}</span> ${esc(c.prima ?? "—")} → <b>${esc(c.dopo ?? "—")}</b></div>`).join("")}</li>`).join("")}</ul>` : ""}
+    <div class="err" id="x-err"></div>
+    <div class="foot"><button id="x-cancel">Annulla</button><button id="x-go" class="primary">${ico("upload")}Scrivi in HISTORY.xlsx</button></div>`);
+  $("#x-cancel", el).onclick = closeModal;
+  $("#x-go", el).onclick = async () => {
+    try {
+      const r = await withBusy(() => api("/api/export", {method: "POST"}), "Scrivo nell'Excel…");
+      closeModal(); await loadAll(true);
+      toast(r.avviso || `Esportate ${r.nuove} ${r.nuove === 1 ? "riga nuova" : "righe nuove"} e ${r.modificate} ${r.modificate === 1 ? "modifica" : "modifiche"}`, !!r.avviso);
+    } catch (e) { $("#x-err", el).textContent = e.message; }
+  };
 }
 async function reloadDash() { S.dash = await api("/api/dashboard?months=" + S.months); }
 function rowByNum(n) { return S.data.rows.find(r => r._row === n); }
@@ -222,8 +253,8 @@ const colsLoad = () => { try { const v = JSON.parse(localStorage.getItem(COL_KEY
 const colsSave = () => { try { localStorage.setItem(COL_KEY, JSON.stringify([...S.cols])); } catch (e) {} };
 S.cols = colsLoad();
 const CELLS = {
-  "Seq": r => `<td>${esc(r.Seq)}</td>`,
-  "Cliente": r => `<td class="cl">${orNil(r.Cliente)}</td>`,
+  "Seq": r => `<td>${r.Seq === null || r.Seq === undefined ? nil() : esc(r.Seq)}</td>`,
+  "Cliente": r => `<td class="cl">${orNil(r.Cliente)}${r._state === "new" ? ` <span class="lchip new">nuova</span>` : r._state === "mod" ? ` <span class="lchip mod">modificata</span>` : ""}</td>`,
   "Oggetto": r => `<td class="og" title="${esc(r.Oggetto)}">${orNil(r.Oggetto)}</td>`,
   "Market": r => `<td>${r.Market === NOIND ? `<span class="nil">${NOIND}</span>` : orNil(r.Market)}</td>`,
   "Vertical": r => `<td>${orNil(r.Vertical)}</td>`,
@@ -241,6 +272,7 @@ function filteredRows() {
     if (f.vertical && r.Vertical !== f.vertical) return false;
     if (f.market && r.Market !== f.market) return false;
     if (f.rows && !f.rows.has(r._row)) return false;
+    if (f.loc && r._state === "orig") return false;
     if (f.tipo && (f.tipo === "__altro" ? TIPI_MAIN.includes(r.tipo) : r.tipo !== f.tipo)) return false;
     if (f.anno && (r["Data ins."] || "").slice(0, 4) !== f.anno) return false;
     if (f.solution) { const s = splitSol(r["Solution D&A"]).map(x => x.toLowerCase()); if (f.solution === "(non assegnata)" ? s.length : !s.includes(f.solution.toLowerCase())) return false; }
@@ -259,12 +291,13 @@ function renderTable(m) {
     <div><label for="f-tipo">Tipo</label><select id="f-tipo"><option value="">Tutti</option>${[...d.tipo, "__altro"].map(t => `<option value="${esc(t)}" ${f.tipo === t ? "selected" : ""}>${t === "__altro" ? "Altro" : esc(t)}</option>`).join("")}</select></div>
     <div><label for="f-vertical">Vertical</label><select id="f-vertical">${optionsHtml(d.vertical, f.vertical)}</select></div>
     <div><label for="f-solution">Solution</label><select id="f-solution">${optionsHtml(["(non assegnata)", ...d.solutions], f.solution)}</select></div>
+    <div><label for="f-loc">Locale</label><select id="f-loc"><option value="">Tutte</option><option value="1" ${f.loc ? "selected" : ""}>Da esportare</option></select></div>
     <div><label for="f-anno">Anno (Data ins.)</label><select id="f-anno">${optionsHtml(anni, f.anno)}</select></div>
     <div class="fbar-r"><span id="f-count"></span>
       <details class="ms cols-menu"><summary style="min-width:0">${ico("columns-3")}Colonne</summary><div class="ms-list" style="right:0;left:auto;min-width:200px">${COLDEFS.map(c => `<label class="ms-i"><input type="checkbox" data-col="${esc(c.k)}" ${S.cols.has(c.k) ? "checked" : ""}> ${esc(c.l)}</label>`).join("")}</div></details></div></div>
   <div id="f-chips"></div>
   <div class="card tablecard"><table class="dt"><thead id="th"></thead><tbody id="tb"></tbody></table></div>`;
-  const LABEL = {q: v => `Cerca: ${v}`, stato: v => `Stato: ${v}`, tipo: v => `Tipo: ${v === "__altro" ? "Altro" : v}`, rows: () => f.rowsLabel || "Selezione", market: v => `Market: ${v}`, vertical: v => `Vertical: ${v}`, solution: v => `Solution: ${v}`, anno: v => `Anno: ${v}`};
+  const LABEL = {q: v => `Cerca: ${v}`, stato: v => `Stato: ${v}`, tipo: v => `Tipo: ${v === "__altro" ? "Altro" : v}`, rows: () => f.rowsLabel || "Selezione", market: v => `Market: ${v}`, vertical: v => `Vertical: ${v}`, solution: v => `Solution: ${v}`, anno: v => `Anno: ${v}`, loc: () => "Da esportare"};
   const drawChips = () => {
     const box = $("#f-chips"); box.innerHTML = chipsHtml(Object.keys(LABEL).filter(k => f[k]).map(k => ({id: k, label: LABEL[k](f[k])})));
     bindChips(box, id => { S.filt[id] = ""; renderTable(m); }, () => { S.filt = EMPTY_FILT(); renderTable(m); });
@@ -282,7 +315,7 @@ function renderTable(m) {
   };
   draw();
   const bind = (id, key) => $(id).oninput = e => { S.filt[key] = e.target.value; draw(); };
-  bind("#f-q", "q"); bind("#f-stato", "stato"); bind("#f-tipo", "tipo"); bind("#f-market", "market"); bind("#f-vertical", "vertical"); bind("#f-solution", "solution"); bind("#f-anno", "anno");
+  bind("#f-q", "q"); bind("#f-loc", "loc"); bind("#f-stato", "stato"); bind("#f-tipo", "tipo"); bind("#f-market", "market"); bind("#f-vertical", "vertical"); bind("#f-solution", "solution"); bind("#f-anno", "anno");
   m.querySelectorAll("[data-col]").forEach(c => c.onchange = () => { c.checked ? S.cols.add(c.dataset.col) : S.cols.delete(c.dataset.col); colsSave(); draw(); });
 }
 
@@ -315,7 +348,7 @@ function wipItems() {
     const d = isoDate(r["Data consegna"]);
     const days = d ? Math.round((d - ctx.today) / 864e5) : null;
     const band = days === null ? "none" : days < 0 ? "late" : days <= ctx.weekEnd ? "week" : days <= ctx.weekEnd + 14 ? "two" : "over";
-    return {r, key: String(r.Seq), d, days, band, names: splitSol(r["Solution D&A"]), market: r.Market || NOIND};
+    return {r, key: r.Seq !== null && r.Seq !== undefined ? String(r.Seq) : "n" + r._row, d, days, band, names: splitSol(r["Solution D&A"]), market: r.Market || NOIND};
   }).sort((a, b) => (a.d ? a.d.getTime() : Infinity) - (b.d ? b.d.getTime() : Infinity) || String(a.r.Cliente).localeCompare(String(b.r.Cliente), "it"));
 }
 const passTipo = it => !S.wip.tipo || it.r.tipo === S.wip.tipo;
@@ -451,32 +484,23 @@ function openMeeting() {
   $("#mt-print", el).onclick = () => window.print();
 }
 
-// ------------------------------------------------------------ pulizia dati
+// ------------------------------------------------------------ pulizia dati (SOLO suggerimenti: si corregge nell'Excel)
 async function renderClean(m) {
   m.innerHTML = `<div class="card" style="margin-bottom:var(--gap)"><h2>Valori normalizzati in lettura</h2><div class="sub">L'app legge Stato e Market ignorando maiuscole e spazi, senza toccare il file. Qui vedi cosa viene unificato e quante righe riguarda.</div><div id="c-sum"><div class="muted">Caricamento…</div></div></div>
-    <div class="card"><h2>Pulizia dati</h2><div class="sub">Propone correzioni sul file Excel (stati uniformati, maiuscole come in Domini, date scritte come testo, clienti scritti in modi diversi). Nulla viene scritto finché non applichi; prima di scrivere viene fatta una copia di backup.</div>
-    <button id="c-run" class="primary">Analizza il file</button><div id="c-out" style="margin-top:12px"></div></div>`;
+    <div class="card"><h2>Suggerimenti di pulizia</h2><div class="sub">Cosa conviene correggere nell'Excel (stati scritti in modi diversi, maiuscole diverse da Domini, date scritte come testo, clienti con grafie diverse). Sono solo indicazioni: correggi tu nel file, poi premi “Aggiorna dall'Excel”.</div>
+    <div id="c-out"><div class="muted">Caricamento…</div></div></div>`;
   api("/api/clean/summary").then(list => {
     $("#c-sum").innerHTML = list.length ? `<div class="tscroll"><table><thead><tr><th>Campo</th><th>Valore nel file</th><th>Letto come</th><th class="num">Righe</th><th>Nel file</th></tr></thead><tbody>${list.map(x =>
-      `<tr><td>${esc(x.campo)}</td><td>${esc(x.da)}</td><td><b>${esc(x.a)}</b></td><td class="num">${num(x.righe)}</td><td class="muted">${x.scrivibile ? "correggibile con la pulizia qui sotto" : "solo in lettura (cella vuota)"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Tutti i valori sono già nella forma standard.</div>`;
+      `<tr><td>${esc(x.campo)}</td><td>${esc(x.da)}</td><td><b>${esc(x.a)}</b></td><td class="num">${num(x.righe)}</td><td class="muted">${x.scrivibile ? "da correggere nell'Excel (vedi i suggerimenti sotto)" : "cella vuota: solo in lettura"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Tutti i valori sono già nella forma standard.</div>`;
   }).catch(e => { $("#c-sum").innerHTML = `<div class="err">${esc(e.message)}</div>`; });
-  $("#c-run").onclick = async () => {
-    const items = await api("/api/clean/preview"); S.clean = items; const out = $("#c-out");
+  api("/api/clean/preview").then(items => {
+    const out = $("#c-out");
     if (!items.length) { out.innerHTML = `<div class="empty">Non c'è niente da correggere.</div>`; return; }
     const kinds = [...new Set(items.map(i => i.kind))];
-    out.innerHTML = kinds.map(k => { const its = items.map((it, idx) => [it, idx]).filter(([it]) => it.kind === k);
-      return `<details open><summary>${esc(k)} <span class="cnt">(${its.length})</span></summary><table><thead><tr><th></th><th>Cliente</th><th>Campo</th><th>Ora</th><th>Diventa</th></tr></thead><tbody>${its.map(([it, idx]) =>
-        `<tr><td><input type="checkbox" data-i="${idx}" ${it.default ? "checked" : ""} style="width:auto"></td><td>${esc(it.cliente)}</td><td>${esc(it.field)}</td><td>${esc(it.old)}</td><td><b>${esc(it.new)}</b></td></tr>`).join("")}</tbody></table></details>`; }).join("") +
-      `<div class="foot"><span id="c-n" class="muted"></span><button id="c-apply" class="primary">Applica le correzioni selezionate</button></div>`;
-    const upd = () => $("#c-n").textContent = out.querySelectorAll("input:checked").length + " selezionate";
-    out.querySelectorAll("input").forEach(i => i.onchange = upd); upd();
-    $("#c-apply").onclick = async () => {
-      const sel = [...out.querySelectorAll("input:checked")].map(i => items[+i.dataset.i]); if (!sel.length) return;
-      if (!confirm(`Applicare ${sel.length} correzioni al file Excel? (viene creato un backup)`)) return;
-      try { const r = await withBusy(() => api("/api/clean/apply", {method: "POST", body: {items: sel}})); toast(`Fatto: ${r.modifiche} correzioni su ${r.righe} righe`); await loadAll(true); S.view = "clean"; render(); }
-      catch (e) { toast(e.message, true); }
-    };
-  };
+    out.innerHTML = kinds.map(k => { const its = items.filter(it => it.kind === k);
+      return `<details open><summary>${esc(k)} <span class="cnt">(${its.length})</span></summary><div class="tscroll"><table><thead><tr><th>Riga Excel</th><th>Cliente</th><th>Campo</th><th>Ora</th><th>Suggerito</th></tr></thead><tbody>${its.map(it =>
+        `<tr><td>${esc(it.xl)}</td><td>${esc(it.cliente)}</td><td>${esc(it.field)}</td><td>${esc(it.old)}</td><td><b>${esc(it.new)}</b></td></tr>`).join("")}</tbody></table></div></details>`; }).join("");
+  }).catch(e => { $("#c-out").innerHTML = `<div class="err">${esc(e.message)}</div>`; });
 }
 
 // ------------------------------------------------------------ modale inserimento/modifica
@@ -492,7 +516,7 @@ function openForm(row) {
   const sel = (id, arr, cur, req) => `<select id="${id}">${req ? "" : '<option value=""></option>'}${cur && !arr.includes(cur) ? `<option selected>${esc(cur)}</option>` : ""}${arr.map(x => `<option ${x === cur ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>`;
   const inp = (id, label, val, extra = "", type = "text", req = false) => `<div><label class="${req ? "req" : ""}" for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(val)}" ${extra}></div>`;
   const ta = (id, label, val) => `<div class="full"><label for="${id}">${label}</label><textarea id="${id}">${esc(val)}</textarea></div>`;
-  const el = modal(`<h2>${edit ? "Modifica offerta" + (row.Seq ? " #" + row.Seq : "") : "Nuova offerta"}</h2>
+  const el = modal(`<h2>${edit ? "Modifica offerta" + (row.Seq ? " #" + row.Seq : "") : "Nuova offerta"}${edit && row._state === "new" ? ` <span class="lchip new">nuova, da esportare</span>` : edit && row._state === "mod" ? ` <span class="lchip mod">modificata, da esportare</span>` : ""}</h2>
   <div class="grid">
     <div class="full"><label class="req" for="f-Cliente">Cliente</label><input id="f-Cliente" list="dl-clienti" value="${esc(v.Cliente)}" autocomplete="off"><datalist id="dl-clienti">${d.clienti.map(c => `<option value="${esc(c.Cliente)}">`).join("")}</datalist></div>
     <div><label class="req" for="f-Vertical">Vertical</label>${sel("f-Vertical", d.vertical, v.Vertical, !edit ? false : false)}</div>
@@ -511,7 +535,8 @@ function openForm(row) {
     ${inp("f-Data Opt review", "Data Opt review", v["Data Opt review"], "", "date")}${inp("f-Referenti vertical", "Referenti vertical", v["Referenti vertical"])}
     ${ta("f-Tecnologie di riferimento D&A", "Tecnologie di riferimento D&A", v["Tecnologie di riferimento D&A"])}${ta("f-Note", "Note", v.Note)}</div></details>
   <div class="err" id="f-err"></div>
-  <div class="foot"><button id="f-cancel">Annulla</button><button id="f-save" class="primary">${edit ? "Salva modifiche" : "Aggiungi all'Excel"}</button></div>`);
+  <div class="hint">${edit ? "Le modifiche restano nel database locale finché non premi “Esporta in Excel”." : "La riga viene salvata nel database locale e finisce nell'Excel quando premi “Esporta in Excel”."}</div>
+  <div class="foot">${edit && row._state === "new" ? `<button id="f-del" style="margin-right:auto">${ico("trash-2")}Elimina riga</button>` : ""}${edit && row._state === "mod" ? `<button id="f-rev" style="margin-right:auto">${ico("undo-2")}Annulla modifiche</button>` : ""}<button id="f-cancel">Annulla</button><button id="f-save" class="primary">${edit ? "Salva modifiche" : "Aggiungi"}</button></div>`);
   const F_ = id => el.querySelector(`[id="f-${id}"]`);
   const g = id => (F_(id) || {}).value ?? "";
   const dirty = {SS: edit, Commessa: edit};
@@ -538,6 +563,8 @@ function openForm(row) {
     suggest();
   });
   $("#f-cancel", el).onclick = closeModal;
+  const del = $("#f-del", el); if (del) del.onclick = async () => { if (!confirm("Eliminare questa riga? Non è ancora nell'Excel.")) return; try { await api("/api/rows/" + row._row, {method: "DELETE"}); closeModal(); await loadAll(true); toast("Riga eliminata"); } catch (e) { toast(e.message, true); } };
+  const rev = $("#f-rev", el); if (rev) rev.onclick = async () => { if (!confirm("Annullare le modifiche di questa riga e tornare ai valori dell'Excel?")) return; try { await api("/api/rows/" + row._row + "/revert", {method: "POST"}); closeModal(); await loadAll(true); toast("Modifiche annullate"); } catch (e) { toast(e.message, true); } };
   F_("Cliente").focus();
   $("#f-save", el).onclick = async () => {
     const F = ["Cliente", "Vertical", "Market", "Oggetto", "tipo", "Stato", "Data ins.", "Data consegna", "Solution D&A", "SS", "Commessa", "Legal Entity", "Salesman", "Data Opt review", "Referenti vertical", "Tecnologie di riferimento D&A", "Note"];
@@ -547,8 +574,8 @@ function openForm(row) {
     if (miss.length) { err.textContent = "Campi obbligatori mancanti: " + miss.join(", "); return; }
     const send = async force => {
       if (edit) { const ch = {}; F.forEach(f => { if ((vals[f] || null) !== (row[f] || null)) ch[f] = vals[f]; }); if (!Object.keys(ch).length) { closeModal(); return; }
-        await withBusy(() => api("/api/rows/" + row._row, {method: "PUT", body: {sig: row._sig, changes: ch}})); toast("Modifiche salvate nell'Excel"); }
-      else { await withBusy(() => api("/api/rows", {method: "POST", body: {...vals, _force: force}})); toast("Offerta aggiunta all'Excel"); }
+        await withBusy(() => api("/api/rows/" + row._row, {method: "PUT", body: {changes: ch}})); toast("Modifiche salvate (da esportare nell'Excel)"); }
+      else { await withBusy(() => api("/api/rows", {method: "POST", body: {...vals, _force: force}})); toast("Offerta aggiunta (da esportare nell'Excel)"); }
       closeModal(); await loadAll(true);
     };
     try { await send(false); }
@@ -558,21 +585,30 @@ function openForm(row) {
 
 // ------------------------------------------------------------ impostazioni
 function openSettings(first, msg) {
-  const el = modal(`<h2>${first ? "Benvenuto — scegli il file Excel" : "Impostazioni"}</h2>
-    <p class="muted">Indica il file Excel (quello con il foglio “gare e offerte” e il foglio “Domini”). Se il file è in SharePoint usa la copia sincronizzata sul tuo PC.</p>
-    <label for="s-path">Percorso del file</label><div class="row"><input id="s-path" style="flex:1" value="${esc(S.state && S.state.path || "")}" placeholder="C:\\Users\\…\\HISTORY.xlsx"><button id="s-browse">Sfoglia…</button></div>
+  const st = S.state || {};
+  const el = modal(`<h2>${first ? "Benvenuto — configura i dati" : "Impostazioni"}</h2>
+    <p class="muted">L'app lavora su un <b>database locale</b> (SQLite) caricato dal tuo file Excel. L'Excel viene scritto solo quando premi “Esporta in Excel”.</p>
+    <label for="s-path">File Excel (copia sincronizzata di SharePoint)</label><div class="row"><input id="s-path" style="flex:1" value="${esc(st.path || "")}" placeholder="C:\\Users\\…\\HISTORY.xlsx"><button id="s-browse">Sfoglia…</button></div>
+    <label for="s-db" style="margin-top:12px">Database locale (si crea da solo se non esiste; tienilo fuori da OneDrive)</label><input id="s-db" value="${esc(st.db_path || "")}">
+    <div class="hint">${st.imported_at ? `Ultimo import: ${esc(st.imported_at.replace("T", " "))}` : "Nessun import ancora eseguito."}${st.pending && (st.pending.new + st.pending.mod) ? ` · <b>${st.pending.new + st.pending.mod} modifiche non esportate</b>` : ""}</div>
     <div class="err" id="s-err">${esc(msg || "")}</div>
-    <div class="foot">${first ? "" : '<button id="s-cancel">Chiudi</button>'}<button id="s-save" class="primary">Salva e carica</button></div>
-    <p class="hint">I backup prima di ogni scrittura vengono salvati nella cartella “backup” accanto all'app.</p>`);
+    <div class="foot">${first ? "" : '<button id="s-cancel">Chiudi</button>'}<button id="s-save" class="primary">${ico("database")}Salva e importa dall'Excel</button></div>
+    <p class="hint">Le copie di sicurezza (Excel prima di ogni esportazione, database prima di un aggiornamento con modifiche in sospeso) stanno nella cartella “backup” accanto all'app.</p>`);
   modal.locked = !!first;
   const c = $("#s-cancel", el); if (c) c.onclick = closeModal;
   $("#s-browse", el).onclick = async () => { try { const r = await api("/api/browse", {method: "POST"}); if (r.path) $("#s-path", el).value = r.path; } catch (e) { $("#s-err", el).textContent = e.message; } };
   $("#s-save", el).onclick = async () => {
-    try { await withBusy(() => api("/api/config", {method: "POST", body: {excel_path: $("#s-path", el).value}})); closeModal(); await loadAll(true); }
-    catch (e) { $("#s-err", el).textContent = e.message; }
+    try {
+      const n = st.pending ? st.pending.new + st.pending.mod : 0;
+      if (n && !confirm(`Ci sono ${n} modifiche non esportate: importando verranno eliminate. Continuare?`)) return;
+      await withBusy(async () => {
+        await api("/api/config", {method: "POST", body: {excel_path: $("#s-path", el).value, db_path: $("#s-db", el).value}});
+        await api("/api/import", {method: "POST", body: {force: true}});
+      }, "Importo il file Excel…");
+      closeModal(); await loadAll(true); toast("Dati importati dall'Excel");
+    } catch (e) { $("#s-err", el).textContent = e.message; }
   };
 }
-
 
 // ------------------------------------------------------------ barra laterale (compatta, si espande al passaggio del mouse; si può fissare)
 const PIN_KEY = "gare.side.pinned";
@@ -586,7 +622,8 @@ function setPinned(v, save = true) {
 // ------------------------------------------------------------ avvio
 document.querySelectorAll("#nav button").forEach(b => b.onclick = () => { S.view = b.dataset.view; if (!S.data) return; if (S.view === "table") S.filt = EMPTY_FILT(); render(); });
 $("#btn-new").onclick = () => S.data ? openForm(null) : toast("Prima scegli il file Excel", true);
-$("#btn-reload").onclick = async () => { await loadAll(true); toast("File riletto"); };
+$("#btn-reload").onclick = importNow;
+$("#btn-export").onclick = exportFlow;
 $("#btn-settings").onclick = () => openSettings(false);
 $("#btn-pin").onclick = () => setPinned(!document.body.classList.contains("pinned"));
 hydrateIcons();

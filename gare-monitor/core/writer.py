@@ -192,22 +192,37 @@ class ExcelWriter:
         g = lambda f: self._cell_val(_retry(lambda: ws.Cells(row, cols[f]).Value)) if f in cols else None
         _check_sig(g("Cliente"), g("Oggetto"), g("Data ins."), sig, row)
 
+    def _append_one(self, ws, lo, cols, values):
+        lr = _retry(lambda: lo.ListRows.Add())
+        row = _retry(lambda: lr.Range.Row)
+        for f, v in values.items():
+            if f in cols:
+                self._set(ws, row, cols[f], _value_for(f, v))
+        if "Seq" in cols and not _retry(lambda: ws.Cells(row, cols["Seq"]).HasFormula):
+            _retry(lambda: setattr(ws.Cells(row, cols["Seq"]), "Formula", "=ROW()-1"))
+        if "Valore" in cols and not _retry(lambda: ws.Cells(row, cols["Valore"]).HasFormula):
+            for r in range(row - 1, max(row - 30, 1), -1):
+                if _retry(lambda: ws.Cells(r, cols["Valore"]).HasFormula):
+                    frm = _retry(lambda: ws.Cells(r, cols["Valore"]).Formula)
+                    _retry(lambda: setattr(ws.Cells(row, cols["Valore"]), "Formula", frm))
+                    break
+        return row
+
     def append(self, values):
+        return self._run(lambda ws, lo, cols: self._append_one(ws, lo, cols, values))
+
+    def export(self, new_rows, updates):
+        """Una sola sessione di Excel: prima controlla che le righe da modificare siano ancora quelle, poi accoda le
+        righe nuove dopo l'ultima e aggiorna le modificate. Ritorna i numeri di riga delle righe accodate."""
         def fn(ws, lo, cols):
-            lr = _retry(lambda: lo.ListRows.Add())
-            row = _retry(lambda: lr.Range.Row)
-            for f, v in values.items():
-                if f in cols:
-                    self._set(ws, row, cols[f], _value_for(f, v))
-            if "Seq" in cols and not _retry(lambda: ws.Cells(row, cols["Seq"]).HasFormula):
-                _retry(lambda: setattr(ws.Cells(row, cols["Seq"]), "Formula", "=ROW()-1"))
-            if "Valore" in cols and not _retry(lambda: ws.Cells(row, cols["Valore"]).HasFormula):
-                for r in range(row - 1, max(row - 30, 1), -1):
-                    if _retry(lambda: ws.Cells(r, cols["Valore"]).HasFormula):
-                        frm = _retry(lambda: ws.Cells(r, cols["Valore"]).Formula)
-                        _retry(lambda: setattr(ws.Cells(row, cols["Valore"]), "Formula", frm))
-                        break
-            return row
+            for row, sig, _ in updates:
+                self._check(ws, cols, row, sig)
+            appended = [self._append_one(ws, lo, cols, v) for v in new_rows]
+            for row, _, changes in updates:
+                for f, v in changes.items():
+                    if f in cols:
+                        self._set(ws, row, cols[f], _value_for(f, v))
+            return appended
         return self._run(fn)
 
     def update_many(self, items):
@@ -254,30 +269,42 @@ class OpenpyxlWriter:
         g = lambda f: ws.cell(row, cols[f]).value if f in cols else None
         _check_sig(g("Cliente"), g("Oggetto"), g("Data ins."), sig, row)
 
+    def _append_one(self, ws, cols, values):
+        from copy import copy
+        tab = ws.tables.get(self.table_name)
+        last = tab.ref.split(":")[1] if tab else None
+        last_row = int("".join(ch for ch in last if ch.isdigit())) if last else ws.max_row
+        row = last_row + 1
+        for c in range(1, ws.max_column + 1):
+            ws.cell(row, c)._style = copy(ws.cell(last_row, c)._style)
+        if tab:
+            tab.ref = f"{tab.ref.split(':')[0]}:{last[:len(last) - len(str(last_row))]}{row}"
+        for f, v in values.items():
+            if f in cols:
+                ws.cell(row, cols[f]).value = _value_for(f, v)
+        if "Seq" in cols:
+            ws.cell(row, cols["Seq"]).value = "=ROW()-1"
+        if "Valore" in cols:
+            for r in range(last_row, max(last_row - 30, 1), -1):
+                v = ws.cell(r, cols["Valore"]).value
+                if isinstance(v, str) and v.startswith("="):
+                    ws.cell(row, cols["Valore"]).value = v
+                    break
+        return row
+
     def append(self, values):
+        return self._run(lambda ws, cols: self._append_one(ws, cols, values))
+
+    def export(self, new_rows, updates):
         def fn(ws, cols):
-            from copy import copy
-            tab = ws.tables.get(self.table_name)
-            last = tab.ref.split(":")[1] if tab else None
-            last_row = int("".join(ch for ch in last if ch.isdigit())) if last else ws.max_row
-            row = last_row + 1
-            for c in range(1, ws.max_column + 1):
-                src, dst = ws.cell(last_row, c), ws.cell(row, c)
-                dst._style = copy(src._style)
-            if tab:
-                tab.ref = f"{tab.ref.split(':')[0]}:{last[:len(last) - len(str(last_row))]}{row}"
-            for f, v in values.items():
-                if f in cols:
-                    ws.cell(row, cols[f]).value = _value_for(f, v)
-            if "Seq" in cols:
-                ws.cell(row, cols["Seq"]).value = "=ROW()-1"
-            if "Valore" in cols:
-                for r in range(last_row, max(last_row - 30, 1), -1):
-                    v = ws.cell(r, cols["Valore"]).value
-                    if isinstance(v, str) and v.startswith("="):
-                        ws.cell(row, cols["Valore"]).value = v
-                        break
-            return row
+            for row, sig, _ in updates:
+                self._check(ws, cols, row, sig)
+            appended = [self._append_one(ws, cols, v) for v in new_rows]
+            for row, _, changes in updates:
+                for f, v in changes.items():
+                    if f in cols:
+                        ws.cell(row, cols[f]).value = _value_for(f, v)
+            return appended
         return self._run(fn)
 
     def update_many(self, items):

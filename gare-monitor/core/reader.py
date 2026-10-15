@@ -22,6 +22,9 @@ FIELDS = [
 ]
 
 
+ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?$")
+
+
 def to_date(v):
     """datetime/date/stringa gg/mm/aaaa o aaaa-mm-gg -> date, altrimenti None."""
     if isinstance(v, dt.datetime):
@@ -30,6 +33,8 @@ def to_date(v):
         return v
     if isinstance(v, str):
         s = v.strip()
+        if ISO_RE.match(s):
+            s = s[:10]
         for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y", "%d.%m.%Y"):
             try:
                 return dt.datetime.strptime(s, fmt).date()
@@ -75,8 +80,20 @@ def _column_list(ws, header):
     return out
 
 
-def read_workbook(path):
-    """Ritorna {'rows': [...], 'domini': {...}}."""
+def _cell_value(v):
+    """Valore di cella pronto per il database: date come testo ISO, il resto invariato."""
+    if isinstance(v, dt.datetime):
+        return v.date().isoformat() if (v.hour, v.minute, v.second) == (0, 0, 0) else v.isoformat(timespec="seconds")
+    if isinstance(v, dt.date):
+        return v.isoformat()
+    if isinstance(v, dt.time):
+        return v.isoformat(timespec="seconds")
+    return v
+
+
+def read_excel(path):
+    """Legge TUTTE le colonne del foglio principale (+ le liste di Domini), su una copia temporanea del file.
+    Ritorna {'headers': [...], 'rows': [{'xl': n_riga, 'cells': {colonna: valore}}], 'domini': {...}}."""
     tmp = tempfile.mkdtemp(prefix="gare_")
     try:
         copy = os.path.join(tmp, "copia.xlsx")
@@ -95,46 +112,60 @@ def read_workbook(path):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             wb = openpyxl.load_workbook(copy, data_only=True)
-        rows = _read_rows(wb[SHEET_MAIN])
+        if SHEET_MAIN not in wb.sheetnames:
+            raise ValueError(f"Nel file manca il foglio '{SHEET_MAIN}'")
+        ws = wb[SHEET_MAIN]
+        headers, cols = [], {}
+        for c in ws[1]:
+            h = clean_text(c.value)
+            if not h:
+                continue
+            base, n = h, 2
+            while h in cols:                       # intestazioni duplicate: " (2)", " (3)"…
+                h = f"{base} ({n})"
+                n += 1
+            cols[h] = c.column
+            headers.append(h)
+        missing = [f for f in ("Cliente", "Stato", "Data ins.") if f not in cols]
+        if missing:
+            raise ValueError(f"Nel foglio '{SHEET_MAIN}' mancano le colonne: {', '.join(missing)}")
+        rows = []
+        for r in range(2, ws.max_row + 1):
+            cells = {h: _cell_value(ws.cell(r, cols[h]).value) for h in headers}
+            if not (clean_text(cells.get("Cliente")) or clean_text(cells.get("Oggetto"))):
+                continue
+            rows.append({"xl": r, "cells": cells})
         domini = _read_domini(wb[SHEET_DOMINI] if SHEET_DOMINI in wb.sheetnames else None)
-        return {"rows": normalize_rows(rows, domini), "domini": domini}
+        return {"headers": headers, "rows": rows, "domini": domini}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _read_rows(ws):
-    header = {}
-    for c in ws[1]:
-        h = clean_text(c.value)
-        if h:
-            header[h] = c.column
-    missing = [f for f in ("Cliente", "Stato", "Data ins.") if f not in header]
-    if missing:
-        raise ValueError(f"Nel foglio '{SHEET_MAIN}' mancano le colonne: {', '.join(missing)}")
-    rows = []
-    for r in range(2, ws.max_row + 1):
-        raw = {f: ws.cell(r, header[f]).value for f in FIELDS if f in header}
-        if not (clean_text(raw.get("Cliente")) or clean_text(raw.get("Oggetto"))):
-            continue
-        seq = ws.cell(r, header["Seq"]).value if "Seq" in header else None
-        row = {"_row": r, "Seq": seq if isinstance(seq, (int, float)) else r - 1}
-        invalid = []
-        for f in FIELDS:
-            v = raw.get(f)
-            if f in DATE_FIELDS:
-                iso = to_iso(v)
-                row[f] = iso
-                if v not in (None, "") and iso is None:
-                    invalid.append(f)
-                if isinstance(v, str) and iso:
-                    row.setdefault("_textdates", []).append(f)
-            else:
-                row[f] = clean_text(v)
-        row["_invalid_dates"] = invalid
-        row["_raw"] = {k: (str(raw[k]) if raw.get(k) is not None else None) for k in ("Stato", "Market") if k in raw}
-        row["_sig"] = row_sig(raw.get("Cliente"), raw.get("Oggetto"), raw.get("Data ins."))
-        rows.append(row)
-    return rows
+def build_row(rid, xl, cells, orig=None, state="orig"):
+    """Riga per l'app a partire dai valori del database.
+    cells = valori attuali; orig = valori importati dall'Excel (None per le righe nuove)."""
+    row = {"_row": rid, "_xl": xl, "_state": state}
+    seq = cells.get("Seq")
+    row["Seq"] = seq if isinstance(seq, (int, float)) and not isinstance(seq, bool) else (xl - 1 if xl else None)
+    invalid, textdates = [], []
+    for f in FIELDS:
+        v = cells.get(f)
+        if f in DATE_FIELDS:
+            iso = to_iso(v)
+            row[f] = iso
+            if v not in (None, "") and iso is None:
+                invalid.append(f)
+            if isinstance(v, str) and iso and not ISO_RE.match(v.strip()):
+                textdates.append(f)
+        else:
+            row[f] = clean_text(v)
+    row["_invalid_dates"] = invalid
+    if textdates:
+        row["_textdates"] = textdates
+    base = orig if orig is not None else cells
+    row["_raw"] = {k: (str(base[k]) if base.get(k) is not None else None) for k in ("Stato", "Market") if k in base}
+    row["_sig"] = row_sig(cells.get("Cliente"), cells.get("Oggetto"), cells.get("Data ins."))
+    return row
 
 
 def _read_domini(ws):

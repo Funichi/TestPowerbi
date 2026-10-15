@@ -79,8 +79,8 @@ def clean_preview(rows, domini):
     liste = {"Vertical": domini.get("vertical", []), "tipo": domini.get("tipo", [])}
 
     def add(r, kind, field, old, new, default=True):
-        out.append({"row": r["_row"], "sig": r["_sig"], "kind": kind, "field": field, "old": old, "new": new,
-                    "cliente": r["Cliente"], "oggetto": (r["Oggetto"] or "")[:80], "default": default})
+        out.append({"row": r["_row"], "xl": r.get("_xl"), "kind": kind, "field": field, "old": old, "new": new,
+                    "cliente": r["Cliente"], "oggetto": (r["Oggetto"] or "")[:80]})
 
     spellings = defaultdict(Counter)
     for r in rows:
@@ -88,6 +88,8 @@ def clean_preview(rows, domini):
     canon = {k: c.most_common(1)[0][0] for k, c in spellings.items() if len(c) > 1}
 
     for r in rows:
+        if r.get("_state") == "new":                    # righe inserite qui: non sono ancora nell'Excel
+            continue
         raw = r.get("_raw") or {}
         sr = raw.get("Stato")
         if isinstance(sr, str) and sr != r["Stato"] and r["Stato"] in STATI:

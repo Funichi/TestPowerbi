@@ -49,6 +49,8 @@ def normalization_summary(rows):
     """Elenco dei valori normalizzati con il numero di righe coinvolte."""
     c = Counter()
     for r in rows:
+        if r.get("_state") == "new":
+            continue
         raw = r.get("_raw") or {}
         sr, sn = raw.get("Stato"), r["Stato"]
         if isinstance(sr, str) and sr != sn and sn in STATI:

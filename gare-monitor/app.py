@@ -1,4 +1,8 @@
-"""Gare & Offerte — app locale che usa l'Excel come archivio principale."""
+"""Gare & Offerte — app locale.
+
+Archivio di lavoro: database SQLite locale (monitoraggio.db), caricato dal file Excel con "Aggiorna dall'Excel".
+L'Excel viene scritto SOLO quando si preme "Esporta in Excel" (righe nuove accodate, righe modificate aggiornate).
+"""
 import datetime as dt
 import json
 import os
@@ -9,7 +13,8 @@ import webbrowser
 from flask import Flask, jsonify, request, send_from_directory
 
 from core import logic
-from core.reader import DATE_FIELDS, FIELDS, clean_text, read_workbook, row_sig, to_date
+from core.db import Store
+from core.reader import DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
 from core.writer import WriteError, get_writer
 
 FROZEN = getattr(sys, "frozen", False)
@@ -17,13 +22,15 @@ RES_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 BASE_DIR = os.path.dirname(sys.executable) if FROZEN else os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.environ.get("GARE_CONFIG", os.path.join(BASE_DIR, "config.json"))
 BACKUP_DIR = os.path.join(os.path.dirname(CONFIG_PATH), "backup")
-
-app = Flask(__name__, static_folder=os.path.join(RES_DIR, "static"), static_url_path="/static")
-_cache = {"key": None, "data": None}
+DEFAULT_DB = os.path.join(os.path.dirname(CONFIG_PATH), "monitoraggio.db")
 DEFAULT_EXCEL_PATH = r"C:\Users\ngrando\OneDrive - Engineering Ingegneria Informatica S.p.A\Solution - Documenti\Clienti\01 Amministrazione\HISTORY.xlsx"
 
+app = Flask(__name__, static_folder=os.path.join(RES_DIR, "static"), static_url_path="/static")
+_cache = {"v": None, "path": None, "data": None}
+_store = {"obj": None}
 
-# ------------------------------------------------------------------ config e dati
+
+# ------------------------------------------------------------------ config, database, dati
 
 def load_config():
     try:
@@ -43,22 +50,39 @@ def excel_path():
     return p if os.path.isfile(p) else None
 
 
-def get_data(force=False):
+def db_path():
+    return load_config().get("db_path") or DEFAULT_DB
+
+
+def store():
+    p = db_path()
+    if _store["obj"] is None or _store["obj"].path != p:
+        _store["obj"] = Store(p)
+    return _store["obj"]
+
+
+def do_import():
     p = excel_path()
     if not p:
         raise FileNotFoundError("File Excel non configurato o non trovato")
-    st = os.stat(p)
-    key = (p, st.st_mtime_ns, st.st_size)
-    if force or _cache["key"] != key:
-        _cache["data"] = read_workbook(p)
-        _cache["key"] = key
-        _cache["loaded"] = dt.datetime.now().isoformat(timespec="seconds")
+    store().import_all(read_excel(p), p)
+
+
+def get_data():
+    st = store()
+    if not st.has_data():
+        do_import()                                    # primo avvio: carica l'Excel nel database
+    if _cache["v"] != st.version or _cache["path"] != st.path:
+        _cache.update(data=st.load(), v=st.version, path=st.path)
+        _cache["loaded"] = st.meta("imported_at")
     return _cache["data"]
 
 
 def writer():
-    cfg = load_config()
-    return get_writer(excel_path(), BACKUP_DIR, cfg.get("writer", "auto"))
+    p = excel_path()
+    if not p:
+        raise FileNotFoundError("File Excel non trovato: controlla il percorso nelle Impostazioni")
+    return get_writer(p, BACKUP_DIR, load_config().get("writer", "auto"))
 
 
 @app.errorhandler(Exception)
@@ -90,20 +114,28 @@ def favicon():
 @app.get("/api/state")
 def state():
     cfg = load_config()
-    p = cfg.get("excel_path") or DEFAULT_EXCEL_PATH
-    return jsonify({"path": p, "exists": bool(excel_path()), "loaded": _cache.get("loaded"), "writer": cfg.get("writer", "auto"), "oggi": dt.date.today().isoformat()})
+    st = store()
+    return jsonify({"path": cfg.get("excel_path") or DEFAULT_EXCEL_PATH, "excel_ok": bool(excel_path()), "db_path": st.path,
+                    "exists": bool(excel_path()) or st.has_data(), "imported": st.has_data(), "imported_at": st.meta("imported_at"),
+                    "pending": st.counts(), "oggi": dt.date.today().isoformat()})
 
 
 @app.post("/api/config")
 def set_config():
-    p = (request.json or {}).get("excel_path", "").strip().strip('"')
-    if not os.path.isfile(p):
-        raise FileNotFoundError(f"File non trovato: {p}")
+    b = request.json or {}
     cfg = load_config()
-    cfg["excel_path"] = p
+    if "excel_path" in b:
+        p = (b["excel_path"] or "").strip().strip('"')
+        if not os.path.isfile(p):
+            raise FileNotFoundError(f"File non trovato: {p}")
+        cfg["excel_path"] = p
+    if b.get("db_path"):
+        d = b["db_path"].strip().strip('"')
+        if not os.path.isdir(os.path.dirname(os.path.abspath(d))):
+            raise FileNotFoundError(f"La cartella del database non esiste: {os.path.dirname(d)}")
+        cfg["db_path"] = d
     save_config(cfg)
-    _cache["key"] = None
-    read_workbook(p)  # fallisce subito se il formato non è quello atteso
+    _cache["v"] = None
     return jsonify({"ok": True})
 
 
@@ -124,8 +156,7 @@ def browse():
 
 @app.get("/api/data")
 def data():
-    force = request.args.get("force") == "1"
-    d = get_data(force)
+    d = get_data()
     rows = d["rows"]
     solutions = {}
     for r in rows:
@@ -136,7 +167,7 @@ def data():
         if r["Cliente"]:
             clienti[logic.client_key(r["Cliente"])] = {"Cliente": r["Cliente"], "Vertical": r["Vertical"], "Market": r["Market"]}
     dom = d["domini"]
-    return jsonify({"rows": rows, "loaded": _cache.get("loaded"),
+    return jsonify({"rows": rows, "loaded": _cache.get("loaded"), "pending": store().counts(),
                     "domini": {"vertical": dom["vertical"], "market": dom["market"], "tipo": dom["tipo"], "stato": logic.STATI,
                                "solutions": sorted(solutions.values(), key=str.casefold), "clienti": sorted(clienti.values(), key=lambda c: c["Cliente"].casefold())}})
 
@@ -149,7 +180,7 @@ def dashboard():
     return jsonify(logic.dashboard(d["rows"], d["domini"], dt.date.today(), months))
 
 
-# ------------------------------------------------------------------ inserimento / modifica
+# ------------------------------------------------------------------ inserimento / modifica (solo database locale)
 
 REQUIRED_NEW = ["Cliente", "Vertical", "Market", "Oggetto", "tipo", "Data ins.", "Stato"]
 
@@ -202,28 +233,77 @@ def create_row():
     dup = [r for r in d["rows"] if r["_sig"] == row_sig(vals["Cliente"], vals["Oggetto"], vals["Data ins."])]
     if dup and not b.get("_force"):
         return jsonify({"error": f"Esiste già una riga identica (Seq {dup[0]['Seq']}). Salva comunque?", "duplicato": True}), 409
-    row = writer().append(vals)
-    _cache["key"] = None
-    return jsonify({"ok": True, "row": row, "ss": vals.get("SS")})
+    rid = store().insert(vals)
+    return jsonify({"ok": True, "id": rid})
 
 
-@app.put("/api/rows/<int:row>")
-def update_row(row):
+@app.put("/api/rows/<int:rid>")
+def update_row(rid):
     b = request.json or {}
     d = get_data()
-    cur = next((r for r in d["rows"] if r["_row"] == row), None)
+    cur = next((r for r in d["rows"] if r["_row"] == rid), None)
     if not cur:
-        raise ValueError("Riga non trovata, ricarica i dati")
+        raise ValueError("Riga non trovata, aggiorna i dati")
     vals = _sanitize(b.get("changes", {}), d["domini"])
     changes = {f: v for f, v in vals.items() if (v or None) != (cur.get(f) or None)}
     if not changes:
         return jsonify({"ok": True, "nessuna_modifica": True})
-    writer().update_many([(row, b.get("sig") or cur["_sig"], changes)])
-    _cache["key"] = None
+    store().update(rid, changes)
     return jsonify({"ok": True})
 
 
-# ------------------------------------------------------------------ pulizia
+@app.delete("/api/rows/<int:rid>")
+def delete_row(rid):
+    store().delete(rid)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/rows/<int:rid>/revert")
+def revert_row(rid):
+    store().revert(rid)
+    return jsonify({"ok": True})
+
+
+# ------------------------------------------------------------------ import / export
+
+@app.post("/api/import")
+def import_now():
+    st = store()
+    pend = st.counts()
+    n = pend["new"] + pend["mod"]
+    if n and not (request.json or {}).get("force"):
+        return jsonify({"error": f"Ci sono {n} modifiche non ancora esportate: l'aggiornamento le elimina.", "conferma": True, "pending": pend}), 409
+    backup = st.backup(BACKUP_DIR) if n else None
+    do_import()
+    return jsonify({"ok": True, "backup": backup, "righe": len(get_data()["rows"])})
+
+
+@app.get("/api/pending")
+def pending():
+    p = store().pending_items()
+    rows = {r["_row"]: r for r in get_data()["rows"]}
+    nuove = [{"id": x["id"], "Cliente": x["values"].get("Cliente"), "Oggetto": x["values"].get("Oggetto"), "Stato": x["values"].get("Stato")} for x in p["new"]]
+    mod = [{"id": x["id"], "xl": x["xl"], "Cliente": x["cliente"], "Oggetto": x["oggetto"],
+            "campi": [{"campo": f, "prima": x["before"].get(f), "dopo": v} for f, v in x["changes"].items()]} for x in p["mod"]]
+    return jsonify({"nuove": nuove, "modificate": mod})
+
+
+@app.post("/api/export")
+def export_now():
+    st = store()
+    p = st.pending_items()
+    if not p["new"] and not p["mod"]:
+        raise ValueError("Non c'è niente da esportare")
+    rows = writer().export([x["values"] for x in p["new"]], [(x["xl"], x["sig"], x["changes"]) for x in p["mod"]])
+    avviso = None
+    try:
+        do_import()                                    # rilegge l'Excel: il database torna identico al file
+    except Exception as e:
+        avviso = f"Esportazione riuscita, ma non sono riuscito a rileggere il file: {e}. Premi “Aggiorna dall'Excel”."
+    return jsonify({"ok": True, "nuove": len(p["new"]), "modificate": len(p["mod"]), "righe": rows, "avviso": avviso})
+
+
+# ------------------------------------------------------------------ pulizia (solo suggerimenti)
 
 @app.get("/api/clean/preview")
 def clean_preview():
@@ -236,24 +316,6 @@ def clean_summary():
     return jsonify(logic.normalization_summary(get_data()["rows"]))
 
 
-@app.post("/api/clean/apply")
-def clean_apply():
-    items = (request.json or {}).get("items", [])
-    d = get_data()
-    cur = {r["_row"]: r for r in d["rows"]}
-    grouped = {}
-    for it in items:
-        r = cur.get(it["row"])
-        if not r:
-            continue
-        grouped.setdefault(it["row"], (it["sig"], {}))[1][it["field"]] = it["new"]
-    if not grouped:
-        raise ValueError("Niente da applicare")
-    writer().update_many([(row, sig, ch) for row, (sig, ch) in grouped.items()])
-    _cache["key"] = None
-    return jsonify({"ok": True, "righe": len(grouped), "modifiche": len(items)})
-
-
 # ------------------------------------------------------------------ avvio
 
 def main():
@@ -262,6 +324,7 @@ def main():
     print("=" * 60)
     print(" Gare & Offerte — app avviata")
     print(f" Apri il browser su {url}")
+    print(f" Database locale: {db_path()}")
     print(" Per chiudere l'app chiudi questa finestra.")
     print("=" * 60)
     if not os.environ.get("GARE_NO_BROWSER"):

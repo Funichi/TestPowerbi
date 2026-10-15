@@ -32,7 +32,8 @@
     <header class="top">
       <div class="top-t"><h1 id="page-title">Cruscotto</h1><div id="page-sub" class="sub0"></div></div>
       <div class="actions">
-        <button id="btn-reload" class="btn-sec" title="Rilegge il file Excel"><i data-ico="refresh-cw"></i>Ricarica</button>
+        <button id="btn-reload" class="btn-sec" title="Svuota il database locale e lo ricarica dal file Excel"><i data-ico="refresh-cw"></i>Aggiorna dall'Excel</button>
+        <button id="btn-export" class="btn-sec" title="Scrive nel file Excel le righe nuove e le modifiche fatte qui"><i data-ico="upload"></i>Esporta in Excel<span class="cnt-badge" id="exp-n" hidden></span></button>
         <button id="btn-new" class="primary"><i data-ico="plus"></i>Nuova offerta</button>
       </div>
     </header>
@@ -41,7 +42,7 @@
 </div>
 <div id="modal-root"></div>
 <div id="toast" class="toast" hidden></div>
-<div id="busy" class="busy" hidden><div>Salvataggio nell'Excel…</div></div>
+<div id="busy" class="busy" hidden><div id="busy-t">Un momento…</div></div>
 <script src="/static/icons.js"></script>
 <script src="/static/app.js"></script>
 </body>
