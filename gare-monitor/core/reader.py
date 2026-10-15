@@ -8,6 +8,8 @@ import warnings
 
 import openpyxl
 
+from .normalize import normalize_rows
+
 SHEET_MAIN = "gare e offerte"
 SHEET_DOMINI = "Domini"
 
@@ -93,7 +95,9 @@ def read_workbook(path):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             wb = openpyxl.load_workbook(copy, data_only=True)
-        return {"rows": _read_rows(wb[SHEET_MAIN]), "domini": _read_domini(wb[SHEET_DOMINI] if SHEET_DOMINI in wb.sheetnames else None)}
+        rows = _read_rows(wb[SHEET_MAIN])
+        domini = _read_domini(wb[SHEET_DOMINI] if SHEET_DOMINI in wb.sheetnames else None)
+        return {"rows": normalize_rows(rows, domini), "domini": domini}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -127,6 +131,7 @@ def _read_rows(ws):
             else:
                 row[f] = clean_text(v)
         row["_invalid_dates"] = invalid
+        row["_raw"] = {k: (str(raw[k]) if raw.get(k) is not None else None) for k in ("Stato", "Market") if k in raw}
         row["_sig"] = row_sig(raw.get("Cliente"), raw.get("Oggetto"), raw.get("Data ins."))
         rows.append(row)
     return rows

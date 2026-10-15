@@ -1,11 +1,11 @@
 "use strict";
-const STATI = ["WIP", "Waiting For response", "Sospeso", "Won", "Lost", "NoBID"];
-const BCLASS = {"WIP": "WIP", "Waiting For response": "Waiting", "Sospeso": "Sospeso", "Won": "Won", "Lost": "Lost", "NoBID": "NoBID"};
-const COLOR = {"WIP": "var(--st-wip)", "Waiting For response": "var(--st-waiting)", "Sospeso": "var(--st-sospeso)", "Won": "var(--st-won)", "Lost": "var(--st-lost)", "NoBID": "var(--st-nobid)", "Altro": "var(--st-altro)"};
-const STATO_COL = {"WIP": "s-WIP", "Waiting For response": "s-Waiting", "Won": "s-Won", "Lost": "s-Lost", "Altro": "s-Altro"};
-const S = {data: null, dash: null, view: "dash", months: "12", trendMode: "inserite", pipeBy: "market",
+const STATI = ["WIP", "Waiting For response", "Sospeso", "Won", "Lost", "NoBID", "Closed"];
+const BCLASS = {"WIP": "WIP", "Waiting For response": "Waiting", "Sospeso": "Sospeso", "Won": "Won", "Lost": "Lost", "NoBID": "NoBID", "Closed": "Closed"};
+const COLOR = {"WIP": "var(--st-wip)", "Waiting For response": "var(--st-waiting)", "Sospeso": "var(--st-sospeso)", "Won": "var(--st-won)", "Lost": "var(--st-lost)", "NoBID": "var(--st-nobid)", "Closed": "var(--st-closed)", "Altro": "var(--st-altro)"};
+const STATO_COL = {"WIP": "s-WIP", "Waiting For response": "s-Waiting", "Won": "s-Won", "Lost": "s-Lost", "NoBID": "s-NoBID", "Sospeso": "s-Sospeso", "Closed": "s-Closed", "Altro": "s-Altro"};
+const S = {data: null, dash: null, view: "dash", months: "12", trendSeries: "inserite", trendCum: true, pipeBy: "market",
   filt: {q: "", stato: "", vertical: "", market: "", solution: "", anno: ""}, sort: {k: "Data ins.", dir: -1}, clean: null, state: null};
-const EMPTY_FILT = () => ({q: "", stato: "", vertical: "", market: "", solution: "", anno: ""});
+const EMPTY_FILT = () => ({q: "", stato: "", vertical: "", market: "", tipo: "", solution: "", anno: "", rows: null, rowsLabel: ""});
 
 // icone Lucide (definite in icons.js)
 const ico = n => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ""}</svg>`;
@@ -19,7 +19,7 @@ const TITLES = {
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const fmt = iso => iso ? iso.split("-").reverse().join("/") : "";
-const normStato = s => { const m = {"closed": "Sospeso", "no bid": "NoBID", "no-bid": "NoBID", "nobid": "NoBID", "waiting": "Waiting For response"}; const k = (s || "").trim().toLowerCase(); return STATI.find(x => x.toLowerCase() === k) || m[k] || s; };
+const normStato = s => { const m = {"closed": "Closed", "no bid": "NoBID", "no-bid": "NoBID", "nobid": "NoBID", "waiting": "Waiting For response"}; const k = (s || "").trim().toLowerCase(); return STATI.find(x => x.toLowerCase() === k) || m[k] || s; };
 const badge = s => s ? `<span class="badge b-${BCLASS[normStato(s)] || "x"}">${esc(s)}</span>` : "";
 const splitSol = v => (v || "").split(/\s*[\/,+&;]\s*/).map(x => x.trim()).filter(Boolean);
 const nil = () => `<span class="nil">—</span>`;
@@ -28,6 +28,7 @@ const num = n => Number(n).toLocaleString("it-IT");
 const TIPO_SHORT = {"Offerta diretta": "Offerta", "Incontro Cliente": "Incontro", "Incontro Interno": "Interno", "Gara sotto AQ": "Gara AQ", "Gara": "Gara", "RFI": "RFI", "Manif. Interesse": "Manif."};
 const tipoChip = t => t ? `<span class="tchip" title="${esc(t)}">${esc(TIPO_SHORT[t] || t)}</span>` : nil();
 const NOIND = "(non indicato)";
+const TIPI_MAIN = ["Gara", "Gara sotto AQ", "Offerta diretta", "Incontro Cliente", "RFI"];
 
 // chip dei filtri attivi, rimovibili
 function chipsHtml(items) {
@@ -79,73 +80,80 @@ function render() {
 
 // ------------------------------------------------------------ cruscotto
 const PERIODS = [["6", "Ultimi 6 mesi"], ["12", "Ultimi 12 mesi"], ["24", "Ultimi 24 mesi"], ["all", "Tutto lo storico"]];
-const periodText = () => S.months === "all" ? "tutto lo storico" : `ultimi ${S.months} mesi`;
-function delta(cur, prev, kind) {
-  if (cur === null || cur === undefined || prev === null || prev === undefined) return "";
-  if (kind === "pt") { const d = Math.round((cur - prev) * 1000) / 10; return d ? `<span class="d" title="rispetto al periodo precedente">${d > 0 ? "▲" : "▼"} ${Math.abs(d).toLocaleString("it-IT")} pt</span>` : `<span class="d">= invariato</span>`; }
-  const d = cur - prev; if (!d) return `<span class="d">= invariato</span>`;
-  return `<span class="d" title="rispetto al periodo precedente (${prev})">${d > 0 ? "▲" : "▼"} ${Math.abs(d)}${prev ? ` (${Math.abs(Math.round(100 * d / prev))}%)` : ""}</span>`;
-}
+const MESI = ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"];
 const kpi = (n, label, extra = "", cls = "", attrs = "") => `<div class="card kpi ${cls}" ${attrs}><div class="n">${n}${extra}</div><div class="l">${label}</div></div>`;
-function dayLabel(g) { return g < 0 ? `<span class="tag late">scaduta da ${-g} gg</span>` : g === 0 ? `<span class="tag late">oggi</span>` : `<span class="tag soon">tra ${g} gg</span>`; }
+function ytdDelta(cur, prev, anno) {
+  if (!prev) return `<span class="d" title="nessun dato nello stesso periodo del ${anno}">n.d. vs ${anno}</span>`;
+  const d = cur - prev; if (!d) return `<span class="d">= invariato vs ${anno}</span>`;
+  return `<span class="d" title="${cur} contro ${prev} nello stesso periodo del ${anno}">${d > 0 ? "▲" : "▼"} ${Math.abs(Math.round(100 * d / prev))}% vs ${anno}</span>`;
+}
 function miniTable(items, cols) {
   if (!items.length) return `<div class="empty">Nessuna voce.</div>`;
   return `<div class="tscroll"><table><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead><tbody>${items.map(x => `<tr class="click" data-row="${x._row}">${cols.map(c => `<td>${c[1](x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 const offer = x => `<div class="offer"><b>${esc(x.Cliente)}</b><span>${esc((x.Oggetto || "").slice(0, 90))}</span></div>`;
+const legendItem = s => `<span><i style="background:${COLOR[s]}"></i>${s === "Altro" ? "Sospeso / NoBID / Closed" : s === "Waiting For response" ? "Waiting" : s}</span>`;
 
 function hbars(groups) {
   if (!groups.length) return `<div class="empty">Nessun dato.</div>`;
   const mx = Math.max(...groups.map(g => g.totale)), segs = ["WIP", "Waiting For response", "Won", "Lost", "Altro"];
   return `<div class="hb">${groups.map(g => `<div class="hn cl" title="${esc(g.nome)}" data-grp="${esc(g.nome)}">${esc(g.nome)}</div><div class="hbwrap"><div class="hbar" style="width:${(100 * g.totale / mx).toFixed(1)}%">${segs.map(s => g[s] ?
-    `<i class="${STATO_COL[s]}" style="width:${(100 * g[s] / g.totale).toFixed(2)}%" data-grp="${esc(g.nome)}" data-st="${s}" title="${esc(g.nome)} · ${s === "Altro" ? "Sospeso / NoBID" : s}: ${g[s]}">${g[s] / g.totale >= .1 ? g[s] : ""}</i>` : "").join("")}</div><span class="ht-n">${g.totale}</span></div>`).join("")}</div>
-    <div class="legend">${segs.map(s => `<span><i style="background:${COLOR[s]}"></i>${s === "Altro" ? "Sospeso / NoBID" : s === "Waiting For response" ? "Waiting" : s}</span>`).join("")}</div>`;
+    `<i class="${STATO_COL[s]}" style="width:${(100 * g[s] / g.totale).toFixed(2)}%" data-grp="${esc(g.nome)}" data-st="${s}" title="${esc(g.nome)} · ${s === "Altro" ? "Sospeso / NoBID / Closed" : s}: ${g[s]}">${g[s] / mx >= .06 ? g[s] : ""}</i>` : "").join("")}</div><span class="ht-n">${g.totale}</span></div>`).join("")}</div>
+    <div class="legend">${segs.map(legendItem).join("")}</div>`;
 }
-function winrateRows(list) {
-  if (!list.length) return `<div class="empty">Nessuna offerta chiusa nel periodo.</div>`;
-  return list.map(x => `<div class="wr"><div class="hn" title="${esc(x.nome)}">${esc(x.nome)}</div><div class="track" role="img" aria-label="${Math.round(x.rate * 100)}%"><i style="width:${(100 * x.rate).toFixed(1)}%"></i></div><div class="v"><b>${Math.round(x.rate * 100)}%</b> (${x.won} su ${x.chiuse})</div></div>`).join("");
+const ESITO_SEGS = ["Won", "Lost", "NoBID", "Waiting For response", "WIP", "Sospeso", "Closed"];
+function esitoRows(list, minChiuse) {
+  if (!list.length) return `<div class="empty">Nessuna offerta nel periodo.</div>`;
+  const mx = Math.max(...list.map(g => g.totale));
+  return `<div class="eb">${list.map(g => `<div class="hn cl" title="${esc(g.nome)}" data-tipo="${esc(g.nome)}">${esc(g.nome)}</div><div class="hbwrap"><div class="hbar" style="width:${(100 * g.totale / mx).toFixed(1)}%">${ESITO_SEGS.map(s => g[s] ?
+    `<i class="${STATO_COL[s]}" style="width:${(100 * g[s] / g.totale).toFixed(2)}%" data-tipo="${esc(g.nome)}" data-st="${s}" title="${esc(g.nome)} · ${s}: ${g[s]}">${g[s] / mx >= .06 ? g[s] : ""}</i>` : "").join("")}</div><span class="ht-n">${g.totale}</span></div>
+    <div class="erate">${g.rate === null ? `<b class="nil">—</b><span>pochi dati</span>` : `<b>${Math.round(g.rate * 100)}%</b><span>${g.Won} su ${g.chiuse} chiuse</span>`}</div>`).join("")}</div>
+    <div class="legend">${ESITO_SEGS.map(legendItem).join("")}</div><div class="hint">Win rate = Won / (Won + Lost); mostrato solo con almeno ${minChiuse} offerte chiuse. Closed non rientra nel calcolo.</div>`;
 }
+function etaCard(e) {
+  const mx = Math.max(1, ...e.fasce.map(f => f.n)), over = e.oltre180;
+  const frase = e.totale === 0 ? "Nessuna offerta in attesa di risposta."
+    : over ? `<b>${num(over)}</b> offerte attendono risposta da oltre 6 mesi: valutare il passaggio a Sospeso.` : "Nessuna offerta attende risposta da oltre 6 mesi.";
+  return `<div class="age">${e.fasce.map(f => `<button class="arow ${f.n ? "" : "zero"}" data-age="${f.k}" ${f.n ? "" : "disabled"} title="Apri in Tabella le ${f.n} offerte"><span class="an">${f.label}</span><span class="atrack"><i class="age-${f.k.replace("+", "p")}" style="width:${(100 * f.n / mx).toFixed(1)}%"></i></span><span class="av">${num(f.n)}</span></button>`).join("")}</div>
+    <p class="age-sum">${frase}${e.mancante ? ` ${num(e.mancante)} senza data.` : ""}</p>
+    <div class="hint">Giorni da Data consegna (se manca, da Data ins.). Solo stato Waiting For response.</div>`;
+}
+
 function renderDash(m) {
-  const d = S.dash, t = d.tiles, so = d.soglie, k = d.kpi.periodo, p = d.kpi.precedente;
+  const d = S.dash, k = d.kpi, pl = d.pillole, so = d.soglie, t = d.trend;
   const chips = S.months !== "12" ? [{id: "period", label: PERIODS.find(x => x[0] === S.months)[1]}] : [];
   const pb = S.pipeBy === "market" ? d.pipeline_market : d.pipeline_vertical;
-  $("#page-sub").textContent = `Oggi ${fmt(d.oggi)} · periodo: ${periodText()}`;
+  const w12 = k.winrate12;
+  $("#page-sub").textContent = `Oggi ${fmt(d.oggi)} · KPI e trend sull'anno solare ${k.anno}`;
   m.innerHTML = `
   <div class="fbar"><div><label for="period">Periodo</label><select id="period">${PERIODS.map(([v, l]) => `<option value="${v}" ${S.months === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-    <div class="fbar-r">WIP: tutte le offerte in corso · il resto segue il periodo (per Data ins.)</div></div>
+    <div class="fbar-r">Il periodo vale solo per Pipeline per Market ed Esito per tipo</div></div>
   <div id="f-chips">${chipsHtml(chips)}</div>
   <div class="kpis">
-    ${kpi(num(t.wip), "In corso (WIP)", "", "click", 'data-view="wip"')}
-    ${kpi(num(t.waiting), "In attesa di risposta", "", "click", 'data-go="Waiting For response"')}
-    ${kpi(num(k.inserite), `Offerte inserite · ${periodText()}`, delta(k.inserite, p && p.inserite))}
-    ${kpi(num(k.won), `Won · ${periodText()}`, delta(k.won, p && p.won))}
-    ${kpi(k.winrate === null ? "—" : Math.round(k.winrate * 100) + "%", `Win rate · ${k.won} Won su ${k.won + k.lost} chiuse`, delta(k.winrate, p && p.winrate, "pt"), "key")}
+    ${kpi(num(k.wip), "In corso (WIP)", "", "click", 'data-wipgo="all"')}
+    ${kpi(num(k.waiting), "In attesa di risposta", "", "click", 'data-go="Waiting For response"')}
+    ${kpi(num(k.inserite_ytd.cur), `Offerte inserite ${k.anno} (da inizio anno)`, ytdDelta(k.inserite_ytd.cur, k.inserite_ytd.prev, k.prec))}
+    ${kpi(num(k.won_ytd.cur), `Won ${k.anno} (da inizio anno)`, ytdDelta(k.won_ytd.cur, k.won_ytd.prev, k.prec))}
+    ${kpi(w12.rate === null ? "—" : Math.round(w12.rate * 100) + "%", `Win rate ultimi 12 mesi · ${w12.won} su ${w12.chiuse} chiuse`, "", "key")}
   </div>
   <div class="alerts">
-    <span class="apill" data-scroll="sec-scad"><i style="background:var(--urg-late)"></i><b>${t.scadute}</b> consegne scadute</span>
-    <span class="apill" data-scroll="sec-scad"><i style="background:var(--urg-week)"></i><b>${t.imminenti}</b> entro ${so.scadenza} gg</span>
-    <span class="apill" data-scroll="sec-soll"><i style="background:var(--urg-two)"></i><b>${t.solleciti}</b> da sollecitare</span>
-    <span class="apill" data-scroll="sec-att"><i style="background:var(--accent)"></i><b>${t.attenzioni}</b> punti di attenzione</span>
+    <button class="apill" data-wipgo="late"><i style="background:var(--urg-late)"></i><b>${pl.scadute}</b> consegne scadute</button>
+    <button class="apill" data-wipgo="d7"><i style="background:var(--urg-week)"></i><b>${pl.imminenti}</b> entro ${so.scadenza} gg</button>
+    <button class="apill" data-solleciti="1"><i style="background:var(--urg-two)"></i><b>${pl.solleciti.length}</b> da sollecitare</button>
+    <button class="apill" data-scroll="sec-att"><i style="background:var(--accent)"></i><b>${pl.attenzioni}</b> punti di attenzione</button>
   </div>
   <div class="g12">
-    <div class="card c6" id="sec-scad"><h2>Scadenze</h2><div class="sub">Offerte in corso (WIP) con consegna scaduta o entro ${so.scadenza} giorni.</div>
-      ${miniTable(d.scadenze, [["Quando", x => dayLabel(x.giorni) + `<span class="sm">${fmt(x["Data consegna"])}</span>`], ["Offerta", offer], ["Solution", x => orNil(x["Solution D&A"])]])}</div>
-    <div class="card c6" id="sec-soll"><h2>Da sollecitare</h2><div class="sub">Consegnate (Waiting For response) da ${so.sollecito}–${so.riclassifica} giorni dalla Data ins.</div>
-      ${miniTable(d.solleciti, [["Giorni", x => `<span class="tag d-two">${x.giorni} gg</span><span class="sm">${fmt(x["Data ins."])}</span>`], ["Offerta", offer], ["Solution", x => orNil(x["Solution D&A"])]])}
-      <details><summary>Oltre ${so.riclassifica} giorni <span class="cnt">— ${d.riclassificare.length} nel periodo (${d.riclassificare_totale} in tutto): probabili Sospeso</span></summary>
-      ${miniTable(d.riclassificare, [["Giorni", x => `${x.giorni} gg`], ["Offerta", offer], ["Solution", x => orNil(x["Solution D&A"])]])}</details></div>
+    <div class="card c8"><div class="card-h"><div><h2>Trend anno su anno</h2><div class="sub">${k.anno} contro ${k.prec}, per mese di Data ins.</div></div>
+      <div class="row"><div class="seg"><button data-ts="inserite" class="${S.trendSeries === "inserite" ? "on" : ""}">Inserite</button><button data-ts="won" class="${S.trendSeries === "won" ? "on" : ""}">Won</button></div>
+      <div class="seg"><button data-tc="0" class="${S.trendCum ? "" : "on"}">Mensile</button><button data-tc="1" class="${S.trendCum ? "on" : ""}">Cumulato</button></div></div></div>
+      <div id="yoy" class="yoy"></div></div>
+    <div class="card c4"><h2>Età delle offerte in attesa</h2><div class="sub">Quanto aspettiamo una risposta</div>${etaCard(d.eta_attesa)}</div>
   </div>
   <div class="g12">
-    <div class="card c8"><div class="card-h"><div><h2>Pipeline per ${S.pipeBy === "market" ? "Market" : "Vertical"}</h2><div class="sub">Numero di offerte per stato. Clicca una barra per vedere l'elenco.</div></div>
+    <div class="card c7"><div class="card-h"><div><h2>Pipeline per ${S.pipeBy === "market" ? "Market" : "Vertical"}</h2><div class="sub">Numero di offerte per stato. Clicca una barra per vedere l'elenco.</div></div>
       <div class="seg"><button data-pb="market" class="${S.pipeBy === "market" ? "on" : ""}">Market</button><button data-pb="vertical" class="${S.pipeBy === "vertical" ? "on" : ""}">Vertical</button></div></div>
       ${hbars(pb)}</div>
-    <div class="card c4"><h2>Win rate per Market</h2><div class="sub">Solo offerte chiuse (Won + Lost) nel periodo.</div>${winrateRows(d.winrate_market)}</div>
-  </div>
-  <div class="g12">
-    <div class="card c8"><div class="card-h"><div><h2>Trend mensile</h2><div class="sub">Per mese di Data ins. (inserite) o Data consegna (consegnate)</div></div>
-      <div class="seg"><button data-tm="inserite" class="${S.trendMode === "inserite" ? "on" : ""}">Inserite</button><button data-tm="consegnate" class="${S.trendMode === "consegnate" ? "on" : ""}">Consegnate</button></div></div>
-      <div id="trend"></div></div>
-    <div class="card c4"><h2>Offerte per stato</h2><div class="sub">Nel periodo scelto</div><div id="donut" class="donut"></div></div>
+    <div class="card c5"><h2>Esito per tipo</h2><div class="sub">Offerte per stato e win rate del tipo, nel periodo scelto.</div>${esitoRows(d.esito_tipo, so.min_chiuse)}</div>
   </div>
   <div class="card" id="sec-att"><h2>Punti di attenzione</h2><div class="sub">Dati mancanti o anomali da sistemare.</div>
     ${d.attenzioni.length ? d.attenzioni.map(a => `<details><summary>${esc(a.titolo)} <span class="cnt">(${a.righe.length})</span></summary>${miniTable(a.righe, [["Seq", x => x.Seq], ["Offerta", offer], ["Stato", x => badge(x.Stato)], ["Data ins.", x => fmt(x["Data ins."])], ["", x => esc(x.dettaglio || "")]])}</details>`).join("") : `<div class="empty">Tutto in ordine.</div>`}</div>`;
@@ -154,38 +162,56 @@ function renderDash(m) {
   bindChips(m, () => setPeriod("12"), () => setPeriod("12"));
   m.querySelectorAll("tr[data-row]").forEach(tr => tr.onclick = () => openForm(rowByNum(+tr.dataset.row)));
   m.querySelectorAll(".kpi[data-go]").forEach(c => c.onclick = () => goTable({stato: c.dataset.go}));
-  m.querySelectorAll(".kpi[data-view]").forEach(c => c.onclick = () => { S.view = c.dataset.view; render(); });
+  m.querySelectorAll("[data-wipgo]").forEach(c => c.onclick = () => goWip({band: c.dataset.wipgo === "all" ? "" : c.dataset.wipgo}));
+  m.querySelectorAll("[data-solleciti]").forEach(c => c.onclick = () => goTable({rows: pl.solleciti, rowsLabel: `Da sollecitare (${pl.solleciti.length})`}));
   m.querySelectorAll("[data-scroll]").forEach(c => c.onclick = () => document.getElementById(c.dataset.scroll).scrollIntoView({behavior: "smooth"}));
   m.querySelectorAll(".hb [data-grp]").forEach(c => c.onclick = () => goTable({[S.pipeBy]: c.dataset.grp, stato: c.dataset.st && c.dataset.st !== "Altro" ? c.dataset.st : ""}));
+  m.querySelectorAll(".eb [data-tipo]").forEach(c => c.onclick = () => goTable({tipo: c.dataset.tipo === "Altro" ? "__altro" : c.dataset.tipo, stato: c.dataset.st || ""}));
+  m.querySelectorAll("[data-age]").forEach(c => c.onclick = () => { const f = d.eta_attesa.fasce.find(x => x.k === c.dataset.age); goTable({rows: f.rows, rowsLabel: `In attesa ${f.label} (${f.n})`}); });
   m.querySelectorAll("[data-pb]").forEach(b => b.onclick = () => { S.pipeBy = b.dataset.pb; render(); });
-  m.querySelectorAll("[data-tm]").forEach(b => b.onclick = () => { S.trendMode = b.dataset.tm; render(); });
-  drawTrend($("#trend"), d.trend);
-  drawDonut($("#donut"), d.stati);
+  m.querySelectorAll("[data-ts]").forEach(b => b.onclick = () => { S.trendSeries = b.dataset.ts; render(); });
+  m.querySelectorAll("[data-tc]").forEach(b => b.onclick = () => { S.trendCum = b.dataset.tc === "1"; render(); });
+  drawYoy($("#yoy"), t);
 }
-function drawDonut(el, st) {
-  const tot = STATI.reduce((a, s) => a + (st[s] || 0), 0), R = 70, C = 2 * Math.PI * R, gap = tot > 0 ? 3 : 0;
-  let off = 0, arcs = "";
-  STATI.forEach(s => { const v = st[s] || 0; if (!v) return; const len = Math.max(C * v / tot - gap, 1);
-    arcs += `<circle cx="100" cy="100" r="${R}" fill="none" stroke="${COLOR[s]}" stroke-width="20" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 100 100)"><title>${s}: ${v}</title></circle>`; off += C * v / tot; });
-  el.innerHTML = `<svg viewBox="0 0 200 200" role="img" aria-label="Offerte per stato"><circle cx="100" cy="100" r="${R}" fill="none" stroke="var(--chart-grid)" stroke-width="20"/>${arcs}
-    <text x="100" y="104" text-anchor="middle" style="font-size:30px;font-weight:600;fill:var(--text)">${num(tot)}</text><text x="100" y="124" text-anchor="middle">offerte</text></svg>
-    <div class="dl">${STATI.map(s => `<div><i style="background:${COLOR[s]}"></i>${s === "Waiting For response" ? "Waiting" : s}<b>${num(st[s] || 0)}</b></div>`).join("")}</div>`;
-}
-function drawTrend(el, tr) {
-  const W = 640, H = 280, L = 30, B = 28, T = 18, n = tr.mesi.length, mode = S.trendMode;
-  const vals = mode === "inserite" ? tr.inserite.map(o => [...STATI, "Altro"].reduce((a, s) => a + (o[s] || 0), 0)) : tr.consegnate;
-  const max = Math.max(1, ...vals), nice = Math.ceil(max / 4) * 4 || 4, bw = (W - L - 6) / n, y = v => T + (H - T - B) * (1 - v / nice);
+
+// grafico a linee anno corrente vs anno precedente (12 mesi)
+function drawYoy(el, t) {
+  const W = 760, H = 310, L = 42, R = 92, T = 18, B = 32, N = 12, m = t.mese, ser = t[S.trendSeries];
+  const cum = a => { let s = 0; return a.map(v => s += v); };
+  const cur = (S.trendCum ? cum(ser.cur.slice(0, m)) : ser.cur.slice(0, m)), prev = S.trendCum ? cum(ser.prev) : ser.prev;
+  const max = Math.max(1, ...cur, ...prev), step = Math.max(1, Math.ceil(max / 4)), nice = step * 4;
+  const x = i => L + (W - L - R) * i / (N - 1), y = v => T + (H - T - B) * (1 - v / nice);
+  const pts = a => a.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
   let g = "";
-  for (let k = 0; k <= 4; k++) { const v = nice / 4 * k; g += `<line x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="var(--chart-grid)" stroke-width="1"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${Math.round(v)}</text>`; }
-  vals.forEach((v, i) => { const x = L + i * bw + bw * .2, w = bw * .6, fill = mode === "inserite" ? "var(--chart-main)" : "var(--chart-2)";
-    if (v) g += `<rect x="${x}" y="${y(v)}" width="${w}" height="${y(0) - y(v)}" fill="${fill}" rx="4"><title>${tr.mesi[i]}: ${v}</title></rect>`;
-    if (v && n <= 24) g += `<text x="${x + w / 2}" y="${y(v) - 5}" text-anchor="middle" style="fill:var(--text-2)">${v}</text>`;
-    if (n <= 14 || i % 2 === 0) g += `<text x="${x + w / 2}" y="${H - 8}" text-anchor="middle">${tr.mesi[i].slice(5)}/${tr.mesi[i].slice(2, 4)}</text>`; });
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Trend mensile: ${mode}">${g}</svg>`;
+  for (let k = 0; k <= 4; k++) g += `<line x1="${L}" x2="${W - R + 10}" y1="${y(step * k)}" y2="${y(step * k)}" stroke="var(--chart-grid)" stroke-width="1"/><text x="${L - 8}" y="${y(step * k) + 4}" text-anchor="end">${step * k}</text>`;
+  MESI.forEach((nm, i) => g += `<text x="${x(i)}" y="${H - 10}" text-anchor="middle">${nm}</text>`);
+  g += `<polyline points="${pts(prev).join(" ")}" fill="none" stroke="var(--chart-2)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const full = cur.slice(0, m - 1), last = cur.length - 1;
+  if (full.length > 1) g += `<polyline points="${pts(full).join(" ")}" fill="none" stroke="var(--chart-main)" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+  if (last >= 1) g += `<line x1="${x(last - 1)}" y1="${y(cur[last - 1])}" x2="${x(last)}" y2="${y(cur[last])}" stroke="var(--chart-main)" stroke-width="3.5" stroke-dasharray="2 6" stroke-linecap="round"/>`;
+  cur.forEach((v, i) => g += i === last ? `<circle cx="${x(i)}" cy="${y(v)}" r="5.5" fill="var(--card)" stroke="var(--chart-main)" stroke-width="2.5"><title>mese in corso: dato parziale</title></circle>` : `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="var(--chart-main)"/>`);
+  // etichette dirette a fine linea (anno e valore), spostate se si sovrappongono
+  let yc = y(cur[last]), yp = y(prev[N - 1]), xc = x(last) + 12, xp = x(N - 1) + 12;
+  if (last === N - 1 && Math.abs(yc - yp) < 16) { if (yc <= yp) yp = yc + 16; else yc = yp + 16; }
+  g += `<text x="${xc}" y="${yc + 4}" style="fill:var(--accent);font-weight:700;font-size:13px">${t.anno}: ${num(cur[last])}</text><text x="${xp}" y="${yp + 4}" style="fill:var(--text-2);font-weight:600;font-size:13px">${t.prec}: ${num(prev[N - 1])}</text>`;
+  const cw = (W - L - R) / (N - 1);
+  for (let i = 0; i < N; i++) g += `<rect class="hit" data-i="${i}" x="${x(i) - cw / 2}" y="${T}" width="${cw}" height="${H - T - B}" fill="transparent"/>`;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Trend ${S.trendSeries} ${t.anno} contro ${t.prec}">${g}</svg><div class="tip" hidden></div>
+    <div class="hint">${S.trendCum ? "Valori cumulati dall'inizio dell'anno." : "Valori del singolo mese."} Il mese in corso (${MESI[m - 1]}) è parziale: punto vuoto e tratteggio.</div>`;
+  const tip = $(".tip", el), svg = $("svg", el);
+  el.querySelectorAll(".hit").forEach(r => {
+    r.onmouseenter = () => {
+      const i = +r.dataset.i, a = i < m ? cur[i] : null, b = prev[i], diff = a === null ? "" : `<div>Differenza: <b>${a - b > 0 ? "+" : ""}${a - b}</b>${b ? ` (${a - b > 0 ? "+" : ""}${Math.round(100 * (a - b) / b)}%)` : ""}</div>`;
+      tip.innerHTML = `<b>${MESI[i]}${i === m - 1 ? " (parziale)" : ""}</b><div>${t.anno}: <b>${a === null ? "—" : a}</b></div><div>${t.prec}: <b>${b}</b></div>${diff}`;
+      tip.hidden = false;
+      const k = svg.getBoundingClientRect().width / W; tip.style.left = Math.min(x(i) * k + 14, svg.getBoundingClientRect().width - 170) + "px"; tip.style.top = "16px";
+    };
+    r.onmouseleave = () => tip.hidden = true;
+  });
 }
 
 // ------------------------------------------------------------ tabella
-function goTable(f) { S.filt = {...EMPTY_FILT(), ...f}; S.view = "table"; render(); }
+function goTable(f) { S.filt = {...EMPTY_FILT(), ...f, rows: f.rows ? new Set(f.rows) : null}; S.view = "table"; render(); }
 const COLDEFS = [
   {k: "Seq", l: "Seq", on: true}, {k: "Cliente", l: "Cliente", on: true}, {k: "Oggetto", l: "Oggetto", on: true}, {k: "Market", l: "Market", on: true},
   {k: "Vertical", l: "Vertical", on: false}, {k: "tipo", l: "Tipo", on: true}, {k: "Data ins.", l: "Data ins.", on: true}, {k: "Data consegna", l: "Consegna", on: true},
@@ -199,7 +225,7 @@ const CELLS = {
   "Seq": r => `<td>${esc(r.Seq)}</td>`,
   "Cliente": r => `<td class="cl">${orNil(r.Cliente)}</td>`,
   "Oggetto": r => `<td class="og" title="${esc(r.Oggetto)}">${orNil(r.Oggetto)}</td>`,
-  "Market": r => `<td>${orNil(r.Market)}</td>`,
+  "Market": r => `<td>${r.Market === NOIND ? `<span class="nil">${NOIND}</span>` : orNil(r.Market)}</td>`,
   "Vertical": r => `<td>${orNil(r.Vertical)}</td>`,
   "tipo": r => `<td>${tipoChip(r.tipo)}</td>`,
   "Data ins.": r => `<td>${r["Data ins."] ? fmt(r["Data ins."]) : nil()}</td>`,
@@ -213,7 +239,9 @@ function filteredRows() {
   return S.data.rows.filter(r => {
     if (f.stato && (normStato(r.Stato) !== f.stato)) return false;
     if (f.vertical && r.Vertical !== f.vertical) return false;
-    if (f.market && (f.market === NOIND ? r.Market : r.Market !== f.market)) return false;
+    if (f.market && r.Market !== f.market) return false;
+    if (f.rows && !f.rows.has(r._row)) return false;
+    if (f.tipo && (f.tipo === "__altro" ? TIPI_MAIN.includes(r.tipo) : r.tipo !== f.tipo)) return false;
     if (f.anno && (r["Data ins."] || "").slice(0, 4) !== f.anno) return false;
     if (f.solution) { const s = splitSol(r["Solution D&A"]).map(x => x.toLowerCase()); if (f.solution === "(non assegnata)" ? s.length : !s.includes(f.solution.toLowerCase())) return false; }
     if (q && ![r.Cliente, r.Oggetto, r.SS, r["Solution D&A"], r.Market, r.Note, r["Referenti vertical"]].some(v => (v || "").toLowerCase().includes(q))) return false;
@@ -223,11 +251,12 @@ function filteredRows() {
 function renderTable(m) {
   const d = S.data.domini, f = S.filt;
   const anni = [...new Set(S.data.rows.map(r => (r["Data ins."] || "").slice(0, 4)).filter(Boolean))].sort().reverse();
-  const markets = [...new Set([...d.market, ...S.data.rows.map(r => r.Market).filter(Boolean)])].sort((a, b) => a.localeCompare(b, "it"));
+  const markets = [...new Set([...d.market, ...S.data.rows.map(r => r.Market).filter(x => x && x !== NOIND)])].sort((a, b) => a.localeCompare(b, "it"));
   m.innerHTML = `<div class="fbar">
     <div class="grow"><label for="f-q">Cerca</label><input id="f-q" value="${esc(f.q)}" placeholder="cliente, oggetto, codice SS, solution…"></div>
     <div><label for="f-stato">Stato</label><select id="f-stato">${optionsHtml(STATI, f.stato)}</select></div>
     <div><label for="f-market">Market</label><select id="f-market">${optionsHtml([NOIND, ...markets], f.market)}</select></div>
+    <div><label for="f-tipo">Tipo</label><select id="f-tipo"><option value="">Tutti</option>${[...d.tipo, "__altro"].map(t => `<option value="${esc(t)}" ${f.tipo === t ? "selected" : ""}>${t === "__altro" ? "Altro" : esc(t)}</option>`).join("")}</select></div>
     <div><label for="f-vertical">Vertical</label><select id="f-vertical">${optionsHtml(d.vertical, f.vertical)}</select></div>
     <div><label for="f-solution">Solution</label><select id="f-solution">${optionsHtml(["(non assegnata)", ...d.solutions], f.solution)}</select></div>
     <div><label for="f-anno">Anno (Data ins.)</label><select id="f-anno">${optionsHtml(anni, f.anno)}</select></div>
@@ -235,7 +264,7 @@ function renderTable(m) {
       <details class="ms cols-menu"><summary style="min-width:0">${ico("columns-3")}Colonne</summary><div class="ms-list" style="right:0;left:auto;min-width:200px">${COLDEFS.map(c => `<label class="ms-i"><input type="checkbox" data-col="${esc(c.k)}" ${S.cols.has(c.k) ? "checked" : ""}> ${esc(c.l)}</label>`).join("")}</div></details></div></div>
   <div id="f-chips"></div>
   <div class="card tablecard"><table class="dt"><thead id="th"></thead><tbody id="tb"></tbody></table></div>`;
-  const LABEL = {q: v => `Cerca: ${v}`, stato: v => `Stato: ${v}`, market: v => `Market: ${v}`, vertical: v => `Vertical: ${v}`, solution: v => `Solution: ${v}`, anno: v => `Anno: ${v}`};
+  const LABEL = {q: v => `Cerca: ${v}`, stato: v => `Stato: ${v}`, tipo: v => `Tipo: ${v === "__altro" ? "Altro" : v}`, rows: () => f.rowsLabel || "Selezione", market: v => `Market: ${v}`, vertical: v => `Vertical: ${v}`, solution: v => `Solution: ${v}`, anno: v => `Anno: ${v}`};
   const drawChips = () => {
     const box = $("#f-chips"); box.innerHTML = chipsHtml(Object.keys(LABEL).filter(k => f[k]).map(k => ({id: k, label: LABEL[k](f[k])})));
     bindChips(box, id => { S.filt[id] = ""; renderTable(m); }, () => { S.filt = EMPTY_FILT(); renderTable(m); });
@@ -253,7 +282,7 @@ function renderTable(m) {
   };
   draw();
   const bind = (id, key) => $(id).oninput = e => { S.filt[key] = e.target.value; draw(); };
-  bind("#f-q", "q"); bind("#f-stato", "stato"); bind("#f-market", "market"); bind("#f-vertical", "vertical"); bind("#f-solution", "solution"); bind("#f-anno", "anno");
+  bind("#f-q", "q"); bind("#f-stato", "stato"); bind("#f-tipo", "tipo"); bind("#f-market", "market"); bind("#f-vertical", "vertical"); bind("#f-solution", "solution"); bind("#f-anno", "anno");
   m.querySelectorAll("[data-col]").forEach(c => c.onchange = () => { c.checked ? S.cols.add(c.dataset.col) : S.cols.delete(c.dataset.col); colsSave(); draw(); });
 }
 
@@ -268,7 +297,8 @@ const WIP_BANDS = [
 const SEL_KEY = "gare.wip.sel.v1";
 const selLoad = () => { try { return new Set(JSON.parse(localStorage.getItem(SEL_KEY) || "[]")); } catch (e) { return new Set(); } };
 const selSave = set => { try { localStorage.setItem(SEL_KEY, JSON.stringify([...set])); } catch (e) {} };
-S.wip = {sol: new Set(), tipo: "", market: "", sel: selLoad(), collapsed: {}};
+S.wip = {sol: new Set(), tipo: "", market: "", band: "", sel: selLoad(), collapsed: {}};
+function goWip(f) { S.wip.sol = new Set(); S.wip.tipo = ""; S.wip.market = ""; S.wip.band = f.band || ""; S.view = "wip"; render(); }
 const isoDate = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; };
 const fmtD = d => d ? `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}` : "";
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
@@ -291,6 +321,8 @@ function wipItems() {
 const passTipo = it => !S.wip.tipo || it.r.tipo === S.wip.tipo;
 const passSol = it => !S.wip.sol.size || (it.names.length ? it.names.some(n => S.wip.sol.has(n.toLowerCase())) : S.wip.sol.has(NOASS.toLowerCase()));
 const passMarket = it => !S.wip.market || it.market === S.wip.market;
+const passBand = it => !S.wip.band || (S.wip.band === "late" ? it.band === "late" : it.days !== null && it.days >= 0 && it.days <= 7);
+const BAND_LABEL = {late: "Consegne scadute", d7: "Consegne entro 7 giorni"};
 const dayText = g => g === null ? "" : g < 0 ? `scaduta da ${-g} gg` : g === 0 ? "oggi" : `tra ${g} gg`;
 const dayBadge = (g, band) => g === null ? "" : `<span class="tag d-${band}">${dayText(g)}</span>`;
 const ownerOf = it => it.r["Solution D&A"] || "n.d.";
@@ -342,7 +374,7 @@ function renderWip(m) {
   </div>
   <div class="wgrid"><div id="w-list"></div><aside class="card wload" id="w-load"></aside></div>`;
 
-  const visible = () => all.filter(i => passTipo(i) && passSol(i) && passMarket(i));
+  const visible = () => all.filter(i => passTipo(i) && passSol(i) && passMarket(i) && passBand(i));
   const exportItems = () => { const s = all.filter(i => S.wip.sel.has(i.key)); return s.length ? s : visible(); };
   const counters = () => {
     const n = all.filter(i => S.wip.sel.has(i.key)).length;
@@ -355,10 +387,10 @@ function renderWip(m) {
     $("#w-ms-l").querySelectorAll("input").forEach(c => c.onchange = () => { c.checked ? S.wip.sol.add(c.dataset.k) : S.wip.sol.delete(c.dataset.k); draw(); });
   };
   const drawChips = () => {
-    const items = [...[...S.wip.sol].map(k => ({id: "s:" + k, label: "Solution: " + solName(k)})), ...(S.wip.tipo ? [{id: "t", label: "Tipo: " + S.wip.tipo}] : []), ...(S.wip.market ? [{id: "m", label: "Market: " + S.wip.market}] : [])];
+    const items = [...[...S.wip.sol].map(k => ({id: "s:" + k, label: "Solution: " + solName(k)})), ...(S.wip.tipo ? [{id: "t", label: "Tipo: " + S.wip.tipo}] : []), ...(S.wip.market ? [{id: "m", label: "Market: " + S.wip.market}] : []), ...(S.wip.band ? [{id: "b", label: BAND_LABEL[S.wip.band]}] : [])];
     const box = $("#w-chips"); box.innerHTML = chipsHtml(items);
-    bindChips(box, id => { if (id === "t") { S.wip.tipo = ""; $("#w-tipo").value = ""; } else if (id === "m") S.wip.market = ""; else S.wip.sol.delete(id.slice(2)); draw(); },
-      () => { S.wip.sol.clear(); S.wip.tipo = ""; S.wip.market = ""; $("#w-tipo").value = ""; draw(); });
+    bindChips(box, id => { if (id === "t") { S.wip.tipo = ""; $("#w-tipo").value = ""; } else if (id === "m") S.wip.market = ""; else if (id === "b") S.wip.band = ""; else S.wip.sol.delete(id.slice(2)); draw(); },
+      () => { S.wip.sol.clear(); S.wip.tipo = ""; S.wip.market = ""; S.wip.band = ""; $("#w-tipo").value = ""; draw(); });
   };
   const draw = () => {
     drawMs(); drawChips(); counters();
@@ -421,8 +453,13 @@ function openMeeting() {
 
 // ------------------------------------------------------------ pulizia dati
 async function renderClean(m) {
-  m.innerHTML = `<div class="card"><h2>Pulizia dati</h2><div class="sub">Propone correzioni sul file Excel (stati uniformati, maiuscole come in Domini, date scritte come testo, clienti scritti in modi diversi). Nulla viene scritto finché non applichi; prima di scrivere viene fatta una copia di backup.</div>
+  m.innerHTML = `<div class="card" style="margin-bottom:var(--gap)"><h2>Valori normalizzati in lettura</h2><div class="sub">L'app legge Stato e Market ignorando maiuscole e spazi, senza toccare il file. Qui vedi cosa viene unificato e quante righe riguarda.</div><div id="c-sum"><div class="muted">Caricamento…</div></div></div>
+    <div class="card"><h2>Pulizia dati</h2><div class="sub">Propone correzioni sul file Excel (stati uniformati, maiuscole come in Domini, date scritte come testo, clienti scritti in modi diversi). Nulla viene scritto finché non applichi; prima di scrivere viene fatta una copia di backup.</div>
     <button id="c-run" class="primary">Analizza il file</button><div id="c-out" style="margin-top:12px"></div></div>`;
+  api("/api/clean/summary").then(list => {
+    $("#c-sum").innerHTML = list.length ? `<div class="tscroll"><table><thead><tr><th>Campo</th><th>Valore nel file</th><th>Letto come</th><th class="num">Righe</th><th>Nel file</th></tr></thead><tbody>${list.map(x =>
+      `<tr><td>${esc(x.campo)}</td><td>${esc(x.da)}</td><td><b>${esc(x.a)}</b></td><td class="num">${num(x.righe)}</td><td class="muted">${x.scrivibile ? "correggibile con la pulizia qui sotto" : "solo in lettura (cella vuota)"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Tutti i valori sono già nella forma standard.</div>`;
+  }).catch(e => { $("#c-sum").innerHTML = `<div class="err">${esc(e.message)}</div>`; });
   $("#c-run").onclick = async () => {
     const items = await api("/api/clean/preview"); S.clean = items; const out = $("#c-out");
     if (!items.length) { out.innerHTML = `<div class="empty">Non c'è niente da correggere.</div>`; return; }

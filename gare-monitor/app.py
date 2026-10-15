@@ -231,6 +231,11 @@ def clean_preview():
     return jsonify(logic.clean_preview(d["rows"], d["domini"]))
 
 
+@app.get("/api/clean/summary")
+def clean_summary():
+    return jsonify(logic.normalization_summary(get_data()["rows"]))
+
+
 @app.post("/api/clean/apply")
 def clean_apply():
     items = (request.json or {}).get("items", [])

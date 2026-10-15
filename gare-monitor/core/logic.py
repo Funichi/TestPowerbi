@@ -3,25 +3,14 @@ import datetime as dt
 import re
 from collections import Counter, defaultdict
 
+from .normalize import NOIND, STATI, STATO_MAP, norm_stato, normalization_summary  # noqa: F401  (ri-esportati)
 from .reader import DATE_FIELDS, clean_text, to_date
 
-STATI = ["WIP", "Waiting For response", "Sospeso", "Won", "Lost", "NoBID"]
-STATO_MAP = {
-    "wip": "WIP", "won": "Won", "win": "Won", "lost": "Lost",
-    "nobid": "NoBID", "no bid": "NoBID", "no-bid": "NoBID",
-    "sospeso": "Sospeso", "closed": "Sospeso",
-    "waiting for response": "Waiting For response", "waiting": "Waiting For response",
-}
-GIORNI_SOLLECITO = 30      # Waiting For response da più di N giorni dalla Data ins.
+GIORNI_SOLLECITO = 30      # Waiting For response da più di N giorni dalla Data ins. (pillola "da sollecitare")
 GIORNI_RICLASSIFICA = 90   # oltre: probabilmente da portare a Sospeso
 GIORNI_SCADENZA = 7        # consegne imminenti
-
-
-def norm_stato(v):
-    s = clean_text(v)
-    if not s:
-        return None
-    return STATO_MAP.get(s.casefold())
+TIPI_MAIN = ["Gara", "Gara sotto AQ", "Offerta diretta", "Incontro Cliente", "RFI"]
+MIN_CHIUSE = 5             # sotto questa soglia il win rate di un tipo non viene mostrato
 
 
 def add_months(d, n):
@@ -87,7 +76,7 @@ def suggest_commessa(domini, vertical, data_consegna, data_ins):
 
 def clean_preview(rows, domini):
     out = []
-    liste = {"Vertical": domini.get("vertical", []), "Market": domini.get("market", []), "tipo": domini.get("tipo", [])}
+    liste = {"Vertical": domini.get("vertical", []), "tipo": domini.get("tipo", [])}
 
     def add(r, kind, field, old, new, default=True):
         out.append({"row": r["_row"], "sig": r["_sig"], "kind": kind, "field": field, "old": old, "new": new,
@@ -99,10 +88,13 @@ def clean_preview(rows, domini):
     canon = {k: c.most_common(1)[0][0] for k, c in spellings.items() if len(c) > 1}
 
     for r in rows:
-        st = r["Stato"]
-        n = norm_stato(st)
-        if st and n and n != st:
-            add(r, "Stato uniformato", "Stato", st, n)
+        raw = r.get("_raw") or {}
+        sr = raw.get("Stato")
+        if isinstance(sr, str) and sr != r["Stato"] and r["Stato"] in STATI:
+            add(r, "Stato uniformato", "Stato", sr, r["Stato"])
+        mr = raw.get("Market")
+        if mr and str(mr) != r["Market"] and r["Market"] != NOIND:
+            add(r, "Maiuscole/elenco", "Market", str(mr), r["Market"])
         for f, lista in liste.items():
             v = r[f]
             if v and v not in lista:
@@ -132,25 +124,36 @@ def _group_pipeline(rows, stato, key):
     return out
 
 
-def _win_rate(rows, stato, key):
-    g = defaultdict(lambda: [0, 0])
-    for r in rows:
-        st = stato[r["_row"]]
-        if st in ("Won", "Lost"):
-            g[clean_text(r[key]) or "(non indicato)"][0 if st == "Won" else 1] += 1
-    out = [{"nome": n, "won": w, "lost": l, "chiuse": w + l, "rate": w / (w + l)} for n, (w, l) in g.items() if w + l]
-    out.sort(key=lambda x: (-x["chiuse"], -x["rate"], x["nome"].casefold()))
-    return out
-
-
 def _brief(r, **extra):
     d = {k: r[k] for k in ("_row", "Seq", "Cliente", "Oggetto", "Stato", "Solution D&A", "Data ins.", "Data consegna", "Vertical")}
     d.update(extra)
     return d
 
 
+def _prev_year(d):
+    try:
+        return d.replace(year=d.year - 1)
+    except ValueError:                       # 29 febbraio
+        return d.replace(year=d.year - 1, day=28)
+
+
+def _tipo_group(v):
+    t = (clean_text(v) or "").casefold()
+    return next((m for m in TIPI_MAIN if m.casefold() == t), "Altro")
+
+
+ETA_FASCE = [("0-30", "0–30 gg"), ("31-90", "31–90 gg"), ("91-180", "91–180 gg"), ("181+", "oltre 180 gg"), ("nd", "data mancante")]
+
+
+def _fascia_eta(age):
+    if age is None:
+        return "nd"
+    return "0-30" if age <= 30 else "31-90" if age <= 90 else "91-180" if age <= 180 else "181+"
+
+
 def dashboard(rows, domini, today, months):
-    """months: int (ultimi N mesi) o None (tutto)."""
+    """months: int (ultimi N mesi) o None (tutto). Il periodo vale solo per Pipeline per Market ed Esito per tipo:
+    KPI YTD, win rate a 12 mesi e trend usano l'anno solare / gli ultimi 12 mesi."""
     cutoff = add_months(today, -(months - 1)) if months else None
 
     def ins(r):
@@ -166,46 +169,72 @@ def dashboard(rows, domini, today, months):
     stato = {r["_row"]: (norm_stato(r["Stato"]) or r["Stato"]) for r in rows}
     scope = [r for r in rows if in_period(r) or stato[r["_row"]] == "WIP"]
 
-    # Pipeline per solution: WIP sempre (tutte); le altre colonne nel periodo
-    pipe = defaultdict(Counter)
-    spell = defaultdict(Counter)
-    for r in scope:
-        s = stato[r["_row"]]
-        for nme in split_solutions(r["Solution D&A"]) or ["(non assegnata)"]:
-            k = nme.casefold()
-            spell[k][nme] += 1
-            pipe[k][s] += 1
-    pipeline = []
-    for k, c in pipe.items():
-        pipeline.append({"solution": spell[k].most_common(1)[0][0], **{s: c.get(s, 0) for s in STATI}, "totale": sum(c.values())})
-    pipeline.sort(key=lambda x: (-x["WIP"], -x["Waiting For response"], x["solution"].casefold()))
+    # ---- KPI: YTD con confronto allo stesso periodo dell'anno precedente; win rate ultimi 12 mesi
+    y0, py0, pend = dt.date(today.year, 1, 1), dt.date(today.year - 1, 1, 1), _prev_year(today)
 
-    # Scadenze: WIP con consegna scaduta o entro 7 giorni
-    scadenze = []
+    def count(a, b, only=None):
+        return sum(1 for r in rows if ins(r) and a <= ins(r) <= b and (only is None or stato[r["_row"]] == only))
+
+    start12 = _prev_year(today) + dt.timedelta(days=1)
+    w12 = sum(1 for r in rows if ins(r) and start12 <= ins(r) <= today and stato[r["_row"]] == "Won")
+    l12 = sum(1 for r in rows if ins(r) and start12 <= ins(r) <= today and stato[r["_row"]] == "Lost")
+    kpi = {
+        "anno": today.year, "prec": today.year - 1,
+        "wip": sum(1 for r in rows if stato[r["_row"]] == "WIP"),
+        "waiting": sum(1 for r in rows if stato[r["_row"]] == "Waiting For response"),
+        "inserite_ytd": {"cur": count(y0, today), "prev": count(py0, pend)},
+        "won_ytd": {"cur": count(y0, today, "Won"), "prev": count(py0, pend, "Won")},
+        "winrate12": {"won": w12, "chiuse": w12 + l12, "rate": (w12 / (w12 + l12)) if w12 + l12 else None},
+    }
+
+    # ---- Trend anno su anno (12 mesi, anno corrente vs precedente)
+    def monthly(year, only=None):
+        arr = [0] * 12
+        for r in rows:
+            d = ins(r)
+            if d and d.year == year and (only is None or stato[r["_row"]] == only):
+                arr[d.month - 1] += 1
+        return arr
+    trend = {"anno": today.year, "prec": today.year - 1, "mese": today.month,
+             "inserite": {"cur": monthly(today.year), "prev": monthly(today.year - 1)},
+             "won": {"cur": monthly(today.year, "Won"), "prev": monthly(today.year - 1, "Won")}}
+
+    # ---- Esito per tipo (segue il periodo)
+    g = defaultdict(Counter)
+    for r in rows:
+        if in_period(r):
+            g[_tipo_group(r["tipo"])][stato[r["_row"]]] += 1
+    esito = []
+    for nome in TIPI_MAIN + ["Altro"]:
+        c = g.get(nome)
+        if not c:
+            continue
+        w, l = c["Won"], c["Lost"]
+        esito.append({"nome": nome, **{st: c.get(st, 0) for st in STATI}, "totale": sum(c.values()), "chiuse": w + l,
+                      "rate": (w / (w + l)) if w + l >= MIN_CHIUSE else None})
+
+    # ---- Età delle offerte in attesa (da Data consegna; se manca, da Data ins.)
+    fasce = {k: [] for k, _ in ETA_FASCE}
+    for r in rows:
+        if stato[r["_row"]] != "Waiting For response":
+            continue
+        base = cons(r) or ins(r)
+        fasce[_fascia_eta(max((today - base).days, 0) if base else None)].append(r["_row"])
+    eta = {"fasce": [{"k": k, "label": l, "n": len(fasce[k]), "rows": fasce[k]} for k, l in ETA_FASCE],
+           "totale": sum(len(v) for v in fasce.values()), "oltre180": len(fasce["181+"]), "mancante": len(fasce["nd"])}
+
+    # ---- Pillole: scadenze WIP e offerte da sollecitare
+    scadute = imminenti = 0
     for r in rows:
         c = cons(r)
-        if stato[r["_row"]] == "WIP" and c is not None and (c - today).days <= GIORNI_SCADENZA:
-            scadenze.append(_brief(r, giorni=(c - today).days))
-    scadenze.sort(key=lambda x: x["giorni"])
+        if stato[r["_row"]] == "WIP" and c is not None:
+            gg = (c - today).days
+            scadute += gg < 0
+            imminenti += 0 <= gg <= GIORNI_SCADENZA
+    solleciti = [r["_row"] for r in rows if stato[r["_row"]] == "Waiting For response" and ins(r)
+                 and GIORNI_SOLLECITO <= (today - ins(r)).days <= GIORNI_RICLASSIFICA]
 
-    # Waiting da sollecitare (età dalla Data ins.)
-    solleciti, riclass = [], []
-    riclass_totale = 0
-    for r in rows:
-        d = ins(r)
-        if stato[r["_row"]] != "Waiting For response" or d is None:
-            continue
-        g = (today - d).days
-        if GIORNI_SOLLECITO <= g <= GIORNI_RICLASSIFICA:
-            solleciti.append(_brief(r, giorni=g))
-        elif g > GIORNI_RICLASSIFICA:
-            riclass_totale += 1
-            if in_period(r):
-                riclass.append(_brief(r, giorni=g))
-    solleciti.sort(key=lambda x: -x["giorni"])
-    riclass.sort(key=lambda x: -x["giorni"])
-
-    # Punti di attenzione
+    # ---- Punti di attenzione
     ss_count = Counter()
     for r in rows:
         s = clean_text(r["SS"])
@@ -226,12 +255,12 @@ def dashboard(rows, domini, today, months):
         if i and (i - today).days > 7:
             att["Data ins. nel futuro"].append(_brief(r))
         if r["Stato"] and r["Stato"] not in STATI:
-            att["Stato da uniformare (Pulizia dati)"].append(_brief(r, dettaglio=r["Stato"]))
+            att["Stato non riconosciuto"].append(_brief(r, dettaglio=r["Stato"]))
         if not r["Stato"]:
             att["Senza Stato"].append(_brief(r))
         if s in ("WIP", "Waiting For response") and not clean_text(r["Solution D&A"]):
             att["WIP/Waiting senza Solution D&A"].append(_brief(r))
-        mancanti = [f for f in ("Vertical", "Market", "tipo", "Oggetto") if not r[f]]
+        mancanti = [f for f in ("Vertical", "tipo", "Oggetto") if not r[f]] + (["Market"] if r["Market"] == NOIND else [])
         if mancanti:
             att["Campi base mancanti (Vertical/Market/tipo/Oggetto)"].append(_brief(r, dettaglio=", ".join(mancanti)))
         ssv = clean_text(r["SS"])
@@ -239,54 +268,15 @@ def dashboard(rows, domini, today, months):
             att["Codice SS duplicato"].append(_brief(r, dettaglio=ssv))
     attenzioni = sorted(({"titolo": t, "righe": v} for t, v in att.items()), key=lambda a: -len(a["righe"]))
 
-    # Trend mensile
-    dates = [d for r in rows for d in (ins(r), cons(r)) if d]
-    start = add_months(today, -(months - 1)) if months else (min(dates).replace(day=1) if dates else today.replace(day=1))
-    mesi = []
-    m = start
-    while m <= today.replace(day=1):
-        mesi.append(m)
-        m = add_months(m, 1)
-    idx = {(m.year, m.month): i for i, m in enumerate(mesi)}
-    inserite = [dict.fromkeys(STATI + ["Altro"], 0) for _ in mesi]
-    consegnate = [0] * len(mesi)
-    for r in rows:
-        i, c = ins(r), cons(r)
-        if i and (i.year, i.month) in idx:
-            s = stato[r["_row"]]
-            inserite[idx[(i.year, i.month)]][s if s in STATI else "Altro"] += 1
-        if c and (c.year, c.month) in idx:
-            consegnate[idx[(c.year, c.month)]] += 1
-    trend = {"mesi": [m.strftime("%Y-%m") for m in mesi], "inserite": inserite, "consegnate": consegnate}
-
-    # KPI con delta rispetto al periodo precedente di pari durata (per Data ins.)
-    def kpi(rs):
-        w = sum(1 for r in rs if stato[r["_row"]] == "Won")
-        l = sum(1 for r in rs if stato[r["_row"]] == "Lost")
-        return {"inserite": len(rs), "won": w, "lost": l, "winrate": (w / (w + l)) if w + l else None}
-    cur_rows = [r for r in rows if ins(r) and (cutoff is None or ins(r) >= cutoff)]
-    kpis = {"periodo": kpi(cur_rows), "precedente": None}
-    if cutoff:
-        prev_start = add_months(cutoff, -months)
-        kpis["precedente"] = kpi([r for r in rows if ins(r) and prev_start <= ins(r) < cutoff])
-    in_per = [r for r in rows if in_period(r)]
-
     return {
         "oggi": today.isoformat(),
-        "kpi": kpis,
+        "kpi": kpi,
+        "pillole": {"scadute": scadute, "imminenti": imminenti, "solleciti": solleciti, "attenzioni": sum(len(a["righe"]) for a in attenzioni)},
+        "trend": trend,
+        "eta_attesa": eta,
         "pipeline_market": _group_pipeline(scope, stato, "Market"),
         "pipeline_vertical": _group_pipeline(scope, stato, "Vertical"),
-        "winrate_market": _win_rate(in_per, stato, "Market"),
-        "tiles": {
-            "wip": sum(1 for r in rows if stato[r["_row"]] == "WIP"),
-            "waiting": sum(1 for r in scope if stato[r["_row"]] == "Waiting For response"),
-            "scadute": sum(1 for x in scadenze if x["giorni"] < 0),
-            "imminenti": sum(1 for x in scadenze if x["giorni"] >= 0),
-            "solleciti": len(solleciti),
-            "attenzioni": sum(len(a["righe"]) for a in attenzioni),
-        },
-        "stati": {st: sum(1 for r in scope if stato[r["_row"]] == st) for st in STATI},
-        "pipeline": pipeline, "scadenze": scadenze, "solleciti": solleciti, "riclassificare": riclass,
-        "riclassificare_totale": riclass_totale, "attenzioni": attenzioni, "trend": trend,
-        "soglie": {"sollecito": GIORNI_SOLLECITO, "riclassifica": GIORNI_RICLASSIFICA, "scadenza": GIORNI_SCADENZA},
+        "esito_tipo": esito,
+        "attenzioni": attenzioni,
+        "soglie": {"sollecito": GIORNI_SOLLECITO, "riclassifica": GIORNI_RICLASSIFICA, "scadenza": GIORNI_SCADENZA, "min_chiuse": MIN_CHIUSE},
     }
