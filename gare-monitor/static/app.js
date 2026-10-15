@@ -4,12 +4,11 @@ const BCLASS = {"WIP": "WIP", "Waiting For response": "Waiting", "Sospeso": "Sos
 const COLOR = {"WIP": "var(--wip)", "Waiting For response": "var(--waiting)", "Sospeso": "var(--sospeso)", "Won": "var(--won)", "Lost": "var(--lost)", "NoBID": "var(--nobid)", "Altro": "var(--altro)"};
 const S = {data: null, dash: null, view: "dash", months: "12", trendMode: "inserite",
   filt: {q: "", stato: "", vertical: "", solution: "", anno: ""}, sort: {k: "Data ins.", dir: -1},
-  kanban: {months: "12", solution: ""}, clean: null, state: null};
+  clean: null, state: null};
 
 const ICONS = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
   table: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 10v10"/>',
-  kanban: '<rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="10" rx="1.5"/><rect x="17" y="4" width="4" height="13" rx="1.5"/>',
   sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 16v4M17 18h4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
@@ -22,7 +21,7 @@ const ICONS = {
 };
 const ico = n => `<svg class="ico" viewBox="0 0 24 24">${ICONS[n] || ""}</svg>`;
 function hydrateIcons(root = document) { root.querySelectorAll("i[data-ico]").forEach(i => i.outerHTML = ico(i.dataset.ico)); }
-const TITLES = {dash: ["Cruscotto", "Scadenze, attenzioni e andamento delle offerte"], table: ["Tabella", "Tutte le offerte: filtra, ordina, clicca una riga per modificarla"], kanban: ["Schede", "Offerte per stato: trascina una scheda per cambiare stato"], clean: ["Pulizia dati", "Uniforma gli stati e correggi i dati nel file Excel"]};
+const TITLES = {dash: ["Cruscotto", "Scadenze, attenzioni e andamento delle offerte"], table: ["Tabella", "Tutte le offerte: filtra, ordina, clicca una riga per modificarla"], wip: ["Consegne WIP", "Scadenze delle offerte in corso e preparazione della riunione"], clean: ["Pulizia dati", "Uniforma gli stati e correggi i dati nel file Excel"]};
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const fmt = iso => iso ? iso.split("-").reverse().join("/") : "";
@@ -66,7 +65,7 @@ function render() {
   document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.view === S.view));
   $("#page-title").textContent = TITLES[S.view][0]; $("#page-sub").textContent = TITLES[S.view][1];
   const m = $("#main");
-  ({dash: renderDash, table: renderTable, kanban: renderKanban, clean: renderClean})[S.view](m);
+  ({dash: renderDash, table: renderTable, wip: renderWip, clean: renderClean})[S.view](m);
 }
 
 // ------------------------------------------------------------ cruscotto
@@ -193,35 +192,158 @@ function renderTable(m) {
   m.querySelectorAll("th.sort").forEach(th => th.onclick = () => { S.sort = {k: th.dataset.k, dir: S.sort.k === th.dataset.k ? -S.sort.dir : 1}; renderTable(m); });
 }
 
-// ------------------------------------------------------------ schede (kanban)
-function renderKanban(m) {
-  const K = S.kanban, today = S.dash.oggi;
-  const cutoff = K.months === "all" ? "" : (() => { const d = new Date(today); d.setMonth(d.getMonth() - (+K.months - 1), 1); return d.toISOString().slice(0, 10); })();
-  const rows = S.data.rows.filter(r => {
-    const s = normStato(r.Stato);
-    if (s !== "WIP" && cutoff && r["Data ins."] && r["Data ins."] < cutoff) return false;
-    if (K.solution && !(K.solution === "(non assegnata)" ? !splitSol(r["Solution D&A"]).length : splitSol(r["Solution D&A"]).some(x => x.toLowerCase() === K.solution.toLowerCase()))) return false;
-    return true;
+// ------------------------------------------------------------ consegne WIP (SOLA LETTURA: nessuna scrittura sull'Excel)
+const WIP_BANDS = [
+  {k: "late", t: "Scadute", note: "Verificare se consegnata o aggiornare lo stato"},
+  {k: "week", t: "Questa settimana", note: ""},
+  {k: "two", t: "Prossime 2 settimane", note: ""},
+  {k: "over", t: "Oltre", note: ""},
+  {k: "none", t: "Senza data di consegna", note: "Completare il dato"},
+];
+const SEL_KEY = "gare.wip.sel.v1";
+const selLoad = () => { try { return new Set(JSON.parse(localStorage.getItem(SEL_KEY) || "[]")); } catch (e) { return new Set(); } };
+const selSave = set => { try { localStorage.setItem(SEL_KEY, JSON.stringify([...set])); } catch (e) {} };
+S.wip = {sol: new Set(), tipo: "", sel: selLoad(), collapsed: {}};
+const isoDate = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; };
+const fmtD = d => d ? `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}` : "";
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const NOASS = "(non assegnata)";
+
+function wipContext() {
+  const t = isoDate(S.dash && S.dash.oggi) || (() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); })();
+  const wd = (t.getDay() + 6) % 7;                       // lunedì = 0
+  return {today: t, monday: addDays(t, -wd), sunday: addDays(t, 6 - wd), weekEnd: 6 - wd};
+}
+function wipItems() {
+  const ctx = wipContext();
+  return S.data.rows.filter(r => normStato(r.Stato) === "WIP").map(r => {
+    const d = isoDate(r["Data consegna"]);
+    const days = d ? Math.round((d - ctx.today) / 864e5) : null;
+    const band = days === null ? "none" : days < 0 ? "late" : days <= ctx.weekEnd ? "week" : days <= ctx.weekEnd + 14 ? "two" : "over";
+    return {r, key: String(r.Seq), d, days, band, names: splitSol(r["Solution D&A"])};
+  }).sort((a, b) => (a.d ? a.d.getTime() : Infinity) - (b.d ? b.d.getTime() : Infinity) || String(a.r.Cliente).localeCompare(String(b.r.Cliente), "it"));
+}
+const passTipo = it => !S.wip.tipo || it.r.tipo === S.wip.tipo;
+const passSol = it => !S.wip.sol.size || (it.names.length ? it.names.some(n => S.wip.sol.has(n.toLowerCase())) : S.wip.sol.has(NOASS.toLowerCase()));
+const dayText = g => g === null ? "" : g < 0 ? `scaduta da ${-g} gg` : g === 0 ? "oggi" : `tra ${g} gg`;
+const dayBadge = (g, band) => g === null ? "" : `<span class="tag d-${band}">${dayText(g)}</span>`;
+const ownerOf = it => it.r["Solution D&A"] || "n.d.";
+
+function wipText(items, ctx) {
+  const L = [`CONSEGNE WIP – settimana dal ${fmtD(ctx.monday)} al ${fmtD(ctx.sunday)}`, `Generato il ${fmtD(ctx.today)} – ${items.length} gare`, ""];
+  WIP_BANDS.forEach(b => {
+    const its = items.filter(i => i.band === b.k); if (!its.length) return;
+    L.push(`== ${b.t.toUpperCase()} (${its.length}) ==`);
+    its.forEach(i => L.push(`• ${(i.r.Cliente || "n.d.").toUpperCase()} – ${i.r.Oggetto || "n.d."} | ${ownerOf(i)} | ${i.d ? `Consegna ${fmtD(i.d)} (${dayText(i.days)})` : "Consegna n.d."} | SS: ${i.r.SS || "n.d."}`));
+    L.push("");
   });
-  m.innerHTML = `<div class="toolbar"><div><label>Periodo</label><select id="k-m">${[["6", "Ultimi 6 mesi"], ["12", "Ultimi 12 mesi"], ["24", "Ultimi 24 mesi"], ["all", "Tutto"]].map(([v, l]) => `<option value="${v}" ${K.months === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-    <div><label>Solution</label><select id="k-s"><option value="">Tutte</option>${["(non assegnata)", ...S.data.domini.solutions].map(x => `<option ${x === K.solution ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></div>
-    <div class="muted" style="padding-bottom:8px">Trascina una scheda in un'altra colonna per cambiare lo stato. WIP: sempre tutte.</div></div>
-    <div class="kanban">${STATI.map(s => { const rs = rows.filter(r => normStato(r.Stato) === s).sort((a, b) => (b["Data ins."] || "").localeCompare(a["Data ins."] || ""));
-      return `<div class="kcol" data-st="${s}"><h3>${badge(s)} <span class="muted">${rs.length}</span></h3><div class="kcards">${rs.map(r => {
-        let tag = ""; if (s === "WIP" && r["Data consegna"]) { const g = Math.round((new Date(r["Data consegna"]) - new Date(today)) / 864e5); if (g <= 7) tag = dayLabel(g); }
-        if (s === "Waiting For response" && r["Data ins."]) { const g = Math.round((new Date(today) - new Date(r["Data ins."])) / 864e5); if (g >= 30) tag = `<span class="tag soon">${g} gg</span>`; }
-        return `<div class="kcard" draggable="true" data-row="${r._row}" style="border-left-color:${COLOR[s]}"><b>${esc(r.Cliente)}</b><span class="o">${esc(r.Oggetto)}</span><div class="m"><span>${esc(r["Solution D&A"] || "—")}</span><span>${fmt(r["Data consegna"] || r["Data ins."])}</span>${tag}</div></div>`; }).join("")}</div></div>`; }).join("")}</div>`;
-  $("#k-m").onchange = e => { K.months = e.target.value; renderKanban(m); };
-  $("#k-s").onchange = e => { K.solution = e.target.value; renderKanban(m); };
-  m.querySelectorAll(".kcard").forEach(c => { c.onclick = () => openForm(rowByNum(+c.dataset.row)); c.ondragstart = e => e.dataTransfer.setData("text/plain", c.dataset.row); });
-  m.querySelectorAll(".kcol").forEach(col => {
-    col.ondragover = e => { e.preventDefault(); col.classList.add("over"); };
-    col.ondragleave = () => col.classList.remove("over");
-    col.ondrop = async e => { e.preventDefault(); col.classList.remove("over");
-      const r = rowByNum(+e.dataTransfer.getData("text/plain")); if (!r || normStato(r.Stato) === col.dataset.st) return;
-      try { await withBusy(() => api("/api/rows/" + r._row, {method: "PUT", body: {sig: r._sig, changes: {Stato: col.dataset.st}}})); toast(`${r.Cliente}: ${col.dataset.st}`); await loadAll(true); }
-      catch (err) { toast(err.message, true); } };
-  });
+  return L.join("\n");
+}
+function downloadText(txt, ctx) {
+  const t = ctx.today, name = `consegne-wip_${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}.txt`;
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + txt], {type: "text/plain;charset=utf-8"})); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+async function copyText(txt) {
+  try { await navigator.clipboard.writeText(txt); }
+  catch (e) { const ta = document.createElement("textarea"); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
+  toast("Copiato negli appunti");
+}
+
+function renderWip(m) {
+  const ctx = wipContext(), all = wipItems();
+  const tipi = [...new Set(all.map(i => i.r.tipo).filter(Boolean))].sort((a, b) => a.localeCompare(b, "it"));
+  const names = new Map(); let hasNo = false;
+  all.forEach(i => { if (!i.names.length) hasNo = true; i.names.forEach(n => names.has(n.toLowerCase()) || names.set(n.toLowerCase(), n)); });
+  const solOpts = [...names.entries()].sort((a, b) => a[1].localeCompare(b[1], "it")); if (hasNo) solOpts.push([NOASS.toLowerCase(), NOASS]);
+  $("#page-sub").textContent = `Oggi ${fmtD(ctx.today)} · ${all.length} offerte in WIP`;
+
+  m.innerHTML = `
+  <div class="toolbar">
+    <div><label>Solution D&amp;A</label><details class="ms" id="w-ms"><summary id="w-ms-s"></summary><div class="ms-list" id="w-ms-l"></div></details></div>
+    <div><label>Tipo</label><select id="w-tipo"><option value="">Tutti</option>${tipi.map(t => `<option ${t === S.wip.tipo ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
+    <div><button id="w-reset" class="ghost">Azzera filtri</button></div>
+    <div class="muted" style="padding-bottom:10px;margin-left:auto">Settimana dal ${fmtD(ctx.monday)} al ${fmtD(ctx.sunday)} · sola lettura</div>
+  </div>
+  <div class="card wbar">
+    <div class="row">
+      <button id="w-selweek">Seleziona questa settimana</button><button id="w-selvis">Seleziona le visibili</button><button id="w-selnone">Deseleziona tutto</button>
+      <span class="wcount" id="w-count"></span>
+      <span style="margin-left:auto" class="row"><button id="w-meet" class="primary">${ico("cal")}Vista riunione</button><button id="w-txt">Scarica .txt</button><button id="w-copy">Copia negli appunti</button></span>
+    </div>
+    <div class="hint" id="w-exp-hint"></div>
+  </div>
+  <div class="wgrid"><div id="w-list"></div><aside class="card wload" id="w-load"></aside></div>`;
+
+  const drawMs = () => {
+    $("#w-ms-s").textContent = S.wip.sol.size ? `${S.wip.sol.size} selezionat${S.wip.sol.size === 1 ? "a" : "e"}` : "Tutte";
+    $("#w-ms-l").innerHTML = solOpts.map(([k, n]) => `<label class="ms-i"><input type="checkbox" data-k="${esc(k)}" ${S.wip.sol.has(k) ? "checked" : ""}> ${esc(n)}</label>`).join("") || `<div class="muted">Nessuna</div>`;
+    $("#w-ms-l").querySelectorAll("input").forEach(c => c.onchange = () => { c.checked ? S.wip.sol.add(c.dataset.k) : S.wip.sol.delete(c.dataset.k); draw(); });
+  };
+  const visible = () => all.filter(i => passTipo(i) && passSol(i));
+  const exportItems = () => { const s = all.filter(i => S.wip.sel.has(i.key)); return s.length ? s : visible(); };
+
+  const draw = () => {
+    drawMs();
+    const vis = visible(), selN = all.filter(i => S.wip.sel.has(i.key)).length;
+    $("#w-count").textContent = `${selN} selezionate`;
+    $("#w-exp-hint").textContent = selN ? `Il .txt e “Copia” useranno le ${selN} gare selezionate.` : `Nessuna selezione: il .txt e “Copia” useranno le ${vis.length} gare visibili.`;
+    $("#w-list").innerHTML = WIP_BANDS.map(b => {
+      const its = vis.filter(i => i.band === b.k); if (!its.length) return "";
+      return `<details class="band band-${b.k}" data-b="${b.k}" ${S.wip.collapsed[b.k] ? "" : "open"}><summary><span class="bt">${b.t}</span><span class="bc">${its.length}</span>${b.note ? `<span class="bn">${b.note}</span>` : ""}</summary>
+      <div class="wlist">${its.map(i => `<div class="wrow ${S.wip.sel.has(i.key) ? "sel" : ""}"><label class="wchk"><input type="checkbox" data-key="${esc(i.key)}" ${S.wip.sel.has(i.key) ? "checked" : ""}></label>
+        <div class="wmain"><b>${esc(i.r.Cliente)}</b><span>${esc(i.r.Oggetto)}</span></div><div class="wtipo">${esc(i.r.tipo)}</div><div class="wsol">${esc(i.r["Solution D&A"] || "—")}</div>
+        <div class="wss">${esc(i.r.SS)}</div><div class="wdate">${i.d ? fmtD(i.d) : "—"} ${dayBadge(i.days, i.band)}</div></div>`).join("")}</div></details>`;
+    }).join("") || `<div class="card empty">Nessuna offerta WIP con questi filtri.</div>`;
+    $("#w-list").querySelectorAll("details.band").forEach(d => d.ontoggle = () => S.wip.collapsed[d.dataset.b] = !d.open);
+    $("#w-list").querySelectorAll(".wchk input").forEach(c => c.onchange = () => { c.checked ? S.wip.sel.add(c.dataset.key) : S.wip.sel.delete(c.dataset.key); selSave(S.wip.sel); c.closest(".wrow").classList.toggle("sel", c.checked);
+      const n = all.filter(i => S.wip.sel.has(i.key)).length; $("#w-count").textContent = `${n} selezionate`; $("#w-exp-hint").textContent = n ? `Il .txt e “Copia” useranno le ${n} gare selezionate.` : `Nessuna selezione: il .txt e “Copia” useranno le ${visible().length} gare visibili.`; });
+
+    // carico per Solution D&A (rispetta il filtro Tipo, non quello Solution)
+    const base = all.filter(passTipo), per = new Map();
+    base.forEach(i => (i.names.length ? i.names : [NOASS]).forEach(n => { const k = n.toLowerCase(); const o = per.get(k) || {n, d7: 0, d14: 0, tot: 0}; o.tot++; if (i.days !== null && i.days >= 0 && i.days <= 7) o.d7++; if (i.days !== null && i.days >= 0 && i.days <= 14) o.d14++; per.set(k, o); }));
+    const rows = [...per.entries()].sort((a, b) => b[1].d7 - a[1].d7 || b[1].tot - a[1].tot || a[1].n.localeCompare(b[1].n, "it")), mx = Math.max(1, ...rows.map(r => r[1].tot));
+    $("#w-load").innerHTML = `<h2>Carico per Solution D&amp;A</h2><div class="sub">Consegne nei prossimi 7 e 14 giorni, e totale WIP. Clicca un nome per filtrare.</div>` +
+      (rows.map(([k, o]) => `<div class="lrow ${S.wip.sol.size === 1 && S.wip.sol.has(k) ? "on" : ""}" data-k="${esc(k)}"><div class="lname"><b>${esc(o.n)}</b><span>${o.d7} in 7 gg · ${o.d14} in 14 gg · ${o.tot} WIP</span></div>
+        <div class="ltrack"><div class="lbar" style="width:${(100 * o.tot / mx).toFixed(1)}%"><i class="l7" style="width:${(100 * o.d7 / o.tot).toFixed(1)}%"></i><i class="l14" style="width:${(100 * (o.d14 - o.d7) / o.tot).toFixed(1)}%"></i></div></div></div>`).join("") || `<div class="empty">Nessun dato.</div>`) +
+      `<div class="legend"><span><i style="background:var(--lost)"></i>entro 7 gg</span><span><i style="background:var(--waiting)"></i>8–14 gg</span><span><i style="background:var(--altro)"></i>altre WIP</span></div>`;
+    $("#w-load").querySelectorAll(".lrow").forEach(r => r.onclick = () => { const k = r.dataset.k; if (S.wip.sol.size === 1 && S.wip.sol.has(k)) S.wip.sol.clear(); else S.wip.sol = new Set([k]); draw(); });
+  };
+  draw();
+  $("#w-tipo").onchange = e => { S.wip.tipo = e.target.value; draw(); };
+  $("#w-reset").onclick = () => { S.wip.sol.clear(); S.wip.tipo = ""; $("#w-tipo").value = ""; draw(); };
+  $("#w-selweek").onclick = () => { visible().filter(i => i.band === "week").forEach(i => S.wip.sel.add(i.key)); selSave(S.wip.sel); draw(); };
+  $("#w-selvis").onclick = () => { visible().forEach(i => S.wip.sel.add(i.key)); selSave(S.wip.sel); draw(); };
+  $("#w-selnone").onclick = () => { S.wip.sel.clear(); selSave(S.wip.sel); draw(); };
+  $("#w-txt").onclick = () => downloadText(wipText(exportItems(), ctx), ctx);
+  $("#w-copy").onclick = () => copyText(wipText(exportItems(), ctx));
+  $("#w-meet").onclick = () => openMeeting();
+}
+
+// vista riunione a schermo intero (solo righe selezionate)
+function openMeeting() {
+  const ctx = wipContext(), items = wipItems().filter(i => S.wip.sel.has(i.key));
+  const el = document.createElement("div"); el.id = "meeting";
+  const cnt = k => items.filter(i => i.band === k).length;
+  const bands = WIP_BANDS.map(b => {
+    const its = items.filter(i => i.band === b.k); if (!its.length) return "";
+    const owners = new Map(); its.forEach(i => { const o = i.r["Solution D&A"] || NOASS; (owners.get(o) || owners.set(o, []).get(o)).push(i); });
+    return `<section class="mt-band mb-${b.k}"><h2>${b.t} <em>${its.length}</em></h2>${b.note ? `<div class="mt-note">${b.note}</div>` : ""}` +
+      [...owners.entries()].sort((a, b) => a[0].localeCompare(b[0], "it")).map(([o, g]) => `<h3>${esc(o)}</h3>` + g.map(i => `<div class="mt-item"><div class="mt-c"><b>${esc(i.r.Cliente)}</b><span>${esc(i.r.Oggetto)}</span></div>
+        <div class="mt-m"><div><small>Owner</small>${esc(ownerOf(i))}</div><div><small>Consegna</small>${i.d ? fmtD(i.d) : "n.d."}</div><div><small>Giorni</small>${i.days === null ? "—" : `<span class="tag d-${i.band}">${dayText(i.days)}</span>`}</div><div><small>SS</small>${esc(i.r.SS || "n.d.")}</div></div></div>`).join("")).join("") + `</section>`;
+  }).join("");
+  el.innerHTML = `<div class="mt-bar"><button id="mt-exit">Esci (Esc)</button><span style="flex:1"></span><button id="mt-txt">Scarica .txt</button><button id="mt-copy">Copia negli appunti</button><button id="mt-print">Stampa</button></div>
+    <div class="mt-page"><h1>Consegne WIP – settimana dal ${fmtD(ctx.monday)} al ${fmtD(ctx.sunday)}</h1><div class="mt-gen">Generato il ${fmtD(ctx.today)}</div>
+    ${items.length ? bands : `<p class="mt-empty">Nessuna gara selezionata. Torna indietro e spunta le gare da discutere.</p>`}
+    <div class="mt-sum"><div><b>${items.length}</b><span>gare totali</span></div><div class="s-late"><b>${cnt("late")}</b><span>scadute</span></div><div class="s-week"><b>${cnt("week")}</b><span>questa settimana</span></div><div><b>${cnt("none")}</b><span>senza data</span></div></div></div>`;
+  document.body.appendChild(el); document.body.style.overflow = "hidden";
+  const close = () => { el.remove(); document.body.style.overflow = ""; document.removeEventListener("keydown", onKey); };
+  const onKey = e => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  $("#mt-exit", el).onclick = close;
+  $("#mt-txt", el).onclick = () => downloadText(wipText(items, ctx), ctx);
+  $("#mt-copy", el).onclick = () => copyText(wipText(items, ctx));
+  $("#mt-print", el).onclick = () => window.print();
 }
 
 // ------------------------------------------------------------ pulizia dati
