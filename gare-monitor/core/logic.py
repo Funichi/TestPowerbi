@@ -119,6 +119,30 @@ def clean_preview(rows, domini):
 
 # ---------------------------------------------------------------- cruscotto
 
+def _group_pipeline(rows, stato, key):
+    """Offerte per gruppo (Market/Vertical) e stato: WIP, Waiting, Won, Lost; Sospeso/NoBID/altro in 'Altro'."""
+    g = defaultdict(Counter)
+    for r in rows:
+        nome = clean_text(r[key]) or "(non indicato)"
+        st = stato[r["_row"]]
+        g[nome][st if st in ("WIP", "Waiting For response", "Won", "Lost") else "Altro"] += 1
+    out = [{"nome": n, "WIP": c["WIP"], "Waiting For response": c["Waiting For response"], "Won": c["Won"], "Lost": c["Lost"],
+            "Altro": c["Altro"], "totale": sum(c.values())} for n, c in g.items()]
+    out.sort(key=lambda x: (-x["totale"], x["nome"].casefold()))
+    return out
+
+
+def _win_rate(rows, stato, key):
+    g = defaultdict(lambda: [0, 0])
+    for r in rows:
+        st = stato[r["_row"]]
+        if st in ("Won", "Lost"):
+            g[clean_text(r[key]) or "(non indicato)"][0 if st == "Won" else 1] += 1
+    out = [{"nome": n, "won": w, "lost": l, "chiuse": w + l, "rate": w / (w + l)} for n, (w, l) in g.items() if w + l]
+    out.sort(key=lambda x: (-x["chiuse"], -x["rate"], x["nome"].casefold()))
+    return out
+
+
 def _brief(r, **extra):
     d = {k: r[k] for k in ("_row", "Seq", "Cliente", "Oggetto", "Stato", "Solution D&A", "Data ins.", "Data consegna", "Vertical")}
     d.update(extra)
@@ -235,8 +259,24 @@ def dashboard(rows, domini, today, months):
             consegnate[idx[(c.year, c.month)]] += 1
     trend = {"mesi": [m.strftime("%Y-%m") for m in mesi], "inserite": inserite, "consegnate": consegnate}
 
+    # KPI con delta rispetto al periodo precedente di pari durata (per Data ins.)
+    def kpi(rs):
+        w = sum(1 for r in rs if stato[r["_row"]] == "Won")
+        l = sum(1 for r in rs if stato[r["_row"]] == "Lost")
+        return {"inserite": len(rs), "won": w, "lost": l, "winrate": (w / (w + l)) if w + l else None}
+    cur_rows = [r for r in rows if ins(r) and (cutoff is None or ins(r) >= cutoff)]
+    kpis = {"periodo": kpi(cur_rows), "precedente": None}
+    if cutoff:
+        prev_start = add_months(cutoff, -months)
+        kpis["precedente"] = kpi([r for r in rows if ins(r) and prev_start <= ins(r) < cutoff])
+    in_per = [r for r in rows if in_period(r)]
+
     return {
         "oggi": today.isoformat(),
+        "kpi": kpis,
+        "pipeline_market": _group_pipeline(scope, stato, "Market"),
+        "pipeline_vertical": _group_pipeline(scope, stato, "Vertical"),
+        "winrate_market": _win_rate(in_per, stato, "Market"),
         "tiles": {
             "wip": sum(1 for r in rows if stato[r["_row"]] == "WIP"),
             "waiting": sum(1 for r in scope if stato[r["_row"]] == "Waiting For response"),
