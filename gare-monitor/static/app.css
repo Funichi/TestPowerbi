@@ -351,7 +351,7 @@ button.apill{font:inherit;font-weight:400}
 .alertbar{display:flex;align-items:center;gap:12px;background:var(--urg-two-bg);color:var(--urg-two-fg);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:16px;font-size:14px}
 .alertbar svg{flex:none}.alertbar .linkbtn{margin-left:auto;color:var(--urg-two-fg);text-decoration:underline;font-weight:600}
 .wl{padding:0;overflow:hidden}
-.wh,.wr2{display:grid;grid-template-columns:28px minmax(0,1.5fr) minmax(0,2.2fr) 104px 238px 148px;gap:12px;align-items:center;padding:10px var(--pad)}
+.wh,.wr2{display:grid;grid-template-columns:28px minmax(0,1.4fr) minmax(0,2.4fr) 100px 236px 236px;gap:12px;align-items:center;padding:10px var(--pad)}
 .wh{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:600;border-bottom:1px solid var(--divider);background:var(--card)}
 .wr2{border-bottom:1px solid var(--row-line);position:relative}
 .wr2::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:4px;border-radius:0 3px 3px 0;background:var(--urg-over)}
@@ -377,3 +377,15 @@ button.apill{font:inherit;font-weight:400}
 .inl-dt svg{width:14px;height:14px;color:var(--text-3)}.inl-dt:hover svg{color:var(--accent)}
 .dtin{position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;pointer-events:none;border:0;padding:0}
 .inl-st{width:100%;text-overflow:ellipsis}
+
+/* Consegnata + fascia "per tipo" */
+.wst{display:flex;align-items:center;gap:8px}.wst .inl-st{width:118px;flex:none}
+.btn-cons{padding:3px 10px;font-size:12.5px;gap:5px;border-radius:999px;white-space:nowrap;font-weight:600;color:var(--st-won-fg);background:var(--st-won-bg);border-color:transparent}
+.btn-cons svg{width:14px;height:14px}.btn-cons:hover{background:var(--st-won);border-color:transparent}
+.strip-h{display:flex;align-items:baseline;gap:12px;margin-bottom:10px;flex-wrap:wrap}.strip-h h2{margin:0;font-size:15px}.strip-h span{color:var(--text-3);font-size:13px}
+.tipo-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.tcard{display:block;text-align:left;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;font-weight:400}
+.tcard:hover{border-color:var(--border-hover);background:var(--card)}.tcard.on{border-color:var(--accent);background:var(--accent-soft)}
+.tcard .lname{display:flex;flex-direction:column}.tcard .lname b{font-weight:600}.tcard .lname span{font-size:12px;color:var(--text-3)}
+#w-load{margin-bottom:var(--gap)}
+@media(max-width:1200px){.wst{grid-column:2/-1}}

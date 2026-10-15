@@ -358,7 +358,7 @@ const byDate = (a, b) => (a.d ? a.d.getTime() : Infinity) - (b.d ? b.d.getTime()
 const tipoGroup = t => TIPI_MAIN.includes(t) ? t : "Altro";
 const passTipo = it => !S.wip.tipo || (S.wip.tipo === "__altro" ? tipoGroup(it.r.tipo) === "Altro" : it.r.tipo === S.wip.tipo);
 const passSol = it => !S.wip.sol.size || (it.names.length ? it.names.some(n => S.wip.sol.has(n.toLowerCase())) : S.wip.sol.has(NOASS.toLowerCase()));
-const passView = (it, v = S.wip.view) => v === "all" || (v === "late" ? it.band === "late" : v === "week" ? it.band === "week" : v === "future" ? it.days !== null && it.days >= 0 : it.days !== null && it.days >= 0 && it.days <= 7);
+const passView = (it, v = S.wip.view) => v === "all" || (v === "late" ? it.band === "late" : v === "week" ? it.band === "week" : v === "future" ? it.band === "two" || it.band === "over" : it.days !== null && it.days >= 0 && it.days <= 7);
 const dayText = g => g === null ? "" : g < 0 ? `scaduta da ${-g} gg` : g === 0 ? "oggi" : `tra ${g} gg`;
 const dayBadge = (g, band) => g === null ? "" : `<span class="tag d-${band}">${dayText(g)}</span>`;
 const ownerOf = it => it.r["Solution D&A"] || "n.d.";
@@ -421,6 +421,7 @@ function renderWip(m) {
   <div id="w-chips"></div>
   <div class="seg seg-lg" id="w-views" role="tablist"></div>
   <div id="w-alert"></div>
+  <div id="w-load"></div>
   <div class="card wbar">
     <div class="row">
       <button id="w-selweek">Seleziona questa settimana</button><button id="w-selvis">Seleziona le visibili</button><button id="w-selnone">Deseleziona tutto</button>
@@ -429,7 +430,7 @@ function renderWip(m) {
     </div>
     <div class="hint" id="w-exp-hint"></div>
   </div>
-  <div class="wgrid"><div class="card wl" id="w-list"></div><aside class="card wload" id="w-load"></aside></div>`;
+  <div class="card wl" id="w-list"></div>`;
 
   const all = () => wipItems();
   const visible = () => {
@@ -464,7 +465,7 @@ function renderWip(m) {
       <div class="wds" title="${esc(r.Oggetto)}">${orNil(r.Oggetto)}</div>
       <div class="wtipo">${tipoChip(r.tipo)}</div>
       <div class="wdt"><span class="dtw"><button type="button" class="inl inl-dt" data-id="${i.id}" title="Clicca per cambiare la data di consegna" aria-label="Data di consegna di ${esc(r.Cliente)}: ${i.d ? fmtD(i.d) : "nessuna"}. Cambia">${i.d ? fmtD(i.d) : "—"}${ico("calendar")}</button><input type="date" class="dtin" data-id="${i.id}" value="${esc(r["Data consegna"] || "")}" tabindex="-1" aria-hidden="true"></span>${out ? "" : dayBadge(i.days, i.band)}</div>
-      <div class="wst"><select class="inl inl-st st-${BCLASS[st] || "x"}" data-id="${i.id}" aria-label="Stato di ${esc(r.Cliente)}">${STATI.map(x => `<option ${x === st ? "selected" : ""}>${x}</option>`).join("")}</select></div>
+      <div class="wst"><select class="inl inl-st st-${BCLASS[st] || "x"}" data-id="${i.id}" aria-label="Stato di ${esc(r.Cliente)}">${STATI.map(x => `<option ${x === st ? "selected" : ""}>${x}</option>`).join("")}</select>${out ? "" : `<button type="button" class="btn-cons" data-id="${i.id}" title="Segna come consegnata: lo stato passa a Waiting For response">${ico("check")}Consegnata</button>`}</div>
     </div>`;
   };
   const draw = () => {
@@ -472,7 +473,7 @@ function renderWip(m) {
     const base = all().filter(i => i.wip && i.d && passTipo(i) && passSol(i));
     const n = {all: base.length, late: base.filter(i => passView(i, "late")).length, week: base.filter(i => passView(i, "week")).length, future: base.filter(i => passView(i, "future")).length};
     const VIEWS = [["all", "Tutte", n.all], ["late", "Scadute", n.late], ["week", "Questa settimana", n.week], ["future", "Future", n.future]];
-    $("#w-views").innerHTML = VIEWS.map(([k, l, c]) => `<button role="tab" data-v="${k}" class="${W.view === k ? "on" : ""} v-${k}">${l}<span class="vc">${c}</span></button>`).join("");
+    $("#w-views").innerHTML = VIEWS.map(([k, l, c]) => `<button role="tab" data-v="${k}" title="${({all: "Tutte le WIP con data di consegna", late: "Consegna già passata", week: "Consegna da oggi a domenica", future: "Consegna dopo questa settimana"})[k]}" class="${W.view === k ? "on" : ""} v-${k}">${l}<span class="vc">${c}</span></button>`).join("");
     $("#w-views").querySelectorAll("button").forEach(b => b.onclick = () => setView(b.dataset.v));
     const nodate = all().filter(i => i.wip && !i.d);
     $("#w-alert").innerHTML = nodate.length ? `<div class="alertbar">${ico("triangle-alert")}<span><b>${nodate.length}</b> ${nodate.length === 1 ? "offerta WIP è senza" : "offerte WIP sono senza"} data di consegna e non compaiono qui: da completare.</span><button class="linkbtn" id="w-nodate">Vedi quali</button></div>` : "";
@@ -486,17 +487,18 @@ function renderWip(m) {
       const row = rowByNum(+inp.dataset.id); if (!row) return;
       wipEdit(row, {"Data consegna": inp.value || null}, inp.value ? `Consegna di ${row.Cliente}: ${fmt(inp.value)}` : `Data di consegna di ${row.Cliente} tolta`);
     });
+    $("#w-list").querySelectorAll(".btn-cons").forEach(btn => btn.onclick = () => { const row = rowByNum(+btn.dataset.id); if (row) wipEdit(row, {Stato: "Waiting For response"}, `${row.Cliente}: consegnata`); });
     $("#w-list").querySelectorAll(".inl-st").forEach(sel => sel.onchange = () => { const row = rowByNum(+sel.dataset.id); if (row) wipEdit(row, {Stato: sel.value}, `${row.Cliente}: ${sel.value}`); });
 
     // consegne per tipo (rispetta i filtri Solution e vista; clic = filtra per quel tipo)
     const per = new Map();
     all().filter(i => i.wip && i.d && passSol(i)).forEach(i => { const g = tipoGroup(i.r.tipo), o = per.get(g) || {n: g, d7: 0, d14: 0, tot: 0}; o.tot++; if (i.days >= 0 && i.days <= 7) o.d7++; if (i.days >= 0 && i.days <= 14) o.d14++; per.set(g, o); });
     const rows = [...per.values()].sort((a, b) => [...TIPI_MAIN, "Altro"].indexOf(a.n) - [...TIPI_MAIN, "Altro"].indexOf(b.n)), mx = Math.max(1, ...rows.map(r => r.tot));
-    $("#w-load").innerHTML = `<h2>Consegne per tipo</h2><div class="sub">Gara, incontro, RFI… Consegne nei prossimi 7 e 14 giorni e totale WIP con data. Clicca un tipo per filtrare.</div>` +
-      (rows.map(o => { const key = o.n === "Altro" ? "__altro" : o.n; return `<div class="lrow ${W.tipo === key ? "on" : ""}" data-t="${esc(key)}"><div class="lname"><b>${esc(o.n)}</b><span>${o.d7} in 7 gg · ${o.d14} in 14 gg · ${o.tot} WIP</span></div>
-        <div class="ltrack"><div class="lbar" style="width:${(100 * o.tot / mx).toFixed(1)}%"><i class="l7" style="width:${(100 * o.d7 / o.tot).toFixed(1)}%"></i><i class="l14" style="width:${(100 * (o.d14 - o.d7) / o.tot).toFixed(1)}%"></i></div></div></div>`; }).join("") || `<div class="empty">Nessun dato.</div>`) +
-      `<div class="legend"><span><i style="background:var(--chart-main)"></i>entro 7 gg</span><span><i style="background:var(--chart-2)"></i>8–14 gg</span><span><i style="background:var(--chart-3)"></i>altre WIP</span></div>`;
-    $("#w-load").querySelectorAll(".lrow").forEach(r => r.onclick = () => { W.tipo = W.tipo === r.dataset.t ? "" : r.dataset.t; $("#w-tipo").value = W.tipo; resetWipView(); draw(); });
+    $("#w-load").innerHTML = `<div class="strip-h"><h2>Consegne per tipo</h2><span>Prossimi 7 e 14 giorni e totale WIP con data · clicca un tipo per filtrare</span></div><div class="tipo-strip">` +
+      (rows.map(o => { const key = o.n === "Altro" ? "__altro" : o.n; return `<button type="button" class="tcard ${W.tipo === key ? "on" : ""}" data-t="${esc(key)}"><div class="lname"><b>${esc(o.n)}</b><span>${o.d7} in 7 gg · ${o.d14} in 14 gg · ${o.tot} WIP</span></div>
+        <div class="ltrack"><div class="lbar" style="width:${(100 * o.tot / mx).toFixed(1)}%"><i class="l7" style="width:${(100 * o.d7 / o.tot).toFixed(1)}%"></i><i class="l14" style="width:${(100 * (o.d14 - o.d7) / o.tot).toFixed(1)}%"></i></div></div></button>`; }).join("") || `<div class="empty">Nessun dato.</div>`) +
+      `</div><div class="legend"><span><i style="background:var(--chart-main)"></i>entro 7 gg</span><span><i style="background:var(--chart-2)"></i>8–14 gg</span><span><i style="background:var(--chart-3)"></i>altre WIP</span></div>`;
+    $("#w-load").querySelectorAll(".tcard").forEach(r => r.onclick = () => { W.tipo = W.tipo === r.dataset.t ? "" : r.dataset.t; $("#w-tipo").value = W.tipo; resetWipView(); draw(); });
   };
   W.redraw = draw;
   resetWipView();
