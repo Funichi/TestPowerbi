@@ -675,30 +675,45 @@ $("#main").addEventListener("click", e => { const a = e.target.closest("[data-cl
 const durata = t => t && t.media !== null ? `${num(Math.round(t.media))} gg` : "—";
 const vsMedia = (txt) => `<span class="d">${txt}</span>`;
 const pct = r => r === null || r === undefined ? "—" : Math.round(r * 100) + "%";
-async function renderCliente(m) {
+const stGroups = (rows, keyOf, order) => {
+  const g = {};
+  rows.forEach(r => { const k = keyOf(r); if (k === null) return; const e = g[k] = g[k] || {nome: k, WIP: 0, "Waiting For response": 0, Won: 0, Lost: 0, Altro: 0, totale: 0};
+    e[["WIP", "Waiting For response", "Won", "Lost"].includes(r.Stato) ? r.Stato : "Altro"]++; e.totale++; });
+  const out = Object.values(g);
+  return order ? out.sort((x, y) => order.indexOf(x.nome) - order.indexOf(y.nome)) : out.sort((x, y) => x.nome.localeCompare(y.nome, "it"));
+};
+function renderCliente(m) {
   const names = S.data.domini.clienti.map(c => c.Cliente);
   const attivi = Object.entries(S.data.rows.reduce((a, r) => { if (r.Cliente) a[r.Cliente.trim()] = (a[r.Cliente.trim()] || 0) + 1; return a; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 14);
-  const head = `<div class="fbar"><div class="grow"><label for="cl-q">Cliente</label><input id="cl-q" list="dl-cli" value="${esc(S.cliente || "")}" placeholder="scrivi o scegli un cliente…" autocomplete="off"><datalist id="dl-cli">${names.map(n => `<option value="${esc(n)}">`).join("")}</datalist></div>
-    ${S.prevView && S.cliente ? `<div><button id="cl-back" class="btn-sec">${ico("arrow-left")}Indietro</button></div>` : ""}</div>`;
-  const bindSearch = () => {
-    const q = $("#cl-q"), go = () => { const v = q.value.trim(), hit = names.find(n => n.toLowerCase() === v.toLowerCase()); if (hit) { S.cliente = hit; render(); } };
-    q.onchange = go; q.oninput = () => { if (names.includes(q.value)) go(); };
-    const b = $("#cl-back"); if (b) b.onclick = () => { S.view = S.prevView || "dash"; S.prevView = null; render(); };
+  m.innerHTML = `<div class="fbar"><div class="grow"><label for="cl-q">Cliente</label><input id="cl-q" list="dl-cli" value="${esc(S.cliente || "")}" placeholder="scrivi o scegli un cliente…" autocomplete="off"><datalist id="dl-cli">${names.map(n => `<option value="${esc(n)}">`).join("")}</datalist></div>
+    ${S.prevView && S.cliente ? `<div><button id="cl-back" class="btn-sec">${ico("arrow-left")}Indietro</button></div>` : ""}</div><div id="cl-body"></div>`;
+  const body = $("#cl-body"), q = $("#cl-q");
+  const picker = () => { body.innerHTML = `<div class="card"><h2>Scegli un cliente</h2><div class="sub">Scrivi il nome qui sopra, oppure parti da uno dei più attivi. Il nome del cliente è cliccabile anche nella Tabella e nel Cruscotto.</div>
+      <div class="chips">${attivi.map(([n, k]) => `<button class="chip cl-pick" data-cliente="${esc(n)}">${esc(n)} <span class="muted">${k}</span></button>`).join("")}</div></div>`; };
+  // cambia cliente senza ridisegnare la barra di ricerca (così si può continuare a scrivere)
+  const show = v => {
+    if (!q.isConnected) return;                 // il campo è stato ridisegnato (Chrome lancia "change" anche alla sua rimozione)
+    const hit = names.find(n => n.toLowerCase() === v.trim().toLowerCase());
+    if (hit) { if (hit !== S.cliente) { S.cliente = hit; loadBody(); } }
+    else if (!v.trim() && S.cliente) { S.cliente = null; picker(); }
   };
-  if (!S.cliente) {
-    m.innerHTML = head + `<div class="card"><h2>Scegli un cliente</h2><div class="sub">Scrivi il nome qui sopra, oppure parti da uno dei più attivi. Il nome del cliente è cliccabile anche nella Tabella e nel Cruscotto.</div>
-      <div class="chips">${attivi.map(([n, k]) => `<button class="chip cl-pick" data-cliente="${esc(n)}">${esc(n)} <span class="muted">${k}</span></button>`).join("")}</div></div>`;
-    bindSearch(); return;
-  }
-  m.innerHTML = head + `<p class="muted pad">Caricamento…</p>`; bindSearch();
-  let c; try { c = await api("/api/cliente?nome=" + encodeURIComponent(S.cliente)); }
-  catch (e) { m.innerHTML = head + `<div class="card"><div class="err">${esc(e.message)}</div></div>`; bindSearch(); return; }
-  if (S.view !== "cliente") return;
-  const k = c.kpi, md = c.media, tk = k.tempi, tg = md.tempi;
-  const rate = k.rate === null ? "—" : pct(k.rate);
-  const cart = c.cartella;
+  q.oninput = () => show(q.value); q.onchange = () => show(q.value);
+  const bk = $("#cl-back"); if (bk) bk.onclick = () => { S.view = S.prevView || "dash"; S.prevView = null; render(); };
+  const loadBody = async () => {
+    const nome = S.cliente; q.value = nome; S.clTipo = "";
+    body.innerHTML = `<p class="muted pad">Caricamento…</p>`;
+    let c; try { c = await api("/api/cliente?nome=" + encodeURIComponent(nome)); }
+    catch (e) { body.innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div></div>`; return; }
+    if (S.view !== "cliente" || S.cliente !== nome) return;
+    drawCliente(body, c);
+  };
+  if (S.cliente) loadBody(); else picker();
+}
+function drawCliente(body, c) {
+  const k = c.kpi, md = c.media, tk = k.tempi, tg = md.tempi, cart = c.cartella;
   const cmpTempo = tk.media === null || tg.media === null ? "" : vsMedia(`media generale ${durata(tg)}`);
-  m.innerHTML = head + `
+  const tipiPresenti = [...TIPI_MAIN, "Altro"].filter(t => c.cronologia.some(x => tipoGroup(x.tipo) === t));
+  body.innerHTML = `
   <div class="card chead"><div class="chead-t"><h2 class="cname">${esc(c.nome)}</h2>
       <div class="cmeta">${c.vertical ? `<span class="tchip">${esc(c.vertical)}</span>` : ""}${c.market ? `<span class="tchip">${esc(c.market)}</span>` : ""}${c.ss.length ? `<span class="tchip" title="Prefisso del codice SS">SS ${esc(c.ss.join(", "))}</span>` : ""}
       <span class="muted">${c.prima ? `Prima offerta ${fmt(c.prima)}` : ""}${c.ultima ? ` · ultima ${fmt(c.ultima.data)} ${badge(c.ultima.stato)}` : ""}</span></div></div>
@@ -707,22 +722,31 @@ async function renderCliente(m) {
     ${kpi(num(k.totale), `Offerte totali · ${md.offerte_per_cliente ?? "—"} in media per cliente`)}
     ${kpi(num(k.wip + k.waiting), `In corso · ${k.wip} WIP, ${k.waiting} in attesa`)}
     ${kpi(`${k.won}<span class="of">/${k.chiuse}</span>`, "Won su offerte chiuse (Won + Lost)")}
-    ${kpi(rate, "Win rate", md.rate === null ? "" : vsMedia(`media generale ${pct(md.rate)}`), k.chiuse ? "key" : "")}
+    ${kpi(pct(k.rate), "Win rate", md.rate === null ? "" : vsMedia(`media generale ${pct(md.rate)}`), k.chiuse ? "key" : "")}
     ${kpi(durata(tk), `Tempo medio di consegna${tk.n ? ` · mediana ${num(Math.round(tk.mediana))} gg su ${tk.n} offerte` : ""}`, cmpTempo)}
   </div>
   <div class="g12">
-    <div class="card c7"><h2>Offerte nel tempo</h2><div class="sub">Ogni punto è un'offerta, per Data ins. e tipo. Clicca per aprirla.</div><div id="cl-tl"></div></div>
-    <div class="card c5"><h2>Per anno</h2><div class="sub">Esito delle offerte aperte in ciascun anno.</div><div id="cl-anni"></div></div>
+    <div class="card c7"><div class="card-h"><div><h2>Offerte per anno</h2><div class="sub">Per Data ins., divise per stato.</div></div>
+      <div><label for="cl-tipo" class="sr">Tipo</label><select id="cl-tipo"><option value="">Tutti i tipi</option>${tipiPresenti.map(t => `<option>${esc(t)}</option>`).join("")}</select></div></div>
+      <div id="cl-anni"></div></div>
+    <div class="card c5"><h2>Per tipologia</h2><div class="sub">Offerte del cliente divise per tipo e stato.</div><div id="cl-tipi"></div></div>
   </div>
   <div class="card"><h2>Storico offerte</h2><div class="sub">Dalla più recente. Giorni = da Data ins. a Data consegna (solo offerte già consegnate).</div>
     <div class="tscroll"><table class="dt"><thead><tr><th>Data ins.</th><th>Oggetto</th><th>Tipo</th><th>Solution D&amp;A</th><th>Stato</th><th>Consegna</th><th class="num">Giorni</th><th>SS</th></tr></thead><tbody>
     ${c.cronologia.map(x => `<tr class="click" data-row="${x._row}"><td>${x["Data ins."] ? fmt(x["Data ins."]) : nil()}</td><td class="og" title="${esc(x.Oggetto)}">${attDot(x)}${orNil(x.Oggetto)}</td><td>${tipoChip(x.tipo)}</td><td>${orNil(x["Solution D&A"])}</td><td>${badge(x.Stato)}</td><td>${x["Data consegna"] ? fmt(x["Data consegna"]) : nil()}</td><td class="num">${x.giorni === null ? nil() : x.giorni}</td><td>${orNil(x.SS)}</td></tr>`).join("")}
     </tbody></table></div></div>`;
-  m.querySelectorAll("tr[data-row]").forEach(tr => tr.onclick = () => openForm(rowByNum(+tr.dataset.row)));
-  drawTimeline($("#cl-tl"), c);
-  const groups = c.anni.map(a => ({nome: a.anno === null ? "senza data" : String(a.anno), WIP: a.wip, "Waiting For response": a.waiting, Won: a.won, Lost: a.lost, Altro: a.altri, totale: a.totale}));
-  $("#cl-anni").innerHTML = hbars(groups);
-  $("#cl-anni").querySelectorAll("[data-grp]").forEach(e => e.style.cursor = "default");
+  body.querySelectorAll("tr[data-row]").forEach(tr => tr.onclick = () => openForm(rowByNum(+tr.dataset.row)));
+  const anni = () => {
+    const rows = c.cronologia.filter(x => !S.clTipo || tipoGroup(x.tipo) === S.clTipo);
+    const g = stGroups(rows, x => x["Data ins."] ? x["Data ins."].slice(0, 4) : "senza data");
+    $("#cl-anni").innerHTML = g.length ? vcolumns(g) : `<div class="empty">Nessuna offerta di questo tipo.</div>`;
+    $("#cl-anni").querySelectorAll("[data-grp]").forEach(e => e.style.cursor = "default");
+  };
+  anni();
+  $("#cl-tipo").onchange = e => { S.clTipo = e.target.value; anni(); };
+  const tg2 = stGroups(c.cronologia, x => tipoGroup(x.tipo), [...TIPI_MAIN, "Altro"]);
+  $("#cl-tipi").innerHTML = hbars(tg2);
+  $("#cl-tipi").querySelectorAll("[data-grp]").forEach(e => e.style.cursor = "default");
   const f = $("#cl-folder"); if (f) f.onclick = () => apriCartella(c);
 }
 async function apriCartella(c) {
@@ -732,35 +756,8 @@ async function apriCartella(c) {
     <div class="cand">${c.cartella.candidati.map((n, i) => `<button class="btn-sec" data-i="${i}">${ico("folder-open")}${esc(n)}</button>`).join("")}</div>
     <div class="foot"><button id="cf-x">Annulla</button></div>`);
   $("#cf-x", el).onclick = closeModal;
-  el.querySelectorAll("[data-i]").forEach(b => b.onclick = async () => { const n = c.cartella.candidati[+b.dataset.i]; closeModal(); await call(n); c.cartella = {stato: "ok", nome: n, candidati: []}; render(); });
+  el.querySelectorAll("[data-i]").forEach(b => b.onclick = async () => { const n = c.cartella.candidati[+b.dataset.i]; closeModal(); await call(n); c.cartella = {stato: "ok", nome: n, candidati: []}; drawCliente($("#cl-body"), c); });
 }
-// linea del tempo: una corsia per tipo, un punto per offerta, colore = stato
-function drawTimeline(el, c) {
-  const items = c.cronologia.filter(x => x["Data ins."]);
-  if (!items.length) { el.innerHTML = `<div class="empty">Nessuna offerta con Data ins.</div>`; return; }
-  const day = iso => new Date(iso + "T00:00:00").getTime();
-  const lanes = [...TIPI_MAIN, "Altro"].filter(t => items.some(x => (TIPI_MAIN.includes(x.tipo) ? x.tipo : "Altro") === t));
-  const t0 = Math.min(...items.map(x => day(x["Data ins."]))), t1 = Math.max(...items.map(x => day(x["Data ins."])));
-  const y0 = new Date(t0).getFullYear(), y1 = new Date(t1).getFullYear();
-  const a = new Date(y0, 0, 1).getTime(), b = new Date(y1 + 1, 0, 1).getTime();
-  const W = 700, L = 96, R = 14, T = 12, LH = 36, H = T + lanes.length * LH + 26, X = t => L + (t - a) / (b - a) * (W - L - R);
-  const years = []; for (let y = y0; y <= y1; y++) years.push(y);
-  const step = years.length > 8 ? Math.ceil(years.length / 8) : 1;
-  const used = {}; 
-  const dots = items.map(x => {
-    const lane = lanes.indexOf(TIPI_MAIN.includes(x.tipo) ? x.tipo : "Altro"), cx = X(day(x["Data ins."])), key = lane + ":" + Math.round(cx / 12), n = used[key] = (used[key] || 0) + 1;
-    const cy = T + lane * LH + LH / 2 + ((n - 1) % 3 - (n > 1 ? 1 : 0)) * 8;
-    return `<circle class="tdot" data-row="${x._row}" cx="${cx.toFixed(1)}" cy="${cy}" r="6" style="fill:${COLOR[x.Stato] || COLOR.Altro}"><title>${esc(fmt(x["Data ins."]))} · ${esc(x.Stato || "")} · ${esc((x.Oggetto || "").slice(0, 80))}</title></circle>`;
-  }).join("");
-  const grid = years.map(y => `<line x1="${X(new Date(y, 0, 1).getTime())}" x2="${X(new Date(y, 0, 1).getTime())}" y1="${T}" y2="${H - 22}" stroke="var(--divider)"/>${(y - y0) % step === 0 ? `<text x="${X(new Date(y, 0, 1).getTime()) + 4}" y="${H - 6}">${y}</text>` : ""}`).join("");
-  const laneTxt = lanes.map((t, i) => `<text x="0" y="${T + i * LH + LH / 2 + 4}">${esc(TIPO_SHORT[t] || t)}</text><line x1="${L}" x2="${W - R}" y1="${T + (i + 1) * LH}" y2="${T + (i + 1) * LH}" stroke="var(--row-line)"/>`).join("");
-  const presenti = STATI.filter(s => items.some(x => x.Stato === s));
-  const senza = c.cronologia.length - items.length;
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="tl" role="img" aria-label="Offerte del cliente nel tempo">${grid}${laneTxt}${dots}</svg>
-    <div class="legend">${presenti.map(s => `<span><i style="background:${COLOR[s]}"></i>${s === "NoBID" ? "No Bid" : s === "Waiting For response" ? "Waiting" : s}</span>`).join("")}</div>${senza ? `<div class="hint">${senza} offerte senza Data ins. non compaiono nel grafico.</div>` : ""}`;
-  el.querySelectorAll(".tdot").forEach(d => d.onclick = () => openForm(rowByNum(+d.dataset.row)));
-}
-
 // ------------------------------------------------------------ tempi di consegna
 const TEMPI_PERIODI = [["all", "Tutto lo storico"], ["24", "Ultimi 24 mesi"], ["12", "Ultimi 12 mesi"]];
 async function renderTempi(m) {

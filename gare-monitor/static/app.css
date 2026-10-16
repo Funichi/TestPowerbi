@@ -462,3 +462,4 @@ button.apill{font:inherit;font-weight:400}
 .vopts{display:flex;flex-direction:column;gap:6px;flex:1;min-width:240px}.vopt{display:flex;align-items:center;gap:8px;margin:0;font-weight:400;color:var(--text);cursor:pointer}
 @media(max-width:768px){.tm{grid-template-columns:100px minmax(0,1fr)}.tv2{grid-column:1/-1;margin-bottom:6px}}
 .vopt input{width:auto;flex:none;margin:0}.vopt span{white-space:nowrap}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
