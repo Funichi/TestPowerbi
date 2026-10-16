@@ -201,7 +201,7 @@ def _mappa_cartelle():
 @app.get("/api/cliente")
 def cliente():
     nome = request.args.get("nome", "")
-    sc = clienti.scheda(get_data()["rows"], nome)
+    sc = clienti.scheda(get_data()["rows"], nome, request.args.get("anno", type=int))
     sc["cartella"] = clienti.trova_cartella(clienti_dir(), sc["nome"], _mappa_cartelle())
     return jsonify(sc)
 

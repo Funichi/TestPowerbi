@@ -700,14 +700,19 @@ function renderCliente(m) {
   q.oninput = () => show(q.value); q.onchange = () => show(q.value);
   const bk = $("#cl-back"); if (bk) bk.onclick = () => { S.view = S.prevView || "dash"; S.prevView = null; render(); };
   const loadBody = async () => {
-    const nome = S.cliente; q.value = nome; S.clTipo = "";
+    const nome = S.cliente; q.value = nome; S.clTipo = ""; S.clAnno = "";
     body.innerHTML = `<p class="muted pad">Caricamento…</p>`;
     let c; try { c = await api("/api/cliente?nome=" + encodeURIComponent(nome)); }
     catch (e) { body.innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div></div>`; return; }
     if (S.view !== "cliente" || S.cliente !== nome) return;
-    drawCliente(body, c);
+    S.clFull = c; drawCliente(body, c);
   };
   if (S.cliente) loadBody(); else picker();
+}
+async function setAnnoCliente(body, anno) {
+  S.clAnno = anno; S.clTipo = "";
+  try { const c = anno ? await api(`/api/cliente?nome=${encodeURIComponent(S.cliente)}&anno=${anno}`) : S.clFull; drawCliente(body, c); }
+  catch (e) { toast(e.message, true); }
 }
 function drawCliente(body, c) {
   const k = c.kpi, md = c.media, tk = k.tempi, tg = md.tempi, cart = c.cartella;
@@ -716,7 +721,8 @@ function drawCliente(body, c) {
   body.innerHTML = `
   <div class="card chead"><div class="chead-t"><h2 class="cname">${esc(c.nome)}</h2>
       <div class="cmeta">${c.vertical ? `<span class="tchip">${esc(c.vertical)}</span>` : ""}${c.market ? `<span class="tchip">${esc(c.market)}</span>` : ""}${c.ss.length ? `<span class="tchip" title="Prefisso del codice SS">SS ${esc(c.ss.join(", "))}</span>` : ""}
-      <span class="muted">${c.prima ? `Prima offerta ${fmt(c.prima)}` : ""}${c.ultima ? ` · ultima ${fmt(c.ultima.data)} ${badge(c.ultima.stato)}` : ""}</span></div></div>
+      <span class="muted">${S.clAnno ? `Anno ${S.clAnno} · ` : ""}${c.prima ? `Prima offerta ${fmt(c.prima)}` : ""}${c.ultima ? ` · ultima ${fmt(c.ultima.data)} ${badge(c.ultima.stato)}` : ""}</span></div></div>
+    <div><label for="cl-anno" class="sr">Anno</label><select id="cl-anno" title="Mostra indicatori e grafici di un solo anno (Data ins.)"><option value="">Tutti gli anni</option>${(S.clFull || c).anni_disponibili.map(a => `<option value="${a}" ${String(S.clAnno) === String(a) ? "selected" : ""}>${a}</option>`).join("")}</select></div>
     ${cart.stato !== "nessuna" ? `<button id="cl-folder" class="btn-sec" title="${cart.nome ? esc(cart.nome) : "Scegli la cartella di questo cliente"}">${ico("folder-open")}${cart.stato === "ok" ? "Apri cartella" : "Apri cartella…"}</button>` : ""}</div>
   <div class="kpis">
     ${kpi(num(k.totale), `Offerte totali · ${md.offerte_per_cliente ?? "—"} in media per cliente`)}
@@ -726,7 +732,7 @@ function drawCliente(body, c) {
     ${kpi(durata(tk), `Tempo medio di consegna${tk.n ? ` · mediana ${num(Math.round(tk.mediana))} gg su ${tk.n} offerte` : ""}`, cmpTempo)}
   </div>
   <div class="g12">
-    <div class="card c7"><div class="card-h"><div><h2>Offerte per anno</h2><div class="sub">Per Data ins., divise per stato.</div></div>
+    <div class="card c7"><div class="card-h"><div><h2>Offerte per ${S.clAnno ? "mese" : "anno"}</h2><div class="sub">${S.clAnno ? `Nel ${S.clAnno}, per` : "Per"} Data ins., divise per stato.</div></div>
       <div><label for="cl-tipo" class="sr">Tipo</label><select id="cl-tipo"><option value="">Tutti i tipi</option>${tipiPresenti.map(t => `<option>${esc(t)}</option>`).join("")}</select></div></div>
       <div id="cl-anni"></div></div>
     <div class="card c5"><h2>Per tipologia</h2><div class="sub">Offerte del cliente divise per tipo e stato.</div><div id="cl-tipi"></div></div>
@@ -738,11 +744,12 @@ function drawCliente(body, c) {
   body.querySelectorAll("tr[data-row]").forEach(tr => tr.onclick = () => openForm(rowByNum(+tr.dataset.row)));
   const anni = () => {
     const rows = c.cronologia.filter(x => !S.clTipo || tipoGroup(x.tipo) === S.clTipo);
-    const g = stGroups(rows, x => x["Data ins."] ? x["Data ins."].slice(0, 4) : "senza data");
+    const g = S.clAnno ? stGroups(rows, x => x["Data ins."] ? MESI[+x["Data ins."].slice(5, 7) - 1] : null, MESI) : stGroups(rows, x => x["Data ins."] ? x["Data ins."].slice(0, 4) : "senza data");
     $("#cl-anni").innerHTML = g.length ? vcolumns(g) : `<div class="empty">Nessuna offerta di questo tipo.</div>`;
     $("#cl-anni").querySelectorAll("[data-grp]").forEach(e => e.style.cursor = "default");
   };
   anni();
+  $("#cl-anno").onchange = e => setAnnoCliente(body, e.target.value);
   $("#cl-tipo").onchange = e => { S.clTipo = e.target.value; anni(); };
   const tg2 = stGroups(c.cronologia, x => tipoGroup(x.tipo), [...TIPI_MAIN, "Altro"]);
   $("#cl-tipi").innerHTML = hbars(tg2);

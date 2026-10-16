@@ -325,3 +325,13 @@ def test_varianti_cliente_e_unione_nel_database_locale(client):
     r = c.post("/api/clienti/unisci", json={"nomi": ["Terna", "TERNA", "Terna S.p.A."], "in": "Terna"}).get_json()
     assert r["righe"] == 2 and c.get("/api/clienti/varianti").get_json() == []
     assert c.get("/api/state").get_json()["pending"]["mod"] == 1 and sheet(x).cell(3, 4).value == "TERNA "      # solo database locale
+
+
+def test_scheda_cliente_filtrata_per_anno(client):
+    c, x, _ = client
+    c.post("/api/rows", json={**NEW, "Cliente": "Enel", "Oggetto": "Nuova Enel", "SS": "ENE2", "Data ins.": "2026-10-10", "Data consegna": "2026-10-20", "Stato": "Won"})
+    tutti = c.get("/api/cliente", query_string={"nome": "Enel"}).get_json()
+    assert tutti["kpi"]["totale"] == 2 and tutti["anni_disponibili"] == [2025, 2026]
+    a25 = c.get("/api/cliente", query_string={"nome": "Enel", "anno": 2025}).get_json()
+    assert a25["kpi"]["totale"] == 1 and a25["kpi"]["lost"] == 1 and a25["kpi"]["won"] == 0 and a25["anni_disponibili"] == [2025, 2026]
+    assert c.get("/api/cliente", query_string={"nome": "Terna", "anno": 2025}).get_json()["kpi"]["totale"] == 0      # nessuna offerta in quell'anno: scheda vuota, non errore

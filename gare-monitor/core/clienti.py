@@ -49,11 +49,21 @@ def _piu_frequente(valori):
 
 # ---------------------------------------------------------------- scheda cliente
 
-def scheda(rows, nome):
+def _anno(r):
+    d = to_date(r["Data ins."])
+    return d.year if d else None
+
+
+def scheda(rows, nome, anno=None):
+    """Scheda di un cliente. anno: considera solo le offerte aperte in quell'anno (clienti e medie generali comprese)."""
     key = client_key(nome)
-    mie = [r for r in rows if client_key(r["Cliente"]) == key]
-    if not key or not mie:
+    tutte_mie = [r for r in rows if client_key(r["Cliente"]) == key]
+    if not key or not tutte_mie:
         raise ValueError("Cliente non trovato")
+    anni_disponibili = sorted({a for a in map(_anno, tutte_mie) if a})
+    if anno:
+        rows = [r for r in rows if _anno(r) == anno]
+    mie = [r for r in rows if client_key(r["Cliente"]) == key]
     gen = _esiti(rows)
     n_clienti = len({client_key(r["Cliente"]) for r in rows if client_key(r["Cliente"])})
     g_mie = [g for g in (giorni_consegna(r) for r in mie) if g is not None]
@@ -69,10 +79,11 @@ def scheda(rows, nome):
         anni[d.year if d else None].append(r)
     cron = sorted(mie, key=lambda r: (to_date(r["Data ins."]) or to_date("1900-01-01")), reverse=True)
     return {
-        "nome": _piu_frequente([r["Cliente"] for r in mie]),
-        "vertical": _piu_frequente([r["Vertical"] for r in mie]),
-        "market": _piu_frequente([r["Market"] for r in mie if r["Market"] != NOIND]),
-        "ss": sorted({p[0] for p in (_split_ss(r["SS"]) for r in mie) if p}),
+        "nome": _piu_frequente([r["Cliente"] for r in tutte_mie]),
+        "anno": anno, "anni_disponibili": anni_disponibili,
+        "vertical": _piu_frequente([r["Vertical"] for r in tutte_mie]),
+        "market": _piu_frequente([r["Market"] for r in tutte_mie if r["Market"] != NOIND]),
+        "ss": sorted({p[0] for p in (_split_ss(r["SS"]) for r in tutte_mie) if p}),
         "kpi": k,
         "media": {"rate": gen["rate"], "chiuse": gen["chiuse"], "tempi": _tempi(g_tutte),
                   "offerte_per_cliente": round(gen["totale"] / n_clienti, 1) if n_clienti else None},
