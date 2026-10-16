@@ -14,7 +14,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from core import logic
 from core.db import Store
-from core.reader import DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
+from core.reader import ATT_LABELS, DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
 from core.writer import WriteError, get_writer
 
 FROZEN = getattr(sys, "frozen", False)
@@ -197,6 +197,15 @@ def suggest():
 def _sanitize(values, domini):
     out = {}
     for f, v in values.items():
+        if f == "Attenzione":                          # 0 nessuna · 1 giallo · 2 arancione · 3 rosso
+            try:
+                lvl = int(v or 0)
+            except (TypeError, ValueError):
+                raise ValueError("Livello di attenzione non valido")
+            if lvl not in (0, 1, 2, 3):
+                raise ValueError("Livello di attenzione non valido")
+            out[f] = lvl
+            continue
         if f not in FIELDS:
             continue
         if f in DATE_FIELDS:
@@ -282,9 +291,11 @@ def import_now():
 def pending():
     p = store().pending_items()
     rows = {r["_row"]: r for r in get_data()["rows"]}
-    nuove = [{"id": x["id"], "Cliente": x["values"].get("Cliente"), "Oggetto": x["values"].get("Oggetto"), "Stato": x["values"].get("Stato")} for x in p["new"]]
+    nuove = [{"id": x["id"], "Cliente": x["values"].get("Cliente"), "Oggetto": x["values"].get("Oggetto"), "Stato": x["values"].get("Stato"),
+              "Attenzione": ATT_LABELS[x["values"].get("Attenzione") or 0]} for x in p["new"]]
     mod = [{"id": x["id"], "xl": x["xl"], "Cliente": x["cliente"], "Oggetto": x["oggetto"],
-            "campi": [{"campo": f, "prima": x["before"].get(f), "dopo": v} for f, v in x["changes"].items()]} for x in p["mod"]]
+            "campi": [{"campo": f, "prima": ATT_LABELS[x["before"].get(f) or 0] if f == "Attenzione" else x["before"].get(f),
+                       "dopo": ATT_LABELS[v or 0] if f == "Attenzione" else v} for f, v in x["changes"].items()]} for x in p["mod"]]
     return jsonify({"nuove": nuove, "modificate": mod})
 
 

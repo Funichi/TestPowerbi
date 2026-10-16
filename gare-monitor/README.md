@@ -19,6 +19,7 @@ Alternativa senza exe: con Python installato, doppio click su `Avvia.bat`.
 
 ## Regole implementate
 - Scrittura nell'Excel **tramite Excel stesso** (COM): tabella, formule, pivot e menu a tendina restano intatti. Se il file è già aperto in Excel viene aggiornato quello; altrimenti Excel lo apre in background.
+- **Attenzione**: il colore della cella del nome cliente nell'Excel (giallo = rilevante, arancione = da attenzionare, rosso = urgente) è un livello 1-3 nell'app, modificabile da Consegne WIP, Tabella e form. All'esportazione la cella viene colorata (o ripulita) come a mano.
 - SS = prefisso del cliente (3 lettere, o quello già usato) + progressivo; Commessa da Domini (Vertical + anno della Data consegna, altrimenti Data ins.). Entrambi modificabili.
 - Stati: WIP = in corso; Waiting For response = consegnato, si attende; Sospeso = nessuna risposta; Closed è uno stato a sé (escluso dal win rate); Won/Lost/NoBID = chiusi. Stato e Market vengono normalizzati in lettura (maiuscole, spazi; Market vuoto = "(non indicato)").
 

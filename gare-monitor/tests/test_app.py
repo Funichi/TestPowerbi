@@ -31,6 +31,10 @@ def make_xlsx(path):
     ]
     for r in data:
         ws.append(r)
+    from openpyxl.styles import PatternFill
+    for r, rgb in ((2, "FFFFFF00"), (6, "FFFFC000"), (7, "FFFF0000")):                      # giallo, arancione, rosso sulla cella Cliente
+        ws.cell(r, 4).fill = PatternFill("solid", start_color=rgb, end_color=rgb)
+    ws.cell(4, 4).fill = PatternFill("solid", start_color="FFFFFFFF", end_color="FFFFFFFF")   # bianco: non è un livello
     ws.add_table(Table(displayName="Tabella4", ref=f"A1:S{len(data) + 1}"))
     dm = wb.create_sheet("Domini")
     dm.append([None, "Chiave", "Settore", "Codice", "Anno", None, "Vertical", None, "Market", None, "tipo", None, "Stato"])
@@ -209,6 +213,48 @@ def test_cruscotto_kpi_trend_esito_eta(client, tmp_path):
     tipi = {e["nome"]: e for e in dashboard(d["rows"], d["domini"], dt.date(2026, 10, 15), None)["esito_tipo"]}   # periodo: tutto
     assert tipi["Gara"]["totale"] == 3 and tipi["Gara"]["rate"] is None      # meno di 5 chiuse: nessun win rate
     assert tipi["RFI"]["Closed"] == 1 and tipi["Offerta diretta"]["Lost"] == 1
+    assert tipi["Gara"]["NoBID"] == 1 and "Sospeso" not in tipi["Gara"]      # Sospeso e NoBID insieme come "No Bid"
+    top = db["top_clienti"]
+    assert top[0]["nome"] in ("Terna", "TERNA ", "TERNA") and top[0]["totale"] == 2 and top[0]["won"] == 1 and len(top[0]["rows"]) == 2
+    assert db["pillole"]["attenzione"] == {"totale": 1, "rosse": 0, "arancioni": 0, "gialle": 1}
     eta = {f["k"]: f["n"] for f in db["eta_attesa"]["fasce"]}
     assert eta["31-90"] == 1 and eta["nd"] == 0 and db["eta_attesa"]["totale"] == 1
     assert db["pillole"]["imminenti"] == 1 and db["pillole"]["scadute"] == 0
+
+
+def test_attenzione_colore_dalla_cella_e_scrittura_nell_excel(client):
+    from openpyxl.styles import PatternFill  # noqa: F401
+    c, x, _ = client
+    rows = rows_by_cliente(c)
+    assert (rows["Terna"]["Attenzione"], rows["Inps"]["Attenzione"], rows["Enel"]["Attenzione"], rows["TERNA"]["Attenzione"]) == (1, 2, 3, 0)
+    # il colore si cambia nell'app (database locale) e finisce nell'Excel solo con l'esportazione
+    assert c.put(f"/api/rows/{rows['Generali']['_row']}", json={"changes": {"Attenzione": 3}}).status_code == 200
+    assert c.put(f"/api/rows/{rows['Terna']['_row']}", json={"changes": {"Attenzione": 0}}).status_code == 200
+    assert c.put(f"/api/rows/{rows['Terna']['_row']}", json={"changes": {"Attenzione": 7}}).status_code == 400
+    assert c.get("/api/state").get_json()["pending"] == {"new": 0, "mod": 2}
+    assert sheet(x).cell(4, 4).fill.fgColor.rgb == "FFFFFFFF"                      # Excel intatto
+    c.post("/api/rows", json={**NEW, "Attenzione": 2})
+    p = c.get("/api/pending").get_json()
+    assert any(f["campo"] == "Attenzione" and f["dopo"].startswith("Urgente") for m in p["modificate"] for f in m["campi"])
+    assert p["nuove"][0]["Attenzione"].startswith("Da attenzionare")
+    assert c.post("/api/export").status_code == 200
+    ws = sheet(x)
+    assert ws.cell(4, 4).fill.fgColor.rgb == "00FF0000" or ws.cell(4, 4).fill.fgColor.rgb.endswith("FF0000")     # Generali: rosso
+    assert ws.cell(2, 4).fill.fill_type is None                                                               # Terna: colore tolto
+    assert ws.cell(8, 4).fill.fgColor.rgb.endswith("FFC000")                                                  # riga nuova: arancione
+    assert ws.cell(6, 4).fill.fgColor.rgb.endswith("FFC000") and ws.cell(7, 4).fill.fgColor.rgb.endswith("FF0000")   # le altre righe non si toccano
+    allrows = c.get("/api/data").get_json()["rows"]                                                           # dopo l'export il database coincide col file
+    att = {r["Oggetto"]: r["Attenzione"] for r in allrows}
+    assert (att["Tre"], att["Uno"], att["Cinque"], att["Nuova"]) == (3, 0, 2, 2)
+
+
+def test_annullare_modifiche_ripristina_anche_il_colore(client):
+    c, x, _ = client
+    t = rows_by_cliente(c)["Terna"]
+    c.put(f"/api/rows/{t['_row']}", json={"changes": {"Attenzione": 3}})
+    assert c.get("/api/state").get_json()["pending"]["mod"] == 1
+    assert c.post(f"/api/rows/{t['_row']}/revert").status_code == 200
+    assert rows_by_cliente(c)["Terna"]["Attenzione"] == 1
+    c.put(f"/api/rows/{t['_row']}", json={"changes": {"Attenzione": 3}})
+    c.put(f"/api/rows/{t['_row']}", json={"changes": {"Attenzione": 1}})                     # rimesso com'era: non è più una modifica
+    assert c.get("/api/state").get_json()["pending"]["mod"] == 0

@@ -50,6 +50,10 @@
   --urg-week:#E8590C;  --urg-week-bg:#FFF0E6;  --urg-week-fg:#9A3A00;
   --urg-two:#D9A21B;   --urg-two-bg:#FEF7E0;   --urg-two-fg:#6B4A00;
   --urg-over:#C9CCD3;  --urg-over-bg:#F1F2F4;  --urg-over-fg:#555555;
+  /* livello di attenzione (colore del nome cliente nell'Excel): giallo = rilevante, arancione = da attenzionare, rosso = urgente */
+  --att-1:#F2C200; --att-1-bg:#FFF6B8; --att-1-fg:#5C4A00;
+  --att-2:#F59E0B; --att-2-bg:#FFE3B0; --att-2-fg:#6B3A00;
+  --att-3:#E5253B; --att-3-bg:#FFD3D6; --att-3-fg:#7A0F1B;
   /* grafici */
   --chart-main:var(--accent);
   --chart-2:#9CA3AF;
@@ -351,7 +355,7 @@ button.apill{font:inherit;font-weight:400}
 .alertbar{display:flex;align-items:center;gap:12px;background:var(--urg-two-bg);color:var(--urg-two-fg);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:16px;font-size:14px}
 .alertbar svg{flex:none}.alertbar .linkbtn{margin-left:auto;color:var(--urg-two-fg);text-decoration:underline;font-weight:600}
 .wl{padding:0;overflow:hidden}
-.wh,.wr2{display:grid;grid-template-columns:28px minmax(0,1.4fr) minmax(0,2.4fr) 100px 236px 236px;gap:12px;align-items:center;padding:10px var(--pad)}
+.wh,.wr2{display:grid;grid-template-columns:28px minmax(0,1.4fr) minmax(0,2.4fr) 100px 138px 232px 232px;gap:12px;align-items:center;padding:10px var(--pad)}
 .wh{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:600;border-bottom:1px solid var(--divider);background:var(--card)}
 .wr2{border-bottom:1px solid var(--row-line);position:relative}
 .wr2::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:4px;border-radius:0 3px 3px 0;background:var(--urg-over)}
@@ -388,4 +392,24 @@ button.apill{font:inherit;font-weight:400}
 .tcard:hover{border-color:var(--border-hover);background:var(--card)}.tcard.on{border-color:var(--accent);background:var(--accent-soft)}
 .tcard .lname{display:flex;flex-direction:column}.tcard .lname b{font-weight:600}.tcard .lname span{font-size:12px;color:var(--text-3)}
 #w-load{margin-bottom:var(--gap)}
-@media(max-width:1200px){.wst{grid-column:2/-1}}
+@media(max-width:1200px){.wst,.watt{grid-column:2/-1}}
+
+/* ---------- livello di attenzione ---------- */
+.adot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:7px;vertical-align:baseline;flex:none}
+.adot.a1{background:var(--att-1)}.adot.a2{background:var(--att-2)}.adot.a3{background:var(--att-3)}
+.wcl{border-radius:8px;padding:4px 10px;margin:-4px 0}
+.wcl[data-att="1"]{background:var(--att-1-bg)}.wcl[data-att="2"]{background:var(--att-2-bg)}.wcl[data-att="3"]{background:var(--att-3-bg)}
+.wcl[data-att="1"] .owner{color:var(--att-1-fg)}.wcl[data-att="2"] .owner{color:var(--att-2-fg)}.wcl[data-att="3"] .owner{color:var(--att-3-fg)}
+.watt{min-width:0}.inl-att{width:100%;text-overflow:ellipsis;border-radius:999px;padding:4px 8px;font-size:12.5px;color:var(--text-2)}
+.inl-att.att-1{background:var(--att-1-bg);color:var(--att-1-fg);font-weight:600}.inl-att.att-2{background:var(--att-2-bg);color:var(--att-2-fg);font-weight:600}.inl-att.att-3{background:var(--att-3-bg);color:var(--att-3-fg);font-weight:600}
+.mt-c b .adot{width:14px;height:14px;margin-right:10px}
+
+/* ---------- cruscotto: colonne per Vertical e Top 10 clienti ---------- */
+.vseg{cursor:pointer}.vseg:hover{filter:brightness(.93)}.vname{cursor:pointer}
+.top10{display:flex;flex-direction:column;gap:4px}
+.trow{display:grid;grid-template-columns:26px minmax(120px,240px) minmax(0,1fr) 150px;gap:12px;align-items:center;width:100%;text-align:left;border:0;background:none;padding:7px 8px;border-radius:10px;font-weight:400}
+.trow:hover{background:var(--row-hover)}
+.trow .rk{color:var(--text-3);font-size:13px;text-align:right}.trow .tn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ttrack{display:block;height:16px}.tbar{display:flex;height:100%;background:var(--chart-3);border-radius:6px;overflow:hidden}.tw{display:block;height:100%;background:var(--st-won)}
+.trow .tv{display:flex;align-items:center;gap:8px}.trow .tv b{font-size:15px;min-width:22px}
+.wonpill{font-style:normal;font-size:12px;font-weight:600;background:var(--st-won-bg);color:var(--st-won-fg);border-radius:999px;padding:1px 9px;white-space:nowrap}

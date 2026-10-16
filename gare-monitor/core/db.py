@@ -5,6 +5,7 @@ Una sola tabella, 'offerte', con TUTTE le colonne del foglio Excel più quattro 
   __xl     numero di riga nell'Excel al momento dell'import (NULL per le righe inserite qui)
   __state  'orig' = come nell'Excel · 'mod' = modificata qui · 'new' = inserita qui (da esportare)
   __orig   JSON con i valori importati dall'Excel (serve a sapere cosa è cambiato)
+  __att    livello di attenzione 0-3 (colore della cella Cliente: giallo=1, arancione=2, rosso=3)
 Ogni import svuota la tabella e la ricarica: le modifiche non esportate vengono scartate.
 """
 import contextlib
@@ -74,12 +75,13 @@ class Store:
         with self._lock, self.conn() as c:
             c.execute("DROP TABLE IF EXISTS offerte")
             cols = ", ".join(_q(h) for h in headers)
-            c.execute(f'CREATE TABLE offerte ("__id" INTEGER PRIMARY KEY AUTOINCREMENT, "__xl" INTEGER, "__state" TEXT NOT NULL DEFAULT \'orig\', "__orig" TEXT, {cols})')
+            c.execute(f'CREATE TABLE offerte ("__id" INTEGER PRIMARY KEY AUTOINCREMENT, "__xl" INTEGER, "__state" TEXT NOT NULL DEFAULT \'orig\', "__orig" TEXT, "__att" INTEGER NOT NULL DEFAULT 0, {cols})')
             ph = ", ".join("?" for _ in headers)
             for r in data["rows"]:
                 vals = [r["cells"].get(h) for h in headers]
-                c.execute(f'INSERT INTO offerte ("__xl", "__state", "__orig", {cols}) VALUES (?, \'orig\', ?, {ph})',
-                          [r["xl"], json.dumps(r["cells"], ensure_ascii=False)] + vals)
+                att = int(r.get("att") or 0)
+                c.execute(f'INSERT INTO offerte ("__xl", "__state", "__orig", "__att", {cols}) VALUES (?, \'orig\', ?, ?, {ph})',
+                          [r["xl"], json.dumps({**r["cells"], "__att": att}, ensure_ascii=False), att] + vals)
             self._set_meta(c, "headers", headers)
             self._set_meta(c, "domini", data["domini"])
             self._set_meta(c, "imported_at", dt.datetime.now().isoformat(timespec="seconds"))
@@ -97,7 +99,7 @@ class Store:
     def load(self):
         domini = self.meta("domini", {})
         with self.conn() as c:
-            rows = [build_row(r["__id"], r["__xl"], cells, orig, r["__state"]) for r, cells, orig in self._rows(c)]
+            rows = [build_row(r["__id"], r["__xl"], cells, orig, r["__state"], r["__att"]) for r, cells, orig in self._rows(c)]
         return {"rows": normalize_rows(rows, domini), "domini": domini}
 
     def counts(self):
@@ -118,9 +120,10 @@ class Store:
     def insert(self, values):
         headers = self.meta("headers", [])
         vals = self._clean_values(values, headers)
+        att = int(values.get("Attenzione") or 0)
         with self._lock, self.conn() as c:
             cols = list(vals)
-            c.execute(f'INSERT INTO offerte ("__state", {", ".join(_q(k) for k in cols)}) VALUES (\'new\', {", ".join("?" for _ in cols)})', [vals[k] for k in cols])
+            c.execute(f'INSERT INTO offerte ("__state", "__att"{"".join(", " + _q(k) for k in cols)}) VALUES (\'new\', ?{"".join(", ?" for _ in cols)})', [att] + [vals[k] for k in cols])
             rid = c.execute("SELECT last_insert_rowid()").fetchone()[0]
         self.version += 1
         return rid
@@ -137,11 +140,15 @@ class Store:
         vals = self._clean_values(changes, headers)
         with self._lock, self.conn() as c:
             r, cells, orig = self._get(c, rid)
+            att = r["__att"]
+            if "Attenzione" in changes:
+                att = int(changes["Attenzione"] or 0)
+                c.execute('UPDATE offerte SET "__att"=? WHERE "__id"=?', (att, rid))
             if vals:
                 c.execute(f'UPDATE offerte SET {", ".join(_q(k) + "=?" for k in vals)} WHERE "__id"=?', list(vals.values()) + [rid])
                 cells.update(vals)
             if r["__state"] != "new":
-                state = "mod" if self._diff(cells, orig) else "orig"
+                state = "mod" if self._diff(cells, orig, att) else "orig"
                 c.execute('UPDATE offerte SET "__state"=? WHERE "__id"=?', (state, rid))
         self.version += 1
 
@@ -159,14 +166,17 @@ class Store:
             r, _, orig = self._get(c, rid)
             if r["__state"] != "mod":
                 raise ValueError("Questa riga non ha modifiche da annullare")
-            c.execute(f'UPDATE offerte SET {", ".join(_q(h) + "=?" for h in headers)}, "__state"=\'orig\' WHERE "__id"=?',
-                      [orig.get(h) for h in headers] + [rid])
+            c.execute(f'UPDATE offerte SET {", ".join(_q(h) + "=?" for h in headers)}, "__att"=?, "__state"=\'orig\' WHERE "__id"=?',
+                      [orig.get(h) for h in headers] + [int(orig.get("__att") or 0), rid])
         self.version += 1
 
     # ------------------------------------------------------------ cosa esportare
     @staticmethod
-    def _diff(cells, orig):
-        return {f: _cmp(f, cells.get(f)) for f in FIELDS if f in cells and _cmp(f, cells.get(f)) != _cmp(f, orig.get(f))}
+    def _diff(cells, orig, att=0):
+        d = {f: _cmp(f, cells.get(f)) for f in FIELDS if f in cells and _cmp(f, cells.get(f)) != _cmp(f, orig.get(f))}
+        if int(att or 0) != int(orig.get("__att") or 0):
+            d["Attenzione"] = int(att or 0)
+        return d
 
     def pending_items(self):
         """{'new': [{'id', 'values'}], 'mod': [{'id', 'xl', 'sig', 'changes', 'before', 'cliente', 'oggetto'}]}"""
@@ -175,10 +185,13 @@ class Store:
             for r, cells, orig in self._rows(c):
                 if r["__state"] == "new":
                     vals = {f: _cmp(f, cells.get(f)) for f in FIELDS if f in cells and _cmp(f, cells.get(f)) is not None}
+                    if r["__att"]:
+                        vals["Attenzione"] = r["__att"]
                     new.append({"id": r["__id"], "values": vals})
                 elif r["__state"] == "mod":
-                    ch = self._diff(cells, orig)
-                    mod.append({"id": r["__id"], "xl": r["__xl"], "changes": ch, "before": {f: _cmp(f, orig.get(f)) for f in ch},
+                    ch = self._diff(cells, orig, r["__att"])
+                    mod.append({"id": r["__id"], "xl": r["__xl"], "changes": ch,
+                                "before": {f: (int(orig.get("__att") or 0) if f == "Attenzione" else _cmp(f, orig.get(f))) for f in ch},
                                 "sig": row_sig(orig.get("Cliente"), orig.get("Oggetto"), orig.get("Data ins.")),
                                 "cliente": clean_text(orig.get("Cliente")), "oggetto": clean_text(orig.get("Oggetto"))})
         return {"new": new, "mod": mod}

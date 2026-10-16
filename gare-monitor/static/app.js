@@ -3,9 +3,9 @@ const STATI = ["WIP", "Waiting For response", "Sospeso", "Won", "Lost", "NoBID",
 const BCLASS = {"WIP": "WIP", "Waiting For response": "Waiting", "Sospeso": "Sospeso", "Won": "Won", "Lost": "Lost", "NoBID": "NoBID", "Closed": "Closed"};
 const COLOR = {"WIP": "var(--st-wip)", "Waiting For response": "var(--st-waiting)", "Sospeso": "var(--st-sospeso)", "Won": "var(--st-won)", "Lost": "var(--st-lost)", "NoBID": "var(--st-nobid)", "Closed": "var(--st-closed)", "Altro": "var(--st-altro)"};
 const STATO_COL = {"WIP": "s-WIP", "Waiting For response": "s-Waiting", "Won": "s-Won", "Lost": "s-Lost", "NoBID": "s-NoBID", "Sospeso": "s-Sospeso", "Closed": "s-Closed", "Altro": "s-Altro"};
-const S = {data: null, dash: null, view: "dash", months: "12", trendSeries: "inserite", trendCum: true, pipeBy: "market",
+const S = {data: null, dash: null, view: "dash", months: "12", trendSeries: "inserite", trendCum: true, pipeBy: "vertical",
   filt: {q: "", stato: "", vertical: "", market: "", solution: "", anno: ""}, sort: {k: "Data ins.", dir: -1}, clean: null, state: null};
-const EMPTY_FILT = () => ({q: "", stato: "", vertical: "", market: "", tipo: "", solution: "", anno: "", loc: "", rows: null, rowsLabel: ""});
+const EMPTY_FILT = () => ({q: "", stato: "", vertical: "", market: "", tipo: "", solution: "", anno: "", loc: "", att: "", rows: null, rowsLabel: ""});
 
 // icone Lucide (definite in icons.js)
 const ico = n => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ""}</svg>`;
@@ -28,6 +28,10 @@ const num = n => Number(n).toLocaleString("it-IT");
 const TIPO_SHORT = {"Offerta diretta": "Offerta", "Incontro Cliente": "Incontro", "Incontro Interno": "Interno", "Gara sotto AQ": "Gara AQ", "Gara": "Gara", "RFI": "RFI", "Manif. Interesse": "Manif."};
 const tipoChip = t => t ? `<span class="tchip" title="${esc(t)}">${esc(TIPO_SHORT[t] || t)}</span>` : nil();
 const NOIND = "(non indicato)";
+// livello di attenzione = colore del nome cliente nell'Excel (giallo / arancione / rosso)
+const ATT = {1: {label: "Rilevante", color: "giallo"}, 2: {label: "Da attenzionare", color: "arancione"}, 3: {label: "Urgente", color: "rosso"}};
+const attOpts = (cur, short) => `<option value="0" ${!cur ? "selected" : ""}>${short ? "—" : "Nessuna"}</option>` + [1, 2, 3].map(k => `<option value="${k}" ${+cur === k ? "selected" : ""}>${ATT[k].label}${short ? "" : ` (${ATT[k].color})`}</option>`).join("");
+const attDot = r => r.Attenzione ? `<span class="adot a${r.Attenzione}" title="${ATT[r.Attenzione].label} (${ATT[r.Attenzione].color})"></span>` : "";
 const TIPI_MAIN = ["Gara", "Gara sotto AQ", "Offerta diretta", "Incontro Cliente", "RFI"];
 
 // chip dei filtri attivi, rimovibili
@@ -86,7 +90,7 @@ async function exportFlow() {
   if (!p.nuove.length && !p.modificate.length) { toast("Non c'è niente da esportare"); return; }
   const el = modal(`<h2>Esporta in Excel</h2>
     <p class="muted">Verrà scritto direttamente nel file Excel: le righe nuove dopo l'ultima riga, le modifiche sulle righe esistenti. Prima viene fatta una copia di backup. Alla fine il database viene riletto dal file.</p>
-    ${p.nuove.length ? `<h3 class="mh">${p.nuove.length === 1 ? "1 riga nuova" : p.nuove.length + " righe nuove"}</h3><ul class="plist">${p.nuove.map(x => `<li><b>${esc(x.Cliente)}</b> — ${esc((x.Oggetto || "").slice(0, 80))} ${badge(x.Stato)}</li>`).join("")}</ul>` : ""}
+    ${p.nuove.length ? `<h3 class="mh">${p.nuove.length === 1 ? "1 riga nuova" : p.nuove.length + " righe nuove"}</h3><ul class="plist">${p.nuove.map(x => `<li><b>${esc(x.Cliente)}</b> — ${esc((x.Oggetto || "").slice(0, 80))} ${badge(x.Stato)}${x.Attenzione !== "nessuna" ? ` <span class="muted">· ${esc(x.Attenzione)}</span>` : ""}</li>`).join("")}</ul>` : ""}
     ${p.modificate.length ? `<h3 class="mh">${p.modificate.length === 1 ? "1 riga modificata" : p.modificate.length + " righe modificate"}</h3><ul class="plist">${p.modificate.map(x => `<li><b>${esc(x.Cliente)}</b> — ${esc((x.Oggetto || "").slice(0, 60))} <span class="muted">(riga Excel ${x.xl})</span>${x.campi.map(c => `<div class="chg"><span>${esc(c.campo)}</span> ${esc(c.prima ?? "—")} → <b>${esc(c.dopo ?? "—")}</b></div>`).join("")}</li>`).join("")}</ul>` : ""}
     <div class="err" id="x-err"></div>
     <div class="foot"><button id="x-cancel">Annulla</button><button id="x-go" class="primary">${ico("upload")}Scrivi in HISTORY.xlsx</button></div>`);
@@ -123,7 +127,7 @@ function miniTable(items, cols) {
   return `<div class="tscroll"><table><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead><tbody>${items.map(x => `<tr class="click" data-row="${x._row}">${cols.map(c => `<td>${c[1](x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 const offer = x => `<div class="offer"><b>${esc(x.Cliente)}</b><span>${esc((x.Oggetto || "").slice(0, 90))}</span></div>`;
-const legendItem = s => `<span><i style="background:${COLOR[s]}"></i>${s === "Altro" ? "Sospeso / NoBID / Closed" : s === "Waiting For response" ? "Waiting" : s}</span>`;
+const legendItem = s => `<span><i style="background:${COLOR[s]}"></i>${s === "Altro" ? "Sospeso / NoBID / Closed" : s === "NoBID" ? "No Bid" : s === "Waiting For response" ? "Waiting" : s}</span>`;
 
 function hbars(groups) {
   if (!groups.length) return `<div class="empty">Nessun dato.</div>`;
@@ -132,7 +136,24 @@ function hbars(groups) {
     `<i class="${STATO_COL[s]}" style="width:${(100 * g[s] / g.totale).toFixed(2)}%" data-grp="${esc(g.nome)}" data-st="${s}" title="${esc(g.nome)} · ${s === "Altro" ? "Sospeso / NoBID / Closed" : s}: ${g[s]}">${g[s] / mx >= .06 ? g[s] : ""}</i>` : "").join("")}</div><span class="ht-n">${g.totale}</span></div>`).join("")}</div>
     <div class="legend">${segs.map(legendItem).join("")}</div>`;
 }
-const ESITO_SEGS = ["Won", "Lost", "NoBID", "Waiting For response", "WIP", "Sospeso", "Closed"];
+function vcolumns(groups) {
+  if (!groups.length) return `<div class="empty">Nessun dato.</div>`;
+  const segs = ["WIP", "Waiting For response", "Won", "Lost", "Altro"], W = 640, H = 300, L = 40, T = 30, B = 44, n = groups.length;
+  const mx = Math.max(...groups.map(g => g.totale)), step0 = Math.max(1, Math.ceil(mx / 4)), nice = step0 * 4, plot = H - T - B;
+  const y = v => T + plot * (1 - v / nice), stepX = (W - L - 12) / n, bw = Math.min(120, stepX * .6);
+  let g = "";
+  for (let k = 0; k <= 4; k++) g += `<line x1="${L}" x2="${W}" y1="${y(step0 * k)}" y2="${y(step0 * k)}" stroke="var(--chart-grid)"/><text x="${L - 8}" y="${y(step0 * k) + 4}" text-anchor="end">${step0 * k}</text>`;
+  groups.forEach((gr, i) => {
+    const x = L + i * stepX + (stepX - bw) / 2; let acc = 0;
+    segs.forEach(s => { const v = gr[s]; if (!v) return; const y1 = y(acc + v), h = y(acc) - y1; acc += v;
+      g += `<rect class="vseg" x="${x}" y="${y1}" width="${bw}" height="${Math.max(h - 1, 1)}" fill="${COLOR[s]}" rx="3" data-grp="${esc(gr.nome)}" data-st="${s}"><title>${esc(gr.nome)} · ${s === "Altro" ? "Sospeso / NoBID / Closed" : s}: ${v}</title></rect>`;
+      if (h >= 17) g += `<text x="${x + bw / 2}" y="${y1 + h / 2 + 4}" text-anchor="middle" style="fill:var(--eng-dark);font-weight:600;pointer-events:none">${v}</text>`; });
+    g += `<text x="${x + bw / 2}" y="${y(gr.totale) - 7}" text-anchor="middle" style="fill:var(--text);font-weight:700;font-size:13px">${gr.totale}</text>
+      <text class="vname" x="${x + bw / 2}" y="${H - 16}" text-anchor="middle" data-grp="${esc(gr.nome)}" style="fill:var(--text);font-weight:600;font-size:13px">${esc(gr.nome)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Offerte per Vertical e stato">${g}</svg><div class="legend">${segs.map(legendItem).join("")}</div>`;
+}
+const ESITO_SEGS = ["Won", "Lost", "NoBID", "Waiting For response", "WIP", "Closed"];        // NoBID = Sospeso + NoBID
 function esitoRows(list, minChiuse) {
   if (!list.length) return `<div class="empty">Nessuna offerta nel periodo.</div>`;
   const mx = Math.max(...list.map(g => g.totale));
@@ -140,6 +161,14 @@ function esitoRows(list, minChiuse) {
     `<i class="${STATO_COL[s]}" style="width:${(100 * g[s] / g.totale).toFixed(2)}%" data-tipo="${esc(g.nome)}" data-st="${s}" title="${esc(g.nome)} · ${s}: ${g[s]}">${g[s] / mx >= .06 ? g[s] : ""}</i>` : "").join("")}</div><span class="ht-n">${g.totale}</span></div>
     <div class="erate">${g.rate === null ? `<b class="nil">—</b><span>pochi dati</span>` : `<b>${Math.round(g.rate * 100)}%</b><span>${g.Won} su ${g.chiuse} chiuse</span>`}</div>`).join("")}</div>
     <div class="legend">${ESITO_SEGS.map(legendItem).join("")}</div><div class="hint">Win rate = Won / (Won + Lost); mostrato solo con almeno ${minChiuse} offerte chiuse. Closed non rientra nel calcolo.</div>`;
+}
+function topClienti(list) {
+  if (!list.length) return `<div class="empty">Nessuna opportunità nel periodo.</div>`;
+  const mx = Math.max(...list.map(c => c.totale));
+  return `<div class="top10">${list.map((c, i) => `<button type="button" class="trow" data-cl="${i}" title="Apri le ${c.totale} opportunità di ${esc(c.nome)}"><span class="rk">${i + 1}</span><span class="tn">${esc(c.nome)}</span>
+    <span class="ttrack"><span class="tbar" style="width:${(100 * c.totale / mx).toFixed(1)}%"><i class="tw" style="width:${(100 * c.won / c.totale).toFixed(1)}%"></i></span></span>
+    <span class="tv"><b>${c.totale}</b>${c.won ? `<em class="wonpill">${c.won} ${c.won === 1 ? "vinta" : "vinte"}</em>` : ""}</span></button>`).join("")}</div>
+    <div class="legend"><span><i style="background:var(--st-won)"></i>Vinte</span><span><i style="background:var(--chart-3)"></i>Altre opportunità</span></div>`;
 }
 function etaCard(e) {
   const mx = Math.max(1, ...e.fasce.map(f => f.n)), over = e.oltre180;
@@ -158,7 +187,7 @@ function renderDash(m) {
   $("#page-sub").textContent = `Oggi ${fmt(d.oggi)} · KPI e trend sull'anno solare ${k.anno}`;
   m.innerHTML = `
   <div class="fbar"><div><label for="period">Periodo</label><select id="period">${PERIODS.map(([v, l]) => `<option value="${v}" ${S.months === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-    <div class="fbar-r">Il periodo vale solo per Pipeline per Market ed Esito per tipo</div></div>
+    <div class="fbar-r">Il periodo vale per Pipeline, Esito per tipo e Top clienti</div></div>
   <div id="f-chips">${chipsHtml(chips)}</div>
   <div class="kpis">
     ${kpi(num(k.wip), "In corso (WIP)", "", "click", 'data-wipgo="all"')}
@@ -171,6 +200,7 @@ function renderDash(m) {
     <button class="apill" data-wipgo="late"><i style="background:var(--urg-late)"></i><b>${pl.scadute}</b> consegne scadute</button>
     <button class="apill" data-wipgo="d7"><i style="background:var(--urg-week)"></i><b>${pl.imminenti}</b> entro ${so.scadenza} gg</button>
     <button class="apill" data-solleciti="1"><i style="background:var(--urg-two)"></i><b>${pl.solleciti.length}</b> da sollecitare</button>
+    ${pl.attenzione.totale ? `<button class="apill" data-wipatt="1" title="Offerte WIP segnate in rosso, arancione o giallo nell'Excel"><i style="background:var(--att-3)"></i><b>${pl.attenzione.totale}</b> WIP in attenzione <span class="muted">(${pl.attenzione.rosse} urgenti)</span></button>` : ""}
     <button class="apill" data-scroll="sec-att"><i style="background:var(--accent)"></i><b>${pl.attenzioni}</b> punti di attenzione</button>
   </div>
   <div class="g12">
@@ -181,11 +211,12 @@ function renderDash(m) {
     <div class="card c4"><h2>Età delle offerte in attesa</h2><div class="sub">Quanto aspettiamo una risposta</div>${etaCard(d.eta_attesa)}</div>
   </div>
   <div class="g12">
-    <div class="card c7"><div class="card-h"><div><h2>Pipeline per ${S.pipeBy === "market" ? "Market" : "Vertical"}</h2><div class="sub">Numero di offerte per stato. Clicca una barra per vedere l'elenco.</div></div>
-      <div class="seg"><button data-pb="market" class="${S.pipeBy === "market" ? "on" : ""}">Market</button><button data-pb="vertical" class="${S.pipeBy === "vertical" ? "on" : ""}">Vertical</button></div></div>
-      ${hbars(pb)}</div>
+    <div class="card c7"><div class="card-h"><div><h2>Pipeline per ${S.pipeBy === "market" ? "Market" : "Vertical"}</h2><div class="sub">Numero di offerte per stato. Clicca un colore per vedere l'elenco.</div></div>
+      <div class="seg"><button data-pb="vertical" class="${S.pipeBy === "vertical" ? "on" : ""}">Vertical</button><button data-pb="market" class="${S.pipeBy === "market" ? "on" : ""}">Market</button></div></div>
+      ${S.pipeBy === "market" ? hbars(pb) : vcolumns(pb)}</div>
     <div class="card c5"><h2>Esito per tipo</h2><div class="sub">Offerte per stato e win rate del tipo, nel periodo scelto.</div>${esitoRows(d.esito_tipo, so.min_chiuse)}</div>
   </div>
+  <div class="card" id="sec-top"><h2>Top 10 clienti per numero di opportunità</h2><div class="sub">Nel periodo scelto. In verde le opportunità vinte. Clicca un cliente per vederle.</div>${topClienti(d.top_clienti)}</div>
   <div class="card" id="sec-att"><h2>Punti di attenzione</h2><div class="sub">Dati mancanti o anomali da sistemare.</div>
     ${d.attenzioni.length ? d.attenzioni.map(a => `<details><summary>${esc(a.titolo)} <span class="cnt">(${a.righe.length})</span></summary>${miniTable(a.righe, [["Seq", x => x.Seq], ["Offerta", offer], ["Stato", x => badge(x.Stato)], ["Data ins.", x => fmt(x["Data ins."])], ["", x => esc(x.dettaglio || "")]])}</details>`).join("") : `<div class="empty">Tutto in ordine.</div>`}</div>`;
   const setPeriod = async v => { S.months = v; await reloadDash(); render(); };
@@ -196,9 +227,11 @@ function renderDash(m) {
   m.querySelectorAll("[data-wipgo]").forEach(c => c.onclick = () => goWip({band: c.dataset.wipgo === "all" ? "" : c.dataset.wipgo}));
   m.querySelectorAll("[data-solleciti]").forEach(c => c.onclick = () => goTable({rows: pl.solleciti, rowsLabel: `Da sollecitare (${pl.solleciti.length})`}));
   m.querySelectorAll("[data-scroll]").forEach(c => c.onclick = () => document.getElementById(c.dataset.scroll).scrollIntoView({behavior: "smooth"}));
-  m.querySelectorAll(".hb [data-grp]").forEach(c => c.onclick = () => goTable({[S.pipeBy]: c.dataset.grp, stato: c.dataset.st && c.dataset.st !== "Altro" ? c.dataset.st : ""}));
+  m.querySelectorAll(".hb [data-grp], .vseg, .vname").forEach(c => c.onclick = () => goTable({[S.pipeBy]: c.dataset.grp, stato: c.dataset.st && c.dataset.st !== "Altro" ? c.dataset.st : ""}));
   m.querySelectorAll(".eb [data-tipo]").forEach(c => c.onclick = () => goTable({tipo: c.dataset.tipo === "Altro" ? "__altro" : c.dataset.tipo, stato: c.dataset.st || ""}));
   m.querySelectorAll("[data-age]").forEach(c => c.onclick = () => { const f = d.eta_attesa.fasce.find(x => x.k === c.dataset.age); goTable({rows: f.rows, rowsLabel: `In attesa ${f.label} (${f.n})`}); });
+  m.querySelectorAll("[data-cl]").forEach(b => b.onclick = () => { const c = d.top_clienti[+b.dataset.cl]; goTable({rows: c.rows, rowsLabel: `Cliente: ${c.nome} (${c.totale})`}); });
+  m.querySelectorAll("[data-wipatt]").forEach(c => c.onclick = () => goWip({att: "any"}));
   m.querySelectorAll("[data-pb]").forEach(b => b.onclick = () => { S.pipeBy = b.dataset.pb; render(); });
   m.querySelectorAll("[data-ts]").forEach(b => b.onclick = () => { S.trendSeries = b.dataset.ts; render(); });
   m.querySelectorAll("[data-tc]").forEach(b => b.onclick = () => { S.trendCum = b.dataset.tc === "1"; render(); });
@@ -254,7 +287,7 @@ const colsSave = () => { try { localStorage.setItem(COL_KEY, JSON.stringify([...
 S.cols = colsLoad();
 const CELLS = {
   "Seq": r => `<td>${r.Seq === null || r.Seq === undefined ? nil() : esc(r.Seq)}</td>`,
-  "Cliente": r => `<td class="cl">${orNil(r.Cliente)}${r._state === "new" ? ` <span class="lchip new">nuova</span>` : r._state === "mod" ? ` <span class="lchip mod">modificata</span>` : ""}</td>`,
+  "Cliente": r => `<td class="cl">${attDot(r)}${orNil(r.Cliente)}${r._state === "new" ? ` <span class="lchip new">nuova</span>` : r._state === "mod" ? ` <span class="lchip mod">modificata</span>` : ""}</td>`,
   "Oggetto": r => `<td class="og" title="${esc(r.Oggetto)}">${orNil(r.Oggetto)}</td>`,
   "Market": r => `<td>${r.Market === NOIND ? `<span class="nil">${NOIND}</span>` : orNil(r.Market)}</td>`,
   "Vertical": r => `<td>${orNil(r.Vertical)}</td>`,
@@ -273,6 +306,7 @@ function filteredRows() {
     if (f.market && r.Market !== f.market) return false;
     if (f.rows && !f.rows.has(r._row)) return false;
     if (f.loc && r._state === "orig") return false;
+    if (f.att && (f.att === "any" ? !r.Attenzione : String(r.Attenzione) !== f.att)) return false;
     if (f.tipo && (f.tipo === "__altro" ? TIPI_MAIN.includes(r.tipo) : r.tipo !== f.tipo)) return false;
     if (f.anno && (r["Data ins."] || "").slice(0, 4) !== f.anno) return false;
     if (f.solution) { const s = splitSol(r["Solution D&A"]).map(x => x.toLowerCase()); if (f.solution === "(non assegnata)" ? s.length : !s.includes(f.solution.toLowerCase())) return false; }
@@ -291,13 +325,14 @@ function renderTable(m) {
     <div><label for="f-tipo">Tipo</label><select id="f-tipo"><option value="">Tutti</option>${[...d.tipo, "__altro"].map(t => `<option value="${esc(t)}" ${f.tipo === t ? "selected" : ""}>${t === "__altro" ? "Altro" : esc(t)}</option>`).join("")}</select></div>
     <div><label for="f-vertical">Vertical</label><select id="f-vertical">${optionsHtml(d.vertical, f.vertical)}</select></div>
     <div><label for="f-solution">Solution</label><select id="f-solution">${optionsHtml(["(non assegnata)", ...d.solutions], f.solution)}</select></div>
+    <div><label for="f-att">Attenzione</label><select id="f-att"><option value="">Tutte</option><option value="any" ${f.att === "any" ? "selected" : ""}>Con attenzione</option>${[3, 2, 1].map(k => `<option value="${k}" ${f.att === String(k) ? "selected" : ""}>${ATT[k].label}</option>`).join("")}</select></div>
     <div><label for="f-loc">Locale</label><select id="f-loc"><option value="">Tutte</option><option value="1" ${f.loc ? "selected" : ""}>Da esportare</option></select></div>
     <div><label for="f-anno">Anno (Data ins.)</label><select id="f-anno">${optionsHtml(anni, f.anno)}</select></div>
     <div class="fbar-r"><span id="f-count"></span>
       <details class="ms cols-menu"><summary style="min-width:0">${ico("columns-3")}Colonne</summary><div class="ms-list" style="right:0;left:auto;min-width:200px">${COLDEFS.map(c => `<label class="ms-i"><input type="checkbox" data-col="${esc(c.k)}" ${S.cols.has(c.k) ? "checked" : ""}> ${esc(c.l)}</label>`).join("")}</div></details></div></div>
   <div id="f-chips"></div>
   <div class="card tablecard"><table class="dt"><thead id="th"></thead><tbody id="tb"></tbody></table></div>`;
-  const LABEL = {q: v => `Cerca: ${v}`, stato: v => `Stato: ${v}`, tipo: v => `Tipo: ${v === "__altro" ? "Altro" : v}`, rows: () => f.rowsLabel || "Selezione", market: v => `Market: ${v}`, vertical: v => `Vertical: ${v}`, solution: v => `Solution: ${v}`, anno: v => `Anno: ${v}`, loc: () => "Da esportare"};
+  const LABEL = {q: v => `Cerca: ${v}`, stato: v => `Stato: ${v}`, tipo: v => `Tipo: ${v === "__altro" ? "Altro" : v}`, rows: () => f.rowsLabel || "Selezione", market: v => `Market: ${v}`, vertical: v => `Vertical: ${v}`, solution: v => `Solution: ${v}`, anno: v => `Anno: ${v}`, loc: () => "Da esportare", att: v => `Attenzione: ${v === "any" ? "con attenzione" : ATT[v].label}`};
   const drawChips = () => {
     const box = $("#f-chips"); box.innerHTML = chipsHtml(Object.keys(LABEL).filter(k => f[k]).map(k => ({id: k, label: LABEL[k](f[k])})));
     bindChips(box, id => { S.filt[id] = ""; renderTable(m); }, () => { S.filt = EMPTY_FILT(); renderTable(m); });
@@ -315,7 +350,7 @@ function renderTable(m) {
   };
   draw();
   const bind = (id, key) => $(id).oninput = e => { S.filt[key] = e.target.value; draw(); };
-  bind("#f-q", "q"); bind("#f-loc", "loc"); bind("#f-stato", "stato"); bind("#f-tipo", "tipo"); bind("#f-market", "market"); bind("#f-vertical", "vertical"); bind("#f-solution", "solution"); bind("#f-anno", "anno");
+  bind("#f-q", "q"); bind("#f-att", "att"); bind("#f-loc", "loc"); bind("#f-stato", "stato"); bind("#f-tipo", "tipo"); bind("#f-market", "market"); bind("#f-vertical", "vertical"); bind("#f-solution", "solution"); bind("#f-anno", "anno");
   m.querySelectorAll("[data-col]").forEach(c => c.onchange = () => { c.checked ? S.cols.add(c.dataset.col) : S.cols.delete(c.dataset.col); colsSave(); draw(); });
 }
 
@@ -331,9 +366,9 @@ const SEL_KEY = "gare.wip.sel.v1";
 const selLoad = () => { try { return new Set(JSON.parse(localStorage.getItem(SEL_KEY) || "[]")); } catch (e) { return new Set(); } };
 const selSave = set => { try { localStorage.setItem(SEL_KEY, JSON.stringify([...set])); } catch (e) {} };
 // view: all | late | week | future | d7 (d7 arriva dal cruscotto) · touched/order: le righe modificate restano dove sono finché non si cambia vista
-S.wip = {sol: new Set(), tipo: "", view: "all", sel: selLoad(), touched: new Set(), order: null, redraw: null};
+S.wip = {sol: new Set(), tipo: "", att: "", view: "all", sel: selLoad(), touched: new Set(), order: null, redraw: null};
 function resetWipView() { S.wip.touched = new Set(); S.wip.order = null; }
-function goWip(f) { S.wip.sol = new Set(); S.wip.tipo = ""; S.wip.view = f.band === "late" || f.band === "d7" ? f.band : "all"; resetWipView(); S.view = "wip"; render(); }
+function goWip(f) { S.wip.sol = new Set(); S.wip.tipo = ""; S.wip.att = f.att || ""; S.wip.view = f.band === "late" || f.band === "d7" ? f.band : "all"; resetWipView(); S.view = "wip"; render(); }
 const isoDate = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; };
 const fmtD = d => d ? `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}` : "";
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
@@ -357,6 +392,7 @@ function wipItems() {
 const byDate = (a, b) => (a.d ? a.d.getTime() : Infinity) - (b.d ? b.d.getTime() : Infinity) || String(a.r.Cliente).localeCompare(String(b.r.Cliente), "it");
 const tipoGroup = t => TIPI_MAIN.includes(t) ? t : "Altro";
 const passTipo = it => !S.wip.tipo || (S.wip.tipo === "__altro" ? tipoGroup(it.r.tipo) === "Altro" : it.r.tipo === S.wip.tipo);
+const passAtt = it => !S.wip.att || (S.wip.att === "any" ? !!it.r.Attenzione : String(it.r.Attenzione) === S.wip.att);
 const passSol = it => !S.wip.sol.size || (it.names.length ? it.names.some(n => S.wip.sol.has(n.toLowerCase())) : S.wip.sol.has(NOASS.toLowerCase()));
 const passView = (it, v = S.wip.view) => v === "all" || (v === "late" ? it.band === "late" : v === "week" ? it.band === "week" : v === "future" ? it.band === "two" || it.band === "over" : it.days !== null && it.days >= 0 && it.days <= 7);
 const dayText = g => g === null ? "" : g < 0 ? `scaduta da ${-g} gg` : g === 0 ? "oggi" : `tra ${g} gg`;
@@ -368,7 +404,7 @@ function wipText(items, ctx) {
   WIP_BANDS.forEach(b => {
     const its = items.filter(i => i.band === b.k); if (!its.length) return;
     L.push(`== ${b.t.toUpperCase()} (${its.length}) ==`);
-    its.forEach(i => L.push(`• ${(i.r.Cliente || "n.d.").toUpperCase()} – ${i.r.Oggetto || "n.d."} | ${ownerOf(i)} | ${i.d ? `Consegna ${fmtD(i.d)} (${dayText(i.days)})` : "Consegna n.d."} | SS: ${i.r.SS || "n.d."}`));
+    its.forEach(i => L.push(`• ${(i.r.Cliente || "n.d.").toUpperCase()} – ${i.r.Oggetto || "n.d."} | ${ownerOf(i)} | ${i.d ? `Consegna ${fmtD(i.d)} (${dayText(i.days)})` : "Consegna n.d."} | SS: ${i.r.SS || "n.d."}${i.r.Attenzione ? ` | ATTENZIONE: ${ATT[i.r.Attenzione].label}` : ""}`));
     L.push("");
   });
   return L.join("\n");
@@ -416,6 +452,7 @@ function renderWip(m) {
   <div class="fbar">
     <div><label>Solution D&amp;A</label><details class="ms" id="w-ms"><summary id="w-ms-s"></summary><div class="ms-list" id="w-ms-l"></div></details></div>
     <div><label for="w-tipo">Tipo</label><select id="w-tipo"><option value="">Tutti</option>${tipi.map(t => `<option value="${esc(t)}" ${t === W.tipo ? "selected" : ""}>${esc(t)}</option>`).join("")}<option value="__altro" ${W.tipo === "__altro" ? "selected" : ""}>Altro</option></select></div>
+    <div><label for="w-att">Attenzione</label><select id="w-att"><option value="">Tutte</option><option value="any" ${W.att === "any" ? "selected" : ""}>Con attenzione</option>${[3, 2, 1].map(k => `<option value="${k}" ${W.att === String(k) ? "selected" : ""}>${ATT[k].label}</option>`).join("")}</select></div>
     <div class="fbar-r">Settimana dal ${fmtD(ctx.monday)} al ${fmtD(ctx.sunday)} · le modifiche restano in locale fino a “Esporta in Excel”</div>
   </div>
   <div id="w-chips"></div>
@@ -434,7 +471,7 @@ function renderWip(m) {
 
   const all = () => wipItems();
   const visible = () => {
-    const its = all().filter(i => W.touched.has(i.id) || (i.d && i.wip && passTipo(i) && passSol(i) && passView(i)));
+    const its = all().filter(i => W.touched.has(i.id) || (i.d && i.wip && passTipo(i) && passSol(i) && passAtt(i) && passView(i)));
     if (!W.order) { W.order = new Map(its.slice().sort(byDate).map((i, n) => [i.id, n])); }
     return its.sort((a, b) => (W.order.has(a.id) ? W.order.get(a.id) : 1e6) - (W.order.has(b.id) ? W.order.get(b.id) : 1e6) || byDate(a, b));
   };
@@ -452,25 +489,26 @@ function renderWip(m) {
     $("#w-ms-l").querySelectorAll("input").forEach(c => c.onchange = () => { c.checked ? W.sol.add(c.dataset.k) : W.sol.delete(c.dataset.k); resetWipView(); draw(); });
   };
   const drawChips = () => {
-    const items = [...[...W.sol].map(k => ({id: "s:" + k, label: "Solution: " + solName(k)})), ...(W.tipo ? [{id: "t", label: "Tipo: " + (W.tipo === "__altro" ? "Altro" : W.tipo)}] : []), ...(W.view === "d7" ? [{id: "v", label: "Entro 7 giorni"}] : [])];
+    const items = [...[...W.sol].map(k => ({id: "s:" + k, label: "Solution: " + solName(k)})), ...(W.tipo ? [{id: "t", label: "Tipo: " + (W.tipo === "__altro" ? "Altro" : W.tipo)}] : []), ...(W.att ? [{id: "a", label: "Attenzione: " + (W.att === "any" ? "con attenzione" : ATT[W.att].label)}] : []), ...(W.view === "d7" ? [{id: "v", label: "Entro 7 giorni"}] : [])];
     const box = $("#w-chips"); box.innerHTML = chipsHtml(items);
-    bindChips(box, id => { if (id === "t") { W.tipo = ""; $("#w-tipo").value = ""; } else if (id === "v") W.view = "all"; else W.sol.delete(id.slice(2)); resetWipView(); draw(); },
-      () => { W.sol.clear(); W.tipo = ""; W.view = "all"; $("#w-tipo").value = ""; resetWipView(); draw(); });
+    bindChips(box, id => { if (id === "t") { W.tipo = ""; $("#w-tipo").value = ""; } else if (id === "v") W.view = "all"; else if (id === "a") { W.att = ""; $("#w-att").value = ""; } else W.sol.delete(id.slice(2)); resetWipView(); draw(); },
+      () => { W.sol.clear(); W.tipo = ""; W.att = ""; W.view = "all"; $("#w-tipo").value = ""; $("#w-att").value = ""; resetWipView(); draw(); });
   };
   const rowHtml = i => {
     const r = i.r, sel = W.sel.has(i.key), st = normStato(r.Stato), out = !i.wip;
     return `<div class="wr2 ${sel ? "sel" : ""} ${out ? "done" : ""}" data-b="${i.band}" data-id="${i.id}">
       <label class="wchk"><input type="checkbox" data-key="${esc(i.key)}" ${sel ? "checked" : ""} aria-label="Seleziona ${esc(r.Cliente)}"></label>
-      <div class="wcl"><b>${esc(r.Cliente)}</b>${r["Solution D&A"] ? `<span class="owner">${esc(r["Solution D&A"])}</span>` : ""}</div>
+      <div class="wcl" data-att="${r.Attenzione || 0}"><b>${esc(r.Cliente)}</b>${r["Solution D&A"] ? `<span class="owner">${esc(r["Solution D&A"])}</span>` : ""}</div>
       <div class="wds" title="${esc(r.Oggetto)}">${orNil(r.Oggetto)}</div>
       <div class="wtipo">${tipoChip(r.tipo)}</div>
+      <div class="watt"><select class="inl inl-att att-${r.Attenzione || 0}" data-id="${i.id}" aria-label="Attenzione per ${esc(r.Cliente)}">${attOpts(r.Attenzione, true)}</select></div>
       <div class="wdt"><span class="dtw"><button type="button" class="inl inl-dt" data-id="${i.id}" title="Clicca per cambiare la data di consegna" aria-label="Data di consegna di ${esc(r.Cliente)}: ${i.d ? fmtD(i.d) : "nessuna"}. Cambia">${i.d ? fmtD(i.d) : "—"}${ico("calendar")}</button><input type="date" class="dtin" data-id="${i.id}" value="${esc(r["Data consegna"] || "")}" tabindex="-1" aria-hidden="true"></span>${out ? "" : dayBadge(i.days, i.band)}</div>
       <div class="wst"><select class="inl inl-st st-${BCLASS[st] || "x"}" data-id="${i.id}" aria-label="Stato di ${esc(r.Cliente)}">${STATI.map(x => `<option ${x === st ? "selected" : ""}>${x}</option>`).join("")}</select>${out ? "" : `<button type="button" class="btn-cons" data-id="${i.id}" title="Segna come consegnata: lo stato passa a Waiting For response">${ico("check")}Consegnata</button>`}</div>
     </div>`;
   };
   const draw = () => {
     drawMs(); drawChips();
-    const base = all().filter(i => i.wip && i.d && passTipo(i) && passSol(i));
+    const base = all().filter(i => i.wip && i.d && passTipo(i) && passSol(i) && passAtt(i));
     const n = {all: base.length, late: base.filter(i => passView(i, "late")).length, week: base.filter(i => passView(i, "week")).length, future: base.filter(i => passView(i, "future")).length};
     const VIEWS = [["all", "Tutte", n.all], ["late", "Scadute", n.late], ["week", "Questa settimana", n.week], ["future", "Future", n.future]];
     $("#w-views").innerHTML = VIEWS.map(([k, l, c]) => `<button role="tab" data-v="${k}" title="${({all: "Tutte le WIP con data di consegna", late: "Consegna già passata", week: "Consegna da oggi a domenica", future: "Consegna dopo questa settimana"})[k]}" class="${W.view === k ? "on" : ""} v-${k}">${l}<span class="vc">${c}</span></button>`).join("");
@@ -480,19 +518,20 @@ function renderWip(m) {
     const nb = $("#w-nodate"); if (nb) nb.onclick = () => goTable({rows: nodate.map(i => i.id), rowsLabel: `WIP senza data di consegna (${nodate.length})`});
     counters();
     const vis = visible();
-    $("#w-list").innerHTML = vis.length ? `<div class="wh"><span></span><span>Cliente</span><span>Descrizione</span><span>Tipo</span><span>Consegna</span><span>Stato</span></div>${vis.map(rowHtml).join("")}` : `<div class="empty" style="padding:var(--pad)">Nessuna offerta WIP con questi filtri.</div>`;
+    $("#w-list").innerHTML = vis.length ? `<div class="wh"><span></span><span>Cliente</span><span>Descrizione</span><span>Tipo</span><span>Attenzione</span><span>Consegna</span><span>Stato</span></div>${vis.map(rowHtml).join("")}` : `<div class="empty" style="padding:var(--pad)">Nessuna offerta WIP con questi filtri.</div>`;
     $("#w-list").querySelectorAll(".wchk input").forEach(c => c.onchange = () => { c.checked ? W.sel.add(c.dataset.key) : W.sel.delete(c.dataset.key); selSave(W.sel); c.closest(".wr2").classList.toggle("sel", c.checked); counters(); });
     $("#w-list").querySelectorAll(".inl-dt").forEach(btn => btn.onclick = () => { const inp = btn.nextElementSibling; try { inp.showPicker(); } catch (e) { inp.focus(); inp.click(); } });
     $("#w-list").querySelectorAll(".dtin").forEach(inp => inp.onchange = () => {
       const row = rowByNum(+inp.dataset.id); if (!row) return;
       wipEdit(row, {"Data consegna": inp.value || null}, inp.value ? `Consegna di ${row.Cliente}: ${fmt(inp.value)}` : `Data di consegna di ${row.Cliente} tolta`);
     });
+    $("#w-list").querySelectorAll(".inl-att").forEach(sel => sel.onchange = () => { const row = rowByNum(+sel.dataset.id); if (!row) return; const k = +sel.value; wipEdit(row, {Attenzione: k}, k ? `${row.Cliente}: ${ATT[k].label}` : `${row.Cliente}: attenzione tolta`); });
     $("#w-list").querySelectorAll(".btn-cons").forEach(btn => btn.onclick = () => { const row = rowByNum(+btn.dataset.id); if (row) wipEdit(row, {Stato: "Waiting For response"}, `${row.Cliente}: consegnata`); });
     $("#w-list").querySelectorAll(".inl-st").forEach(sel => sel.onchange = () => { const row = rowByNum(+sel.dataset.id); if (row) wipEdit(row, {Stato: sel.value}, `${row.Cliente}: ${sel.value}`); });
 
     // consegne per tipo (rispetta i filtri Solution e vista; clic = filtra per quel tipo)
     const per = new Map();
-    all().filter(i => i.wip && i.d && passSol(i)).forEach(i => { const g = tipoGroup(i.r.tipo), o = per.get(g) || {n: g, d7: 0, d14: 0, tot: 0}; o.tot++; if (i.days >= 0 && i.days <= 7) o.d7++; if (i.days >= 0 && i.days <= 14) o.d14++; per.set(g, o); });
+    all().filter(i => i.wip && i.d && passSol(i) && passAtt(i)).forEach(i => { const g = tipoGroup(i.r.tipo), o = per.get(g) || {n: g, d7: 0, d14: 0, tot: 0}; o.tot++; if (i.days >= 0 && i.days <= 7) o.d7++; if (i.days >= 0 && i.days <= 14) o.d14++; per.set(g, o); });
     const rows = [...per.values()].sort((a, b) => [...TIPI_MAIN, "Altro"].indexOf(a.n) - [...TIPI_MAIN, "Altro"].indexOf(b.n)), mx = Math.max(1, ...rows.map(r => r.tot));
     $("#w-load").innerHTML = `<div class="strip-h"><h2>Consegne per tipo</h2><span>Prossimi 7 e 14 giorni e totale WIP con data · clicca un tipo per filtrare</span></div><div class="tipo-strip">` +
       (rows.map(o => { const key = o.n === "Altro" ? "__altro" : o.n; return `<button type="button" class="tcard ${W.tipo === key ? "on" : ""}" data-t="${esc(key)}"><div class="lname"><b>${esc(o.n)}</b><span>${o.d7} in 7 gg · ${o.d14} in 14 gg · ${o.tot} WIP</span></div>
@@ -504,6 +543,7 @@ function renderWip(m) {
   resetWipView();
   draw();
   $("#w-tipo").onchange = e => { W.tipo = e.target.value; resetWipView(); draw(); };
+  $("#w-att").onchange = e => { W.att = e.target.value; resetWipView(); draw(); };
   $("#w-selweek").onclick = () => { visible().filter(i => i.wip && i.band === "week").forEach(i => W.sel.add(i.key)); selSave(W.sel); draw(); };
   $("#w-selvis").onclick = () => { visible().filter(i => i.wip).forEach(i => W.sel.add(i.key)); selSave(W.sel); draw(); };
   $("#w-selnone").onclick = () => { W.sel.clear(); selSave(W.sel); draw(); };
@@ -521,7 +561,7 @@ function openMeeting() {
     const its = items.filter(i => i.band === b.k); if (!its.length) return "";
     const owners = new Map(); its.forEach(i => { const o = i.r["Solution D&A"] || NOASS; (owners.get(o) || owners.set(o, []).get(o)).push(i); });
     return `<section class="mt-band mb-${b.k}"><h2>${b.t} <em>${its.length}</em></h2>${b.note ? `<div class="mt-note">${b.note}</div>` : ""}` +
-      [...owners.entries()].sort((a, b) => a[0].localeCompare(b[0], "it")).map(([o, g]) => `<h3>${esc(o)}</h3>` + g.map(i => `<div class="mt-item"><div class="mt-c"><b>${esc(i.r.Cliente)}</b><span>${esc(i.r.Oggetto)}</span></div>
+      [...owners.entries()].sort((a, b) => a[0].localeCompare(b[0], "it")).map(([o, g]) => `<h3>${esc(o)}</h3>` + g.map(i => `<div class="mt-item"><div class="mt-c"><b>${attDot(i.r)}${esc(i.r.Cliente)}</b><span>${esc(i.r.Oggetto)}</span></div>
         <div class="mt-m"><div><small>Owner</small>${esc(ownerOf(i))}</div><div><small>Consegna</small>${i.d ? fmtD(i.d) : "n.d."}</div><div><small>Giorni</small>${i.days === null ? "—" : `<span class="tag d-${i.band}">${dayText(i.days)}</span>`}</div><div><small>SS</small>${esc(i.r.SS || "n.d.")}</div></div></div>`).join("")).join("") + `</section>`;
   }).join("");
   el.innerHTML = `<div class="mt-bar"><button id="mt-exit">${ico("x")}Esci (Esc)</button><span style="flex:1"></span><button id="mt-txt">Scarica .txt</button><button id="mt-copy">Copia negli appunti</button><button id="mt-print">Stampa</button></div>
@@ -575,6 +615,7 @@ function openForm(row) {
     <div class="full"><label class="req" for="f-Cliente">Cliente</label><input id="f-Cliente" list="dl-clienti" value="${esc(v.Cliente)}" autocomplete="off"><datalist id="dl-clienti">${d.clienti.map(c => `<option value="${esc(c.Cliente)}">`).join("")}</datalist></div>
     <div><label class="req" for="f-Vertical">Vertical</label>${sel("f-Vertical", d.vertical, v.Vertical, !edit ? false : false)}</div>
     <div><label class="req" for="f-Market">Market</label>${sel("f-Market", d.market, v.Market)}</div>
+    <div class="full"><label for="f-Attenzione">Attenzione (colora il nome cliente nell'Excel)</label><select id="f-Attenzione">${attOpts(v.Attenzione)}</select></div>
     ${ta("f-Oggetto", "Oggetto <span class='req'></span>", v.Oggetto)}
     <div><label class="req" for="f-tipo">Tipo</label>${sel("f-tipo", d.tipo, v.tipo)}</div>
     <div><label class="req" for="f-Stato">Stato</label>${sel("f-Stato", STATI, normStato(v.Stato) || v.Stato, true)}</div>
@@ -622,12 +663,12 @@ function openForm(row) {
   F_("Cliente").focus();
   $("#f-save", el).onclick = async () => {
     const F = ["Cliente", "Vertical", "Market", "Oggetto", "tipo", "Stato", "Data ins.", "Data consegna", "Solution D&A", "SS", "Commessa", "Legal Entity", "Salesman", "Data Opt review", "Referenti vertical", "Tecnologie di riferimento D&A", "Note"];
-    const vals = {}; F.forEach(f => vals[f] = g(f).trim() || null);
+    const vals = {}; F.forEach(f => vals[f] = g(f).trim() || null); vals.Attenzione = +g("Attenzione") || 0;
     const err = $("#f-err", el); err.textContent = "";
     const miss = ["Cliente", "Vertical", "Market", "Oggetto", "tipo", "Data ins.", "Stato"].filter(f => !vals[f]);
     if (miss.length) { err.textContent = "Campi obbligatori mancanti: " + miss.join(", "); return; }
     const send = async force => {
-      if (edit) { const ch = {}; F.forEach(f => { if ((vals[f] || null) !== (row[f] || null)) ch[f] = vals[f]; }); if (!Object.keys(ch).length) { closeModal(); return; }
+      if (edit) { const ch = {}; F.forEach(f => { if ((vals[f] || null) !== (row[f] || null)) ch[f] = vals[f]; }); if (vals.Attenzione !== (row.Attenzione || 0)) ch.Attenzione = vals.Attenzione; if (!Object.keys(ch).length) { closeModal(); return; }
         await withBusy(() => api("/api/rows/" + row._row, {method: "PUT", body: {changes: ch}})); toast("Modifiche salvate (da esportare nell'Excel)"); }
       else { await withBusy(() => api("/api/rows", {method: "POST", body: {...vals, _force: force}})); toast("Offerta aggiunta (da esportare nell'Excel)"); }
       closeModal(); await loadAll(true);

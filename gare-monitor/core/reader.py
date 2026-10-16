@@ -80,6 +80,26 @@ def _column_list(ws, header):
     return out
 
 
+# Livello di attenzione = colore di riempimento della cella del nome cliente, come si fa oggi nell'Excel
+ATT_COLORS = {1: "FFFF00", 2: "FFC000", 3: "FF0000"}          # giallo = rilevante, arancione = da attenzionare, rosso = urgente
+ATT_LABELS = {0: "nessuna", 1: "Rilevante (giallo)", 2: "Da attenzionare (arancione)", 3: "Urgente (rosso)"}
+
+
+def fill_level(cell):
+    """0 se la cella non ha uno dei tre colori; altrimenti 1, 2 o 3."""
+    f = cell.fill
+    if f is None or f.fill_type != "solid":
+        return 0
+    c = f.fgColor
+    if c is None or c.type != "rgb" or not isinstance(c.rgb, str) or len(c.rgb) < 6:
+        return 0
+    rgb = c.rgb[-6:].upper()
+    for lvl, ref in ATT_COLORS.items():
+        if sum(abs(int(rgb[i:i + 2], 16) - int(ref[i:i + 2], 16)) for i in (0, 2, 4)) <= 50:
+            return lvl
+    return 0
+
+
 def _cell_value(v):
     """Valore di cella pronto per il database: date come testo ISO, il resto invariato."""
     if isinstance(v, dt.datetime):
@@ -134,17 +154,17 @@ def read_excel(path):
             cells = {h: _cell_value(ws.cell(r, cols[h]).value) for h in headers}
             if not (clean_text(cells.get("Cliente")) or clean_text(cells.get("Oggetto"))):
                 continue
-            rows.append({"xl": r, "cells": cells})
+            rows.append({"xl": r, "cells": cells, "att": fill_level(ws.cell(r, cols["Cliente"]))})
         domini = _read_domini(wb[SHEET_DOMINI] if SHEET_DOMINI in wb.sheetnames else None)
         return {"headers": headers, "rows": rows, "domini": domini}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def build_row(rid, xl, cells, orig=None, state="orig"):
+def build_row(rid, xl, cells, orig=None, state="orig", att=0):
     """Riga per l'app a partire dai valori del database.
     cells = valori attuali; orig = valori importati dall'Excel (None per le righe nuove)."""
-    row = {"_row": rid, "_xl": xl, "_state": state}
+    row = {"_row": rid, "_xl": xl, "_state": state, "Attenzione": att or 0}
     seq = cells.get("Seq")
     row["Seq"] = seq if isinstance(seq, (int, float)) and not isinstance(seq, bool) else (xl - 1 if xl else None)
     invalid, textdates = [], []

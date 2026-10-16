@@ -22,6 +22,10 @@ KEEP_BACKUPS = 40
 _lock = threading.Lock()
 
 
+ATT_RGB = {1: "FFFF00", 2: "FFC000", 3: "FF0000"}              # giallo, arancione, rosso (come si colora oggi nell'Excel)
+ATT_BGR = {k: int(v[0:2], 16) + int(v[2:4], 16) * 256 + int(v[4:6], 16) * 65536 for k, v in ATT_RGB.items()}
+
+
 class WriteError(Exception):
     pass
 
@@ -192,12 +196,24 @@ class ExcelWriter:
         g = lambda f: self._cell_val(_retry(lambda: ws.Cells(row, cols[f]).Value)) if f in cols else None
         _check_sig(g("Cliente"), g("Oggetto"), g("Data ins."), sig, row)
 
+    @staticmethod
+    def _set_att(ws, row, cols, level):
+        """Colora (o toglie il colore dalla) cella del cliente: 1 giallo, 2 arancione, 3 rosso, 0 nessun colore."""
+        if "Cliente" not in cols:
+            return
+        if level:
+            _retry(lambda: setattr(ws.Cells(row, cols["Cliente"]).Interior, "Color", ATT_BGR[int(level)]))
+        else:
+            _retry(lambda: setattr(ws.Cells(row, cols["Cliente"]).Interior, "ColorIndex", -4142))     # xlColorIndexNone
+
     def _append_one(self, ws, lo, cols, values):
         lr = _retry(lambda: lo.ListRows.Add())
         row = _retry(lambda: lr.Range.Row)
         for f, v in values.items():
             if f in cols:
                 self._set(ws, row, cols[f], _value_for(f, v))
+        if values.get("Attenzione"):
+            self._set_att(ws, row, cols, values["Attenzione"])
         if "Seq" in cols and not _retry(lambda: ws.Cells(row, cols["Seq"]).HasFormula):
             _retry(lambda: setattr(ws.Cells(row, cols["Seq"]), "Formula", "=ROW()-1"))
         if "Valore" in cols and not _retry(lambda: ws.Cells(row, cols["Valore"]).HasFormula):
@@ -220,7 +236,9 @@ class ExcelWriter:
             appended = [self._append_one(ws, lo, cols, v) for v in new_rows]
             for row, _, changes in updates:
                 for f, v in changes.items():
-                    if f in cols:
+                    if f == "Attenzione":
+                        self._set_att(ws, row, cols, v)
+                    elif f in cols:
                         self._set(ws, row, cols[f], _value_for(f, v))
             return appended
         return self._run(fn)
@@ -269,6 +287,13 @@ class OpenpyxlWriter:
         g = lambda f: ws.cell(row, cols[f]).value if f in cols else None
         _check_sig(g("Cliente"), g("Oggetto"), g("Data ins."), sig, row)
 
+    @staticmethod
+    def _set_att(ws, row, cols, level):
+        from openpyxl.styles import PatternFill
+        if "Cliente" not in cols:
+            return
+        ws.cell(row, cols["Cliente"]).fill = PatternFill(fill_type="solid", start_color="FF" + ATT_RGB[int(level)], end_color="FF" + ATT_RGB[int(level)]) if level else PatternFill(fill_type=None)
+
     def _append_one(self, ws, cols, values):
         from copy import copy
         tab = ws.tables.get(self.table_name)
@@ -282,6 +307,8 @@ class OpenpyxlWriter:
         for f, v in values.items():
             if f in cols:
                 ws.cell(row, cols[f]).value = _value_for(f, v)
+        if values.get("Attenzione"):
+            self._set_att(ws, row, cols, values["Attenzione"])
         if "Seq" in cols:
             ws.cell(row, cols["Seq"]).value = "=ROW()-1"
         if "Valore" in cols:
@@ -302,7 +329,9 @@ class OpenpyxlWriter:
             appended = [self._append_one(ws, cols, v) for v in new_rows]
             for row, _, changes in updates:
                 for f, v in changes.items():
-                    if f in cols:
+                    if f == "Attenzione":
+                        self._set_att(ws, row, cols, v)
+                    elif f in cols:
                         ws.cell(row, cols[f]).value = _value_for(f, v)
             return appended
         return self._run(fn)

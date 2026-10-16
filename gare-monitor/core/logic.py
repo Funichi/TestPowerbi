@@ -212,8 +212,22 @@ def dashboard(rows, domini, today, months):
         if not c:
             continue
         w, l = c["Won"], c["Lost"]
-        esito.append({"nome": nome, **{st: c.get(st, 0) for st in STATI}, "totale": sum(c.values()), "chiuse": w + l,
-                      "rate": (w / (w + l)) if w + l >= MIN_CHIUSE else None})
+        esito.append({"nome": nome, "Won": w, "Lost": l, "NoBID": c["NoBID"] + c["Sospeso"],          # Sospeso e NoBID insieme come "No Bid"
+                      "Waiting For response": c["Waiting For response"], "WIP": c["WIP"], "Closed": c["Closed"],
+                      "totale": sum(c.values()), "chiuse": w + l, "rate": (w / (w + l)) if w + l >= MIN_CHIUSE else None})
+
+    # ---- Top 10 clienti per numero di opportunità
+    cl = defaultdict(lambda: {"nomi": Counter(), "tot": 0, "won": 0, "rows": []})
+    for r in rows:
+        k = client_key(r["Cliente"])
+        if k and in_period(r):
+            g_ = cl[k]
+            g_["nomi"][r["Cliente"]] += 1
+            g_["tot"] += 1
+            g_["won"] += stato[r["_row"]] == "Won"
+            g_["rows"].append(r["_row"])
+    top_clienti = sorted(({"nome": v["nomi"].most_common(1)[0][0], "totale": v["tot"], "won": v["won"], "rows": v["rows"]} for v in cl.values()),
+                         key=lambda x: (-x["totale"], -x["won"], x["nome"].casefold()))[:10]
 
     # ---- Età delle offerte in attesa (da Data consegna; se manca, da Data ins.)
     fasce = {k: [] for k, _ in ETA_FASCE}
@@ -235,6 +249,8 @@ def dashboard(rows, domini, today, months):
             imminenti += 0 <= gg <= GIORNI_SCADENZA
     solleciti = [r["_row"] for r in rows if stato[r["_row"]] == "Waiting For response" and ins(r)
                  and GIORNI_SOLLECITO <= (today - ins(r)).days <= GIORNI_RICLASSIFICA]
+
+    att_wip = Counter(r["Attenzione"] for r in rows if stato[r["_row"]] == "WIP" and r.get("Attenzione"))
 
     # ---- Punti di attenzione
     ss_count = Counter()
@@ -273,12 +289,14 @@ def dashboard(rows, domini, today, months):
     return {
         "oggi": today.isoformat(),
         "kpi": kpi,
-        "pillole": {"scadute": scadute, "imminenti": imminenti, "solleciti": solleciti, "attenzioni": sum(len(a["righe"]) for a in attenzioni)},
+        "pillole": {"scadute": scadute, "imminenti": imminenti, "solleciti": solleciti,
+                    "attenzione": {"totale": sum(att_wip.values()), "rosse": att_wip[3], "arancioni": att_wip[2], "gialle": att_wip[1]}, "attenzioni": sum(len(a["righe"]) for a in attenzioni)},
         "trend": trend,
         "eta_attesa": eta,
         "pipeline_market": _group_pipeline(scope, stato, "Market"),
         "pipeline_vertical": _group_pipeline(scope, stato, "Vertical"),
         "esito_tipo": esito,
+        "top_clienti": top_clienti,
         "attenzioni": attenzioni,
         "soglie": {"sollecito": GIORNI_SOLLECITO, "riclassifica": GIORNI_RICLASSIFICA, "scadenza": GIORNI_SCADENZA, "min_chiuse": MIN_CHIUSE},
     }
