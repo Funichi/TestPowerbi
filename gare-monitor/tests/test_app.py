@@ -272,3 +272,56 @@ def test_nuova_offerta_senza_data_consegna_va_a_fine_mese(client):
     assert c.post("/api/rows", json={**NEW, "Oggetto": "con data"}).status_code == 200                 # se c'è, non si tocca
     got = {r["Oggetto"]: r["Data consegna"] for r in c.get("/api/data").get_json()["rows"] if r["Oggetto"] in ("feb", "ott", "con data")}
     assert got == {"feb": "2026-02-28", "ott": "2026-10-31", "con data": "2026-10-20"}
+
+
+def test_ss_progressivo_per_anno_e_duplicati_solo_nello_stesso_anno(client):
+    c, x, _ = client
+    # Terna ha TER1 e TER2 nel 2026: nel 2026 il prossimo è TER3, nel 2027 si riparte da TER1
+    assert c.post("/api/suggest", json={"Cliente": "Terna", "Data ins.": "2026-10-10"}).get_json()["ss"] == "TER3"
+    assert c.post("/api/suggest", json={"Cliente": "Terna", "Data ins.": "2027-01-10"}).get_json()["ss"] == "TER1"
+    # stesso codice in anni diversi: non è un duplicato; nello stesso anno sì
+    c.post("/api/rows", json={**NEW, "SS": "TER2", "Data ins.": "2025-10-10", "Data consegna": "2025-10-20", "Oggetto": "Vecchia"})
+    titoli = lambda: [a["titolo"] for a in c.get("/api/dashboard").get_json()["attenzioni"]]
+    assert not any("SS duplicato" in t for t in titoli())
+    c.post("/api/rows", json={**NEW, "SS": "TER2", "Oggetto": "Stesso anno"})
+    assert any("SS duplicato nello stesso anno" in t for t in titoli())
+
+
+def test_scheda_cliente_tempi_e_cartella(client, tmp_path):
+    c, x, _ = client
+    s = c.get("/api/cliente", query_string={"nome": "terna"}).get_json()
+    assert s["kpi"]["totale"] == 2 and s["kpi"]["won"] == 1 and s["kpi"]["wip"] == 1
+    assert s["kpi"]["tempi"] == {"n": 1, "media": 19.0, "mediana": 19.0}          # la WIP non conta: solo la Won (1/5 -> 20/5)
+    assert s["cronologia"][0]["Oggetto"] == "Uno" and [a["anno"] for a in s["anni"]] == [2026]
+    assert s["media"]["tempi"]["n"] == 3 and c.get("/api/cliente", query_string={"nome": "boh"}).status_code == 400
+    assert s["cartella"]["stato"] == "nessuna"
+    t = c.get("/api/tempi").get_json()
+    assert t["totale"]["n"] == 3 and {g["nome"] for g in t["tipo"]} == {"Gara", "RFI", "Offerta diretta"} and t["solution"]
+    # cartelle: una uguale al nome, una solo simile (si sceglie e si ricorda)
+    base = tmp_path / "Clienti"
+    for n in ("Terna", "Generali Assicurazioni"):
+        (base / n).mkdir(parents=True)
+    cfg = json.loads((tmp_path / "config.json").read_text())
+    cfg["clienti_dir"] = str(base)
+    (tmp_path / "config.json").write_text(json.dumps(cfg))
+    import app as appmod
+    opened = []
+    appmod.open_folder = opened.append
+    assert c.get("/api/cliente", query_string={"nome": "Terna"}).get_json()["cartella"]["stato"] == "ok"
+    g = c.get("/api/cliente", query_string={"nome": "Generali"}).get_json()["cartella"]
+    assert g["stato"] == "scegli" and g["candidati"] == ["Generali Assicurazioni"]
+    assert c.post("/api/cliente/cartella", json={"cliente": "Generali"}).status_code == 404
+    assert c.post("/api/cliente/cartella", json={"cliente": "Generali", "cartella": "../x"}).status_code == 404
+    assert c.post("/api/cliente/cartella", json={"cliente": "Generali", "cartella": "Generali Assicurazioni"}).status_code == 200
+    assert c.get("/api/cliente", query_string={"nome": "Generali"}).get_json()["cartella"] == {"stato": "ok", "nome": "Generali Assicurazioni", "candidati": []}
+    assert opened and opened[-1].endswith("Generali Assicurazioni")
+
+
+def test_varianti_cliente_e_unione_nel_database_locale(client):
+    c, x, _ = client
+    c.post("/api/rows", json={**NEW, "Cliente": "Terna S.p.A.", "Oggetto": "Variante"})
+    v = c.get("/api/clienti/varianti").get_json()
+    assert len(v) == 1 and {n["nome"] for n in v[0]["nomi"]} == {"Terna", "TERNA", "Terna S.p.A."} and v[0]["suggerito"] in ("Terna", "TERNA")
+    r = c.post("/api/clienti/unisci", json={"nomi": ["Terna", "TERNA", "Terna S.p.A."], "in": "Terna"}).get_json()
+    assert r["righe"] == 2 and c.get("/api/clienti/varianti").get_json() == []
+    assert c.get("/api/state").get_json()["pending"]["mod"] == 1 and sheet(x).cell(3, 4).value == "TERNA "      # solo database locale

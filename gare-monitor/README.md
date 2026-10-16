@@ -15,7 +15,10 @@ Alternativa senza exe: con Python installato, doppio click su `Avvia.bat`.
 - **Aggiorna dall'Excel**: svuota il database e lo ricarica dal file. Le modifiche non ancora esportate vengono scartate (prima chiede conferma e salva una copia del database in `backup/`). Al primo avvio l'import è automatico.
 - **Nuova offerta / modifica**: si salvano solo nel database. Le righe sono segnate "nuova" o "modificata"; una riga nuova si può eliminare, una modifica si può annullare.
 - **Esporta in Excel**: mostra cosa verrà scritto e poi lo scrive direttamente in `HISTORY.xlsx` (righe nuove accodate dopo l'ultima, righe modificate aggiornate sulla loro riga). Prima crea un backup dell'Excel in `backup/`; se una riga da modificare nel file è cambiata nel frattempo si ferma senza scrivere nulla. Alla fine rilegge il file.
-- **Pulizia dati**: solo suggerimenti, non scrive nulla. Si corregge nell'Excel e poi si preme "Aggiorna dall'Excel".
+- **Clienti**: scheda per cliente (offerte, esiti, win rate e tempo medio di consegna a confronto con la media, storico, linea del tempo). Il nome cliente è cliccabile in Tabella e Cruscotto (non in Consegne WIP). "Apri cartella" apre la cartella del cliente dentro la cartella indicata in Impostazioni; se il nome non coincide si sceglie una volta e l'app lo ricorda.
+- **Tempi di consegna**: giorni medi e mediani tra Data ins. e Data consegna per tipo, Solution e Vertical (solo offerte consegnate: esclusi WIP e NoBID).
+- **Codice SS**: il progressivo riparte ogni anno (anno di Data ins.). È un duplicato solo se lo stesso codice compare due volte nello stesso anno.
+- **Pulizia dati**: i suggerimenti non scrivono nulla (si corregge nell'Excel e poi "Aggiorna dall'Excel"). L'unione dei clienti scritti in modi diversi modifica invece il database locale e va poi esportata.
 
 ## Regole implementate
 - Scrittura nell'Excel **tramite Excel stesso** (COM): tabella, formule, pivot e menu a tendina restano intatti. Se il file è già aperto in Excel viene aggiornato quello; altrimenti Excel lo apre in background.

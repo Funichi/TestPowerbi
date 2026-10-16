@@ -13,7 +13,7 @@ import webbrowser
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from core import logic
+from core import clienti, logic
 from core.db import Store
 from core.reader import ATT_LABELS, DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
 from core.writer import WriteError, get_writer
@@ -24,6 +24,7 @@ BASE_DIR = os.path.dirname(sys.executable) if FROZEN else os.path.dirname(os.pat
 CONFIG_PATH = os.environ.get("GARE_CONFIG", os.path.join(BASE_DIR, "config.json"))
 BACKUP_DIR = os.path.join(os.path.dirname(CONFIG_PATH), "backup")
 DEFAULT_DB = os.path.join(os.path.dirname(CONFIG_PATH), "monitoraggio.db")
+DEFAULT_CLIENTI_DIR = r"C:\Users\ngrando\OneDrive - Engineering Ingegneria Informatica S.p.A\Solution - Documenti\Clienti"
 DEFAULT_EXCEL_PATH = r"C:\Users\ngrando\OneDrive - Engineering Ingegneria Informatica S.p.A\Solution - Documenti\Clienti\01 Amministrazione\HISTORY.xlsx"
 
 app = Flask(__name__, static_folder=os.path.join(RES_DIR, "static"), static_url_path="/static")
@@ -49,6 +50,11 @@ def save_config(cfg):
 def excel_path():
     p = load_config().get("excel_path") or DEFAULT_EXCEL_PATH
     return p if os.path.isfile(p) else None
+
+
+def clienti_dir():
+    d = load_config().get("clienti_dir", DEFAULT_CLIENTI_DIR)
+    return d if d and os.path.isdir(d) else None
 
 
 def db_path():
@@ -118,7 +124,7 @@ def state():
     st = store()
     return jsonify({"path": cfg.get("excel_path") or DEFAULT_EXCEL_PATH, "excel_ok": bool(excel_path()), "db_path": st.path,
                     "exists": bool(excel_path()) or st.has_data(), "imported": st.has_data(), "imported_at": st.meta("imported_at"),
-                    "pending": st.counts(), "oggi": dt.date.today().isoformat()})
+                    "pending": st.counts(), "oggi": dt.date.today().isoformat(), "clienti_dir": clienti_dir()})
 
 
 @app.post("/api/config")
@@ -135,6 +141,11 @@ def set_config():
         if not os.path.isdir(os.path.dirname(os.path.abspath(d))):
             raise FileNotFoundError(f"La cartella del database non esiste: {os.path.dirname(d)}")
         cfg["db_path"] = d
+    if "clienti_dir" in b:
+        d = (b["clienti_dir"] or "").strip().strip('"')
+        if d and not os.path.isdir(d):
+            raise FileNotFoundError(f"Cartella clienti non trovata: {d}")
+        cfg["clienti_dir"] = d
     save_config(cfg)
     _cache["v"] = None
     return jsonify({"ok": True})
@@ -181,6 +192,78 @@ def dashboard():
     return jsonify(logic.dashboard(d["rows"], d["domini"], dt.date.today(), months))
 
 
+# ------------------------------------------------------------------ clienti, tempi
+
+def _mappa_cartelle():
+    return load_config().get("cartelle_clienti", {})
+
+
+@app.get("/api/cliente")
+def cliente():
+    nome = request.args.get("nome", "")
+    sc = clienti.scheda(get_data()["rows"], nome)
+    sc["cartella"] = clienti.trova_cartella(clienti_dir(), sc["nome"], _mappa_cartelle())
+    return jsonify(sc)
+
+
+def open_folder(path):
+    """Apre la cartella in Esplora risorse (Windows); sugli altri sistemi con il visualizzatore di default."""
+    if hasattr(os, "startfile"):
+        os.startfile(path)
+    else:
+        import subprocess
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", path])
+
+
+@app.post("/api/cliente/cartella")
+def cliente_cartella():
+    b = request.json or {}
+    base = clienti_dir()
+    if not base:
+        raise FileNotFoundError("Cartella dei clienti non configurata o non raggiungibile (vedi Impostazioni)")
+    nome = b.get("cartella")
+    if nome:                                                     # scelta fatta dall'utente: la ricordo per questo cliente
+        if nome not in clienti._cartelle(base):
+            raise FileNotFoundError("Cartella non trovata")
+        cfg = load_config()
+        cfg.setdefault("cartelle_clienti", {})[logic.client_key(b.get("cliente"))] = nome
+        save_config(cfg)
+    else:
+        t = clienti.trova_cartella(base, b.get("cliente"), _mappa_cartelle())
+        if t["stato"] != "ok":
+            raise FileNotFoundError("Cartella non trovata per questo cliente")
+        nome = t["nome"]
+    open_folder(os.path.join(base, nome))
+    return jsonify({"ok": True, "cartella": nome})
+
+
+@app.get("/api/tempi")
+def tempi():
+    m = request.args.get("months", "all")
+    return jsonify(clienti.tempi(get_data()["rows"], dt.date.today(), None if m == "all" else int(m)))
+
+
+@app.get("/api/clienti/varianti")
+def clienti_varianti():
+    return jsonify(clienti.varianti_clienti(get_data()["rows"]))
+
+
+@app.post("/api/clienti/unisci")
+def clienti_unisci():
+    """Porta tutte le grafie indicate sul nome scelto: modifica solo il database locale (poi 'Esporta in Excel')."""
+    b = request.json or {}
+    target = clean_text(b.get("in"))
+    chiavi = {logic.client_key(n) for n in b.get("nomi", [])}
+    if not target or not chiavi:
+        raise ValueError("Indica il nome da tenere e le grafie da unire")
+    n = 0
+    for r in get_data()["rows"]:
+        if logic.client_key(r["Cliente"]) in chiavi and r["Cliente"] != target:
+            store().update(r["_row"], {"Cliente": target})
+            n += 1
+    return jsonify({"ok": True, "righe": n})
+
+
 # ------------------------------------------------------------------ inserimento / modifica (solo database locale)
 
 REQUIRED_NEW = ["Cliente", "Vertical", "Market", "Oggetto", "tipo", "Data ins.", "Stato"]
@@ -190,7 +273,7 @@ REQUIRED_NEW = ["Cliente", "Vertical", "Market", "Oggetto", "tipo", "Data ins.",
 def suggest():
     b = request.json or {}
     d = get_data()
-    ss = logic.suggest_ss(d["rows"], b.get("Cliente"))
+    ss = logic.suggest_ss(d["rows"], b.get("Cliente"), b.get("Data ins."))
     ss["commessa"] = logic.suggest_commessa(d["domini"], b.get("Vertical"), b.get("Data consegna"), b.get("Data ins."))
     return jsonify(ss)
 

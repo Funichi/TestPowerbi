@@ -40,11 +40,19 @@ def _split_ss(ss):
     return (m.group(1).upper(), int(m.group(2))) if m else None
 
 
-def suggest_ss(rows, cliente):
-    """Prefisso (3 lettere del cliente) + progressivo. Ritorna {'ss','prefisso','numero','avviso'}."""
+def _anno_ins(r):
+    d = to_date(r["Data ins."])
+    return d.year if d else None
+
+
+def suggest_ss(rows, cliente, data_ins=None):
+    """Prefisso (3 lettere del cliente) + progressivo. Il progressivo riparte ogni anno (anno della Data ins.):
+    lo stesso codice può tornare in anni diversi, mai due volte nello stesso anno.
+    Ritorna {'ss','prefisso','numero','anno','avviso'}."""
     key = client_key(cliente)
     if not key:
-        return {"ss": None, "prefisso": None, "numero": None, "avviso": None}
+        return {"ss": None, "prefisso": None, "numero": None, "anno": None, "avviso": None}
+    anno = (to_date(data_ins) or dt.date.today()).year
     prefixes = Counter()
     for r in rows:
         if client_key(r["Cliente"]) == key:
@@ -60,8 +68,8 @@ def suggest_ss(rows, cliente):
         altri = {r["Cliente"] for r in rows if (_split_ss(r["SS"]) or ("",))[0] == prefix and client_key(r["Cliente"]) != key}
         if altri:
             avviso = f"Il prefisso {prefix} è già usato da: {', '.join(sorted(altri)[:3])}. Controlla o cambialo."
-    mx = max((p[1] for p in (_split_ss(r["SS"]) for r in rows) if p and p[0] == prefix), default=0)
-    return {"ss": f"{prefix}{mx + 1}", "prefisso": prefix, "numero": mx + 1, "avviso": avviso}
+    mx = max((p[1] for r in rows for p in [_split_ss(r["SS"])] if p and p[0] == prefix and _anno_ins(r) == anno), default=0)
+    return {"ss": f"{prefix}{mx + 1}", "prefisso": prefix, "numero": mx + 1, "anno": anno, "avviso": avviso}
 
 
 def suggest_commessa(domini, vertical, data_consegna, data_ins):
@@ -82,11 +90,6 @@ def clean_preview(rows, domini):
         out.append({"row": r["_row"], "xl": r.get("_xl"), "kind": kind, "field": field, "old": old, "new": new,
                     "cliente": r["Cliente"], "oggetto": (r["Oggetto"] or "")[:80]})
 
-    spellings = defaultdict(Counter)
-    for r in rows:
-        spellings[client_key(r["Cliente"])][r["Cliente"]] += 1
-    canon = {k: c.most_common(1)[0][0] for k, c in spellings.items() if len(c) > 1}
-
     for r in rows:
         if r.get("_state") == "new":                    # righe inserite qui: non sono ancora nell'Excel
             continue
@@ -105,9 +108,6 @@ def clean_preview(rows, domini):
                     add(r, "Maiuscole/elenco", f, v, match)
         for f in r.get("_textdates", []):
             add(r, "Data scritta come testo", f, "(testo)", r[f])
-        k = client_key(r["Cliente"])
-        if k in canon and r["Cliente"] != canon[k]:
-            add(r, "Cliente scritto in modi diversi", "Cliente", r["Cliente"], canon[k], default=False)
     return out
 
 
@@ -274,11 +274,11 @@ def dashboard(rows, domini, today, months):
                 for n in TIPI_MAIN + ["Altro"] if wt.get(n)]
 
     # ---- Punti di attenzione
-    ss_count = Counter()
+    ss_count = Counter()                               # il codice SS è progressivo per anno: duplicato = stesso codice nello stesso anno di Data ins.
     for r in rows:
         s = clean_text(r["SS"])
-        if s and _split_ss(s):
-            ss_count[s.upper()] += 1
+        if s and _split_ss(s) and _anno_ins(r):
+            ss_count[(s.upper(), _anno_ins(r))] += 1
     att = defaultdict(list)
     for r in scope:
         s = stato[r["_row"]]
@@ -303,8 +303,8 @@ def dashboard(rows, domini, today, months):
         if mancanti:
             att["Campi base mancanti (Vertical/Market/tipo/Oggetto)"].append(_brief(r, dettaglio=", ".join(mancanti)))
         ssv = clean_text(r["SS"])
-        if ssv and ss_count.get(ssv.upper(), 0) > 1:
-            att["Codice SS duplicato"].append(_brief(r, dettaglio=ssv))
+        if ssv and _anno_ins(r) and ss_count.get((ssv.upper(), _anno_ins(r)), 0) > 1:
+            att["Codice SS duplicato nello stesso anno"].append(_brief(r, dettaglio=f"{ssv} · {_anno_ins(r)}"))
     attenzioni = sorted(({"titolo": t, "righe": v} for t, v in att.items()), key=lambda a: -len(a["righe"]))
 
     return {

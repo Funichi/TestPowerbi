@@ -3,7 +3,7 @@ const STATI = ["WIP", "Waiting For response", "Sospeso", "Won", "Lost", "NoBID",
 const BCLASS = {"WIP": "WIP", "Waiting For response": "Waiting", "Sospeso": "Sospeso", "Won": "Won", "Lost": "Lost", "NoBID": "NoBID", "Closed": "Closed"};
 const COLOR = {"WIP": "var(--st-wip)", "Waiting For response": "var(--st-waiting)", "Sospeso": "var(--st-sospeso)", "Won": "var(--st-won)", "Lost": "var(--st-lost)", "NoBID": "var(--st-nobid)", "Closed": "var(--st-closed)", "Altro": "var(--st-altro)"};
 const STATO_COL = {"WIP": "s-WIP", "Waiting For response": "s-Waiting", "Won": "s-Won", "Lost": "s-Lost", "NoBID": "s-NoBID", "Sospeso": "s-Sospeso", "Closed": "s-Closed", "Altro": "s-Altro"};
-const S = {data: null, dash: null, view: "dash", months: "12", trendSeries: "inserite", trendCum: true, pipeBy: "vertical", attScope: "wip",
+const S = {cliente: null, prevView: null, tempiMesi: "all", data: null, dash: null, view: "dash", months: "12", trendSeries: "inserite", trendCum: true, pipeBy: "vertical", attScope: "wip",
   filt: {q: "", stato: "", vertical: "", market: "", solution: "", anno: ""}, sort: {k: "Data ins.", dir: -1}, clean: null, state: null};
 const EMPTY_FILT = () => ({q: "", stato: "", vertical: "", market: "", tipo: "", solution: "", anno: "", loc: "", att: "", rows: null, rowsLabel: ""});
 
@@ -14,6 +14,8 @@ const TITLES = {
   dash: ["Cruscotto", "Scadenze, attenzioni e andamento delle offerte"],
   table: ["Tabella", "Tutte le offerte: filtra, ordina, clicca una riga per modificarla"],
   wip: ["Consegne WIP", "Scadenze delle offerte in corso e preparazione della riunione"],
+  cliente: ["Clienti", "Il cruscotto di un singolo cliente: storico, esiti e tempi"],
+  tempi: ["Tempi di consegna", "Quanto passa in media tra Data ins. e Data consegna"],
   clean: ["Pulizia dati", "Uniforma gli stati e correggi i dati nel file Excel"],
 };
 const $ = (s, el = document) => el.querySelector(s);
@@ -112,7 +114,7 @@ function render() {
   document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.view === S.view));
   $("#page-title").textContent = TITLES[S.view][0]; $("#page-sub").textContent = TITLES[S.view][1];
   const m = $("#main");
-  ({dash: renderDash, table: renderTable, wip: renderWip, clean: renderClean})[S.view](m);
+  ({dash: renderDash, table: renderTable, wip: renderWip, cliente: renderCliente, tempi: renderTempi, clean: renderClean})[S.view](m);
 }
 
 // ------------------------------------------------------------ cruscotto
@@ -128,7 +130,8 @@ function miniTable(items, cols) {
   if (!items.length) return `<div class="empty">Nessuna voce.</div>`;
   return `<div class="tscroll"><table><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead><tbody>${items.map(x => `<tr class="click" data-row="${x._row}">${cols.map(c => `<td>${c[1](x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
-const offer = x => `<div class="offer"><b>${esc(x.Cliente)}</b><span>${esc((x.Oggetto || "").slice(0, 90))}</span></div>`;
+const clLink = n => n ? `<a href="#" class="cl-link" data-cliente="${esc(n)}" title="Apri la scheda del cliente">${esc(n)}</a>` : "";
+const offer = x => `<div class="offer"><b>${clLink(x.Cliente)}</b><span>${esc((x.Oggetto || "").slice(0, 90))}</span></div>`;
 const legendItem = s => `<span><i style="background:${COLOR[s]}"></i>${s === "Altro" ? "Sospeso / NoBID / Closed" : s === "NoBID" ? "No Bid" : s === "Waiting For response" ? "Waiting" : s}</span>`;
 
 function hbars(groups) {
@@ -167,7 +170,7 @@ function esitoRows(list, minChiuse) {
 function topClienti(list) {
   if (!list.length) return `<div class="empty">Nessuna opportunità nel periodo.</div>`;
   const mx = Math.max(...list.map(c => c.totale));
-  return `<div class="top10">${list.map((c, i) => `<button type="button" class="trow" data-cl="${i}" title="Apri le ${c.totale} opportunità di ${esc(c.nome)}"><span class="rk">${i + 1}</span><span class="tn">${esc(c.nome)}</span>
+  return `<div class="top10">${list.map((c, i) => `<button type="button" class="trow" data-cl="${i}" title="Apri la scheda di ${esc(c.nome)} (${c.totale} opportunità)"><span class="rk">${i + 1}</span><span class="tn">${esc(c.nome)}</span>
     <span class="ttrack"><span class="tbar" style="width:${(100 * c.totale / mx).toFixed(1)}%"><i class="tw" style="width:${(100 * c.won / c.totale).toFixed(1)}%"></i></span></span>
     <span class="tv"><b>${c.totale}</b>${c.won ? `<em class="wonpill">${c.won} ${c.won === 1 ? "vinta" : "vinte"}</em>` : ""}</span></button>`).join("")}</div>
     <div class="legend"><span><i style="background:var(--st-won)"></i>Vinte</span><span><i style="background:var(--chart-3)"></i>Altre opportunità</span></div>`;
@@ -250,7 +253,7 @@ function renderDash(m) {
       ${S.pipeBy === "market" ? hbars(pb) : vcolumns(pb)}</div>
     <div class="card c5"><h2>Esito per tipo</h2><div class="sub">Offerte per stato e win rate del tipo, nel periodo scelto.</div>${esitoRows(d.esito_tipo, so.min_chiuse)}</div>
   </div>
-  <div class="card" id="sec-top"><h2>Top 10 clienti per numero di opportunità</h2><div class="sub">Nel periodo scelto. In verde le opportunità vinte. Clicca un cliente per vederle.</div>${topClienti(d.top_clienti)}</div>
+  <div class="card" id="sec-top"><h2>Top 10 clienti per numero di opportunità</h2><div class="sub">Nel periodo scelto. In verde le opportunità vinte. Clicca un cliente per aprire la sua scheda.</div>${topClienti(d.top_clienti)}</div>
   <div class="card" id="sec-att"><h2>Punti di attenzione</h2><div class="sub">Dati mancanti o anomali da sistemare.</div>
     ${d.attenzioni.length ? d.attenzioni.map(a => `<details><summary>${esc(a.titolo)} <span class="cnt">(${a.righe.length})</span></summary>${miniTable(a.righe, [["Seq", x => x.Seq], ["Offerta", offer], ["Stato", x => badge(x.Stato)], ["Data ins.", x => fmt(x["Data ins."])], ["", x => esc(x.dettaglio || "")]])}</details>`).join("") : `<div class="empty">Tutto in ordine.</div>`}</div>`;
   const setPeriod = async v => { S.months = v; await reloadDash(); render(); };
@@ -264,7 +267,7 @@ function renderDash(m) {
   m.querySelectorAll(".hb [data-grp], .vseg, .vname").forEach(c => c.onclick = () => goTable({[S.pipeBy]: c.dataset.grp, stato: c.dataset.st && c.dataset.st !== "Altro" ? c.dataset.st : ""}));
   m.querySelectorAll(".eb [data-tipo]").forEach(c => c.onclick = () => goTable({tipo: c.dataset.tipo === "Altro" ? "__altro" : c.dataset.tipo, stato: c.dataset.st || ""}));
   m.querySelectorAll("[data-age]").forEach(c => c.onclick = () => { const f = d.eta_attesa.fasce.find(x => x.k === c.dataset.age); goTable({rows: f.rows, rowsLabel: `In attesa ${f.label} (${f.n})`}); });
-  m.querySelectorAll("[data-cl]").forEach(b => b.onclick = () => { const c = d.top_clienti[+b.dataset.cl]; goTable({rows: c.rows, rowsLabel: `Cliente: ${c.nome} (${c.totale})`}); });
+  m.querySelectorAll("[data-cl]").forEach(b => b.onclick = () => goCliente(d.top_clienti[+b.dataset.cl].nome));
   m.querySelectorAll("[data-wipatt]").forEach(c => c.onclick = () => goWip({att: "any"}));
   m.querySelectorAll("[data-as]").forEach(b => b.onclick = () => { S.attScope = b.dataset.as; render(); });
   m.querySelectorAll(".aslice, .arow2").forEach(c => c.onclick = () => S.attScope === "wip" ? goWip({att: c.dataset.att}) : goTable({att: c.dataset.att}));
@@ -324,7 +327,7 @@ const colsSave = () => { try { localStorage.setItem(COL_KEY, JSON.stringify([...
 S.cols = colsLoad();
 const CELLS = {
   "Seq": r => `<td>${r.Seq === null || r.Seq === undefined ? nil() : esc(r.Seq)}</td>`,
-  "Cliente": r => `<td class="cl">${attDot(r)}${orNil(r.Cliente)}${r._state === "new" ? ` <span class="lchip new">nuova</span>` : r._state === "mod" ? ` <span class="lchip mod">modificata</span>` : ""}</td>`,
+  "Cliente": r => `<td class="cl">${attDot(r)}${r.Cliente ? clLink(r.Cliente) : nil()}${r._state === "new" ? ` <span class="lchip new">nuova</span>` : r._state === "mod" ? ` <span class="lchip mod">modificata</span>` : ""}</td>`,
   "Oggetto": r => `<td class="og" title="${esc(r.Oggetto)}">${orNil(r.Oggetto)}</td>`,
   "Market": r => `<td>${r.Market === NOIND ? `<span class="nil">${NOIND}</span>` : orNil(r.Market)}</td>`,
   "Vertical": r => `<td>${orNil(r.Vertical)}</td>`,
@@ -633,12 +636,27 @@ function openMeeting() {
 // ------------------------------------------------------------ pulizia dati (SOLO suggerimenti: si corregge nell'Excel)
 async function renderClean(m) {
   m.innerHTML = `<div class="card" style="margin-bottom:var(--gap)"><h2>Valori normalizzati in lettura</h2><div class="sub">L'app legge Stato e Market ignorando maiuscole e spazi, senza toccare il file. Qui vedi cosa viene unificato e quante righe riguarda.</div><div id="c-sum"><div class="muted">Caricamento…</div></div></div>
-    <div class="card"><h2>Suggerimenti di pulizia</h2><div class="sub">Cosa conviene correggere nell'Excel (stati scritti in modi diversi, maiuscole diverse da Domini, date scritte come testo, clienti con grafie diverse). Sono solo indicazioni: correggi tu nel file, poi premi “Aggiorna dall'Excel”.</div>
+    <div class="card" style="margin-bottom:var(--gap)"><h2>Clienti scritti in modi diversi</h2><div class="sub">Maiuscole, punteggiatura, “S.p.A.” o piccoli refusi: se è lo stesso cliente, uniscilo. L'unione cambia il nome nel database locale; per portarla nell'Excel premi poi “Esporta in Excel”.</div>
+      <div id="c-var"><div class="muted">Caricamento…</div></div></div>
+    <div class="card"><h2>Suggerimenti di pulizia</h2><div class="sub">Cosa conviene correggere nell'Excel (stati scritti in modi diversi, maiuscole diverse da Domini, date scritte come testo). Sono solo indicazioni: correggi tu nel file, poi premi “Aggiorna dall'Excel”.</div>
     <div id="c-out"><div class="muted">Caricamento…</div></div></div>`;
   api("/api/clean/summary").then(list => {
     $("#c-sum").innerHTML = list.length ? `<div class="tscroll"><table><thead><tr><th>Campo</th><th>Valore nel file</th><th>Letto come</th><th class="num">Righe</th><th>Nel file</th></tr></thead><tbody>${list.map(x =>
       `<tr><td>${esc(x.campo)}</td><td>${esc(x.da)}</td><td><b>${esc(x.a)}</b></td><td class="num">${num(x.righe)}</td><td class="muted">${x.scrivibile ? "da correggere nell'Excel (vedi i suggerimenti sotto)" : "cella vuota: solo in lettura"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Tutti i valori sono già nella forma standard.</div>`;
   }).catch(e => { $("#c-sum").innerHTML = `<div class="err">${esc(e.message)}</div>`; });
+  const loadVar = () => api("/api/clienti/varianti").then(gr => {
+    const box = $("#c-var");
+    if (!gr.length) { box.innerHTML = `<div class="empty">Nessun cliente scritto in modi diversi.</div>`; return; }
+    box.innerHTML = gr.map((g, i) => `<div class="vgrp" data-g="${i}"><div class="vopts">${g.nomi.map(n => `<label class="vopt"><input type="radio" name="vg${i}" value="${esc(n.nome)}" ${n.nome === g.suggerito ? "checked" : ""}> <b>${esc(n.nome)}</b> <span class="muted">${n.righe} ${n.righe === 1 ? "riga" : "righe"}</span></label>`).join("")}</div>
+      <button class="btn-sec" data-merge="${i}">${ico("git-merge")}Unisci sul nome scelto</button></div>`).join("");
+    hydrateIcons(box);
+    box.querySelectorAll("[data-merge]").forEach(b => b.onclick = async () => {
+      const g = gr[+b.dataset.merge], sel = box.querySelector(`input[name="vg${b.dataset.merge}"]:checked`).value;
+      try { const r = await api("/api/clienti/unisci", {method: "POST", body: {nomi: g.nomi.map(n => n.nome), in: sel}}); await refreshAfterEdit(); toast(`${r.righe} ${r.righe === 1 ? "riga" : "righe"} ora ${r.righe === 1 ? "è" : "sono"} su «${sel}»`); loadVar(); }
+      catch (e) { toast(e.message, true); }
+    });
+  }).catch(e => { $("#c-var").innerHTML = `<div class="err">${esc(e.message)}</div>`; });
+  loadVar();
   api("/api/clean/preview").then(items => {
     const out = $("#c-out");
     if (!items.length) { out.innerHTML = `<div class="empty">Non c'è niente da correggere.</div>`; return; }
@@ -647,6 +665,117 @@ async function renderClean(m) {
       return `<details open><summary>${esc(k)} <span class="cnt">(${its.length})</span></summary><div class="tscroll"><table><thead><tr><th>Riga Excel</th><th>Cliente</th><th>Campo</th><th>Ora</th><th>Suggerito</th></tr></thead><tbody>${its.map(it =>
         `<tr><td>${esc(it.xl)}</td><td>${esc(it.cliente)}</td><td>${esc(it.field)}</td><td>${esc(it.old)}</td><td><b>${esc(it.new)}</b></td></tr>`).join("")}</tbody></table></div></details>`; }).join("");
   }).catch(e => { $("#c-out").innerHTML = `<div class="err">${esc(e.message)}</div>`; });
+}
+
+
+// ------------------------------------------------------------ scheda cliente
+function goCliente(nome) { if (S.view !== "cliente") S.prevView = S.view; S.cliente = nome; S.view = "cliente"; render(); }
+// i nomi cliente cliccabili (Tabella, Cruscotto) aprono la scheda; la lista WIP non ne ha, resta pulita
+$("#main").addEventListener("click", e => { const a = e.target.closest("[data-cliente]"); if (a) { e.preventDefault(); e.stopPropagation(); goCliente(a.dataset.cliente); } }, true);
+const durata = t => t && t.media !== null ? `${num(Math.round(t.media))} gg` : "—";
+const vsMedia = (txt) => `<span class="d">${txt}</span>`;
+const pct = r => r === null || r === undefined ? "—" : Math.round(r * 100) + "%";
+async function renderCliente(m) {
+  const names = S.data.domini.clienti.map(c => c.Cliente);
+  const attivi = Object.entries(S.data.rows.reduce((a, r) => { if (r.Cliente) a[r.Cliente.trim()] = (a[r.Cliente.trim()] || 0) + 1; return a; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 14);
+  const head = `<div class="fbar"><div class="grow"><label for="cl-q">Cliente</label><input id="cl-q" list="dl-cli" value="${esc(S.cliente || "")}" placeholder="scrivi o scegli un cliente…" autocomplete="off"><datalist id="dl-cli">${names.map(n => `<option value="${esc(n)}">`).join("")}</datalist></div>
+    ${S.prevView && S.cliente ? `<div><button id="cl-back" class="btn-sec">${ico("arrow-left")}Indietro</button></div>` : ""}</div>`;
+  const bindSearch = () => {
+    const q = $("#cl-q"), go = () => { const v = q.value.trim(), hit = names.find(n => n.toLowerCase() === v.toLowerCase()); if (hit) { S.cliente = hit; render(); } };
+    q.onchange = go; q.oninput = () => { if (names.includes(q.value)) go(); };
+    const b = $("#cl-back"); if (b) b.onclick = () => { S.view = S.prevView || "dash"; S.prevView = null; render(); };
+  };
+  if (!S.cliente) {
+    m.innerHTML = head + `<div class="card"><h2>Scegli un cliente</h2><div class="sub">Scrivi il nome qui sopra, oppure parti da uno dei più attivi. Il nome del cliente è cliccabile anche nella Tabella e nel Cruscotto.</div>
+      <div class="chips">${attivi.map(([n, k]) => `<button class="chip cl-pick" data-cliente="${esc(n)}">${esc(n)} <span class="muted">${k}</span></button>`).join("")}</div></div>`;
+    bindSearch(); return;
+  }
+  m.innerHTML = head + `<p class="muted pad">Caricamento…</p>`; bindSearch();
+  let c; try { c = await api("/api/cliente?nome=" + encodeURIComponent(S.cliente)); }
+  catch (e) { m.innerHTML = head + `<div class="card"><div class="err">${esc(e.message)}</div></div>`; bindSearch(); return; }
+  if (S.view !== "cliente") return;
+  const k = c.kpi, md = c.media, tk = k.tempi, tg = md.tempi;
+  const rate = k.rate === null ? "—" : pct(k.rate);
+  const cart = c.cartella;
+  const cmpTempo = tk.media === null || tg.media === null ? "" : vsMedia(`media generale ${durata(tg)}`);
+  m.innerHTML = head + `
+  <div class="card chead"><div class="chead-t"><h2 class="cname">${esc(c.nome)}</h2>
+      <div class="cmeta">${c.vertical ? `<span class="tchip">${esc(c.vertical)}</span>` : ""}${c.market ? `<span class="tchip">${esc(c.market)}</span>` : ""}${c.ss.length ? `<span class="tchip" title="Prefisso del codice SS">SS ${esc(c.ss.join(", "))}</span>` : ""}
+      <span class="muted">${c.prima ? `Prima offerta ${fmt(c.prima)}` : ""}${c.ultima ? ` · ultima ${fmt(c.ultima.data)} ${badge(c.ultima.stato)}` : ""}</span></div></div>
+    ${cart.stato !== "nessuna" ? `<button id="cl-folder" class="btn-sec" title="${cart.nome ? esc(cart.nome) : "Scegli la cartella di questo cliente"}">${ico("folder-open")}${cart.stato === "ok" ? "Apri cartella" : "Apri cartella…"}</button>` : ""}</div>
+  <div class="kpis">
+    ${kpi(num(k.totale), `Offerte totali · ${md.offerte_per_cliente ?? "—"} in media per cliente`)}
+    ${kpi(num(k.wip + k.waiting), `In corso · ${k.wip} WIP, ${k.waiting} in attesa`)}
+    ${kpi(`${k.won}<span class="of">/${k.chiuse}</span>`, "Won su offerte chiuse (Won + Lost)")}
+    ${kpi(rate, "Win rate", md.rate === null ? "" : vsMedia(`media generale ${pct(md.rate)}`), k.chiuse ? "key" : "")}
+    ${kpi(durata(tk), `Tempo medio di consegna${tk.n ? ` · mediana ${num(Math.round(tk.mediana))} gg su ${tk.n} offerte` : ""}`, cmpTempo)}
+  </div>
+  <div class="g12">
+    <div class="card c7"><h2>Offerte nel tempo</h2><div class="sub">Ogni punto è un'offerta, per Data ins. e tipo. Clicca per aprirla.</div><div id="cl-tl"></div></div>
+    <div class="card c5"><h2>Per anno</h2><div class="sub">Esito delle offerte aperte in ciascun anno.</div><div id="cl-anni"></div></div>
+  </div>
+  <div class="card"><h2>Storico offerte</h2><div class="sub">Dalla più recente. Giorni = da Data ins. a Data consegna (solo offerte già consegnate).</div>
+    <div class="tscroll"><table class="dt"><thead><tr><th>Data ins.</th><th>Oggetto</th><th>Tipo</th><th>Solution D&amp;A</th><th>Stato</th><th>Consegna</th><th class="num">Giorni</th><th>SS</th></tr></thead><tbody>
+    ${c.cronologia.map(x => `<tr class="click" data-row="${x._row}"><td>${x["Data ins."] ? fmt(x["Data ins."]) : nil()}</td><td class="og" title="${esc(x.Oggetto)}">${attDot(x)}${orNil(x.Oggetto)}</td><td>${tipoChip(x.tipo)}</td><td>${orNil(x["Solution D&A"])}</td><td>${badge(x.Stato)}</td><td>${x["Data consegna"] ? fmt(x["Data consegna"]) : nil()}</td><td class="num">${x.giorni === null ? nil() : x.giorni}</td><td>${orNil(x.SS)}</td></tr>`).join("")}
+    </tbody></table></div></div>`;
+  m.querySelectorAll("tr[data-row]").forEach(tr => tr.onclick = () => openForm(rowByNum(+tr.dataset.row)));
+  drawTimeline($("#cl-tl"), c);
+  const groups = c.anni.map(a => ({nome: a.anno === null ? "senza data" : String(a.anno), WIP: a.wip, "Waiting For response": a.waiting, Won: a.won, Lost: a.lost, Altro: a.altri, totale: a.totale}));
+  $("#cl-anni").innerHTML = hbars(groups);
+  $("#cl-anni").querySelectorAll("[data-grp]").forEach(e => e.style.cursor = "default");
+  const f = $("#cl-folder"); if (f) f.onclick = () => apriCartella(c);
+}
+async function apriCartella(c) {
+  const call = async cartella => { try { await api("/api/cliente/cartella", {method: "POST", body: {cliente: c.nome, cartella}}); toast("Cartella aperta in Esplora risorse"); } catch (e) { toast(e.message, true); } };
+  if (c.cartella.stato === "ok") return call(null);
+  const el = modal(`<h2>Cartella di ${esc(c.nome)}</h2><p class="muted">Non c'è una cartella con questo nome esatto. Scegli quella giusta: la ricordo per le prossime volte.</p>
+    <div class="cand">${c.cartella.candidati.map((n, i) => `<button class="btn-sec" data-i="${i}">${ico("folder-open")}${esc(n)}</button>`).join("")}</div>
+    <div class="foot"><button id="cf-x">Annulla</button></div>`);
+  $("#cf-x", el).onclick = closeModal;
+  el.querySelectorAll("[data-i]").forEach(b => b.onclick = async () => { const n = c.cartella.candidati[+b.dataset.i]; closeModal(); await call(n); c.cartella = {stato: "ok", nome: n, candidati: []}; render(); });
+}
+// linea del tempo: una corsia per tipo, un punto per offerta, colore = stato
+function drawTimeline(el, c) {
+  const items = c.cronologia.filter(x => x["Data ins."]);
+  if (!items.length) { el.innerHTML = `<div class="empty">Nessuna offerta con Data ins.</div>`; return; }
+  const day = iso => new Date(iso + "T00:00:00").getTime();
+  const lanes = [...TIPI_MAIN, "Altro"].filter(t => items.some(x => (TIPI_MAIN.includes(x.tipo) ? x.tipo : "Altro") === t));
+  const t0 = Math.min(...items.map(x => day(x["Data ins."]))), t1 = Math.max(...items.map(x => day(x["Data ins."])));
+  const y0 = new Date(t0).getFullYear(), y1 = new Date(t1).getFullYear();
+  const a = new Date(y0, 0, 1).getTime(), b = new Date(y1 + 1, 0, 1).getTime();
+  const W = 700, L = 96, R = 14, T = 12, LH = 36, H = T + lanes.length * LH + 26, X = t => L + (t - a) / (b - a) * (W - L - R);
+  const years = []; for (let y = y0; y <= y1; y++) years.push(y);
+  const step = years.length > 8 ? Math.ceil(years.length / 8) : 1;
+  const used = {}; 
+  const dots = items.map(x => {
+    const lane = lanes.indexOf(TIPI_MAIN.includes(x.tipo) ? x.tipo : "Altro"), cx = X(day(x["Data ins."])), key = lane + ":" + Math.round(cx / 12), n = used[key] = (used[key] || 0) + 1;
+    const cy = T + lane * LH + LH / 2 + ((n - 1) % 3 - (n > 1 ? 1 : 0)) * 8;
+    return `<circle class="tdot" data-row="${x._row}" cx="${cx.toFixed(1)}" cy="${cy}" r="6" style="fill:${COLOR[x.Stato] || COLOR.Altro}"><title>${esc(fmt(x["Data ins."]))} · ${esc(x.Stato || "")} · ${esc((x.Oggetto || "").slice(0, 80))}</title></circle>`;
+  }).join("");
+  const grid = years.map(y => `<line x1="${X(new Date(y, 0, 1).getTime())}" x2="${X(new Date(y, 0, 1).getTime())}" y1="${T}" y2="${H - 22}" stroke="var(--divider)"/>${(y - y0) % step === 0 ? `<text x="${X(new Date(y, 0, 1).getTime()) + 4}" y="${H - 6}">${y}</text>` : ""}`).join("");
+  const laneTxt = lanes.map((t, i) => `<text x="0" y="${T + i * LH + LH / 2 + 4}">${esc(TIPO_SHORT[t] || t)}</text><line x1="${L}" x2="${W - R}" y1="${T + (i + 1) * LH}" y2="${T + (i + 1) * LH}" stroke="var(--row-line)"/>`).join("");
+  const presenti = STATI.filter(s => items.some(x => x.Stato === s));
+  const senza = c.cronologia.length - items.length;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="tl" role="img" aria-label="Offerte del cliente nel tempo">${grid}${laneTxt}${dots}</svg>
+    <div class="legend">${presenti.map(s => `<span><i style="background:${COLOR[s]}"></i>${s === "NoBID" ? "No Bid" : s === "Waiting For response" ? "Waiting" : s}</span>`).join("")}</div>${senza ? `<div class="hint">${senza} offerte senza Data ins. non compaiono nel grafico.</div>` : ""}`;
+  el.querySelectorAll(".tdot").forEach(d => d.onclick = () => openForm(rowByNum(+d.dataset.row)));
+}
+
+// ------------------------------------------------------------ tempi di consegna
+const TEMPI_PERIODI = [["all", "Tutto lo storico"], ["24", "Ultimi 24 mesi"], ["12", "Ultimi 12 mesi"]];
+async function renderTempi(m) {
+  m.innerHTML = `<p class="muted pad">Caricamento…</p>`;
+  let t; try { t = await api("/api/tempi?months=" + S.tempiMesi); } catch (e) { m.innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div></div>`; return; }
+  if (S.view !== "tempi") return;
+  const bars = list => { const mx = Math.max(1, ...list.map(x => x.media || 0)); return list.length ? `<div class="tm">${list.map(x => `<div class="hn" title="${esc(x.nome)}">${esc(x.nome)}</div><div class="track"><i style="width:${(100 * (x.media || 0) / mx).toFixed(1)}%"></i></div>
+      <div class="tv2"><b>${durata(x)}</b><span>mediana ${num(Math.round(x.mediana))} · ${num(x.n)} off.</span></div>`).join("")}</div>` : `<div class="empty">Nessun dato.</div>`; };
+  m.innerHTML = `<div class="fbar"><div><label for="tp">Offerte aperte</label><select id="tp">${TEMPI_PERIODI.map(([v, l]) => `<option value="${v}" ${S.tempiMesi === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <div class="fbar-r">Giorni tra Data ins. e Data consegna, solo offerte già consegnate (esclusi WIP e NoBID)</div></div>
+  <div class="kpis">${kpi(durata(t.totale), `Tempo medio di consegna · ${num(t.totale.n)} offerte`, "", "key")}${kpi(t.totale.n ? num(Math.round(t.totale.mediana)) + " gg" : "—", "Mediana (meno sensibile ai casi estremi)")}</div>
+  <div class="g12"><div class="card c6"><h2>Per tipo di offerta</h2><div class="sub">Quanto serve per consegnare, in media, per ogni tipo.</div>${bars(t.tipo)}</div>
+    <div class="card c6"><h2>Per Solution D&amp;A</h2><div class="sub">Un'offerta con più nomi conta per ciascuno di loro.</div>${bars(t.solution)}</div></div>
+  <div class="card"><h2>Per Vertical</h2><div class="sub">Utile per stimare una scadenza realistica quando arriva una nuova richiesta.</div>${bars(t.vertical)}</div>`;
+  $("#tp").onchange = e => { S.tempiMesi = e.target.value; render(); };
 }
 
 // ------------------------------------------------------------ modale inserimento/modifica
@@ -749,6 +878,7 @@ function openSettings(first, msg) {
     <p class="muted">L'app lavora su un <b>database locale</b> (SQLite) caricato dal tuo file Excel. L'Excel viene scritto solo quando premi “Esporta in Excel”.</p>
     <label for="s-path">File Excel (copia sincronizzata di SharePoint)</label><div class="row"><input id="s-path" style="flex:1" value="${esc(st.path || "")}" placeholder="C:\\Users\\…\\HISTORY.xlsx"><button id="s-browse">Sfoglia…</button></div>
     <label for="s-db" style="margin-top:12px">Database locale (si crea da solo se non esiste; tienilo fuori da OneDrive)</label><input id="s-db" value="${esc(st.db_path || "")}">
+    <label for="s-cli" style="margin-top:12px">Cartella dei clienti (opzionale: per il pulsante “Apri cartella” nella scheda cliente)</label><input id="s-cli" value="${esc(st.clienti_dir || "")}" placeholder="C:\\Users\\…\\Solution - Documenti\\Clienti">
     <div class="hint">${st.imported_at ? `Ultimo import: ${esc(st.imported_at.replace("T", " "))}` : "Nessun import ancora eseguito."}${st.pending && (st.pending.new + st.pending.mod) ? ` · <b>${st.pending.new + st.pending.mod} modifiche non esportate</b>` : ""}</div>
     <div class="err" id="s-err">${esc(msg || "")}</div>
     <div class="foot">${first ? "" : '<button id="s-cancel">Chiudi</button>'}<button id="s-save" class="primary">${ico("database")}Salva e importa dall'Excel</button></div>
@@ -761,7 +891,7 @@ function openSettings(first, msg) {
       const n = st.pending ? st.pending.new + st.pending.mod : 0;
       if (n && !confirm(`Ci sono ${n} modifiche non esportate: importando verranno eliminate. Continuare?`)) return;
       await withBusy(async () => {
-        await api("/api/config", {method: "POST", body: {excel_path: $("#s-path", el).value, db_path: $("#s-db", el).value}});
+        await api("/api/config", {method: "POST", body: {excel_path: $("#s-path", el).value, db_path: $("#s-db", el).value, clienti_dir: $("#s-cli", el).value}});
         await api("/api/import", {method: "POST", body: {force: true}});
       }, "Importo il file Excel…");
       closeModal(); await loadAll(true); toast("Dati importati dall'Excel");
