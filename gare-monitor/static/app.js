@@ -28,7 +28,7 @@ const num = n => Number(n).toLocaleString("it-IT");
 const TIPO_SHORT = {"Offerta diretta": "Offerta", "Incontro Cliente": "Incontro", "Incontro Interno": "Interno", "Gara sotto AQ": "Gara AQ", "Gara": "Gara", "RFI": "RFI", "Manif. Interesse": "Manif."};
 const tipoChip = t => t ? `<span class="tchip" title="${esc(t)}">${esc(TIPO_SHORT[t] || t)}</span>` : nil();
 const NOIND = "(non indicato)";
-const OWNERS = ["Base", "Scamuzzo", "Grando", "Melloncelli"];      // suggerimenti per Solution D&A (gli altri nomi si scrivono a mano)
+const OWNERS = ["Scamuzzo", "Grando", "Melloncelli"];      // suggerimenti per Solution D&A (gli altri nomi si scrivono a mano)
 const endOfMonthIso = iso => { const d = isoDate(iso) || new Date(); const e = new Date(d.getFullYear(), d.getMonth() + 1, 0); return `${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, "0")}-${String(e.getDate()).padStart(2, "0")}`; };
 // livello di attenzione = colore del nome cliente nell'Excel (giallo / arancione / rosso)
 const ATT = {1: {label: "Rilevante", color: "giallo"}, 2: {label: "Da attenzionare", color: "arancione"}, 3: {label: "Urgente", color: "rosso"}};

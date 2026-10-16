@@ -206,9 +206,41 @@ class ExcelWriter:
         else:
             _retry(lambda: setattr(ws.Cells(row, cols["Cliente"]).Interior, "ColorIndex", -4142))     # xlColorIndexNone
 
+    @staticmethod
+    def _new_row(ws, lo):
+        """Aggiunge una riga in fondo alla tabella. Prima ListRows.Add; se Excel la rifiuta (filtri, righe sotto, ecc.)
+        allarga la tabella a mano di una riga, inserendo una riga di foglio se sotto c'è del contenuto."""
+        if _retry(lambda: ws.ProtectContents):
+            raise WriteError("Il foglio è protetto: togli la protezione in Excel (Revisione > Rimuovi protezione foglio) e riprova.")
+        try:
+            lr = _retry(lambda: lo.ListRows.Add())
+            return _retry(lambda: lr.Range.Row)
+        except Exception as first:
+            if getattr(first, "hresult", None) in _BUSY:
+                raise
+            try:
+                try:
+                    if _retry(lambda: lo.AutoFilter is not None):
+                        _retry(lambda: lo.AutoFilter.ShowAllData())
+                except Exception:
+                    pass
+                rng = _retry(lambda: lo.Range)
+                r0, c0 = _retry(lambda: rng.Row), _retry(lambda: rng.Column)
+                nr, nc = _retry(lambda: rng.Rows.Count), _retry(lambda: rng.Columns.Count)
+                new = r0 + nr
+                used = _retry(lambda: ws.Application.WorksheetFunction.CountA(ws.Range(ws.Cells(new, c0), ws.Cells(new, c0 + nc - 1))))
+                if used:
+                    _retry(lambda: ws.Rows(new).Insert())
+                _retry(lambda: lo.Resize(ws.Range(ws.Cells(r0, c0), ws.Cells(new, c0 + nc - 1))))
+                return new
+            except Exception as second:
+                if getattr(second, "hresult", None) in _BUSY:
+                    raise
+                raise WriteError(f"Excel non riesce ad aggiungere la riga alla tabella ({first}; secondo tentativo: {second}). "
+                                 "Controlla che il foglio non sia protetto e che la tabella non sia filtrata o unita ad altre celle.") from second
+
     def _append_one(self, ws, lo, cols, values):
-        lr = _retry(lambda: lo.ListRows.Add())
-        row = _retry(lambda: lr.Range.Row)
+        row = self._new_row(ws, lo)
         for f, v in values.items():
             if f in cols:
                 self._set(ws, row, cols[f], _value_for(f, v))
