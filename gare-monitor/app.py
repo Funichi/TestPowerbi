@@ -3,6 +3,7 @@
 Archivio di lavoro: database SQLite locale (monitoraggio.db), caricato dal file Excel con "Aggiorna dall'Excel".
 L'Excel viene scritto SOLO quando si preme "Esporta in Excel" (righe nuove accodate, righe modificate aggiornate).
 """
+import calendar
 import datetime as dt
 import json
 import os
@@ -239,6 +240,9 @@ def create_row():
     mancanti = [f for f in REQUIRED_NEW if not vals.get(f)]
     if mancanti:
         raise ValueError("Campi obbligatori mancanti: " + ", ".join(mancanti))
+    if not vals.get("Data consegna"):                    # senza data di consegna: fine mese (del mese di apertura)
+        di = to_date(vals["Data ins."])
+        vals["Data consegna"] = di.replace(day=calendar.monthrange(di.year, di.month)[1]).isoformat()
     dup = [r for r in d["rows"] if r["_sig"] == row_sig(vals["Cliente"], vals["Oggetto"], vals["Data ins."])]
     if dup and not b.get("_force"):
         return jsonify({"error": f"Esiste già una riga identica (Seq {dup[0]['Seq']}). Salva comunque?", "duplicato": True}), 409

@@ -262,3 +262,13 @@ def test_annullare_modifiche_ripristina_anche_il_colore(client):
     c.put(f"/api/rows/{t['_row']}", json={"changes": {"Attenzione": 3}})
     c.put(f"/api/rows/{t['_row']}", json={"changes": {"Attenzione": 1}})                     # rimesso com'era: non è più una modifica
     assert c.get("/api/state").get_json()["pending"]["mod"] == 0
+
+
+def test_nuova_offerta_senza_data_consegna_va_a_fine_mese(client):
+    c, x, _ = client
+    body = {k: v for k, v in NEW.items() if k != "Data consegna"}
+    assert c.post("/api/rows", json={**body, "Data ins.": "2026-02-10", "Oggetto": "feb"}).status_code == 200
+    assert c.post("/api/rows", json={**body, "Data ins.": "2026-10-16", "Oggetto": "ott"}).status_code == 200
+    assert c.post("/api/rows", json={**NEW, "Oggetto": "con data"}).status_code == 200                 # se c'è, non si tocca
+    got = {r["Oggetto"]: r["Data consegna"] for r in c.get("/api/data").get_json()["rows"] if r["Oggetto"] in ("feb", "ott", "con data")}
+    assert got == {"feb": "2026-02-28", "ott": "2026-10-31", "con data": "2026-10-20"}

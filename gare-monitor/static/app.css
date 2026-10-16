@@ -428,3 +428,18 @@ button.apill{font:inherit;font-weight:400}
 .arow2{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:center;width:100%;text-align:left;border:0;background:none;padding:6px 8px;border-radius:10px;font-weight:400}
 .arow2:hover:not(:disabled){background:var(--row-hover)}.arow2:disabled{opacity:.5;cursor:default}
 .arow2 i{width:12px;height:12px;border-radius:50%;display:block}.arow2 small{color:var(--text-3)}.arow2 b{font-weight:600}
+
+/* ---------- finestre (nuova offerta, impostazioni…): caratteri più grandi ---------- */
+.modal{font-size:16px;max-width:860px}
+.modal h2{font-size:26px;margin-bottom:20px}
+.modal label{font-size:14.5px;font-weight:600;color:var(--text-2);margin-bottom:6px}
+.modal input,.modal select,.modal textarea{font-size:16px;padding:12px 14px;min-height:48px;border-color:var(--border)}
+.modal textarea{min-height:92px}
+.modal .grid{gap:18px 20px}
+.modal .hint{font-size:14px;margin-top:6px}
+.modal summary{font-size:16px;padding:4px 0}
+.modal button{font-size:16px;padding:10px 20px}
+.modal .foot{margin-top:26px}
+.ochips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.ochip{border-radius:999px;padding:6px 16px!important;font-size:15px!important;font-weight:500;color:var(--text-2)}
+.ochip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}

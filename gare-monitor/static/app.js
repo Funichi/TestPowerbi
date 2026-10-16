@@ -28,6 +28,8 @@ const num = n => Number(n).toLocaleString("it-IT");
 const TIPO_SHORT = {"Offerta diretta": "Offerta", "Incontro Cliente": "Incontro", "Incontro Interno": "Interno", "Gara sotto AQ": "Gara AQ", "Gara": "Gara", "RFI": "RFI", "Manif. Interesse": "Manif."};
 const tipoChip = t => t ? `<span class="tchip" title="${esc(t)}">${esc(TIPO_SHORT[t] || t)}</span>` : nil();
 const NOIND = "(non indicato)";
+const OWNERS = ["Base", "Scamuzzo", "Grando", "Melloncelli"];      // suggerimenti per Solution D&A (gli altri nomi si scrivono a mano)
+const endOfMonthIso = iso => { const d = isoDate(iso) || new Date(); const e = new Date(d.getFullYear(), d.getMonth() + 1, 0); return `${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, "0")}-${String(e.getDate()).padStart(2, "0")}`; };
 // livello di attenzione = colore del nome cliente nell'Excel (giallo / arancione / rosso)
 const ATT = {1: {label: "Rilevante", color: "giallo"}, 2: {label: "Da attenzionare", color: "arancione"}, 3: {label: "Urgente", color: "rosso"}};
 const attOpts = (cur, short) => `<option value="0" ${!cur ? "selected" : ""}>${short ? "—" : "Nessuna"}</option>` + [1, 2, 3].map(k => `<option value="${k}" ${+cur === k ? "selected" : ""}>${ATT[k].label}${short ? "" : ` (${ATT[k].color})`}</option>`).join("");
@@ -662,20 +664,21 @@ function openForm(row) {
   const ta = (id, label, val) => `<div class="full"><label for="${id}">${label}</label><textarea id="${id}">${esc(val)}</textarea></div>`;
   const el = modal(`<h2>${edit ? "Modifica offerta" + (row.Seq ? " #" + row.Seq : "") : "Nuova offerta"}${edit && row._state === "new" ? ` <span class="lchip new">nuova, da esportare</span>` : edit && row._state === "mod" ? ` <span class="lchip mod">modificata, da esportare</span>` : ""}</h2>
   <div class="grid">
-    <div class="full"><label class="req" for="f-Cliente">Cliente</label><input id="f-Cliente" list="dl-clienti" value="${esc(v.Cliente)}" autocomplete="off"><datalist id="dl-clienti">${d.clienti.map(c => `<option value="${esc(c.Cliente)}">`).join("")}</datalist></div>
-    <div><label class="req" for="f-Vertical">Vertical</label>${sel("f-Vertical", d.vertical, v.Vertical, !edit ? false : false)}</div>
+    <div><label class="req" for="f-Vertical">Vertical</label>${sel("f-Vertical", d.vertical, v.Vertical)}</div>
     <div><label class="req" for="f-Market">Market</label>${sel("f-Market", d.market, v.Market)}</div>
-    <div class="full"><label for="f-Attenzione">Attenzione (colora il nome cliente nell'Excel)</label><select id="f-Attenzione">${attOpts(v.Attenzione)}</select></div>
+    <div class="full"><label class="req" for="f-Cliente">Cliente</label><input id="f-Cliente" list="dl-clienti" value="${esc(v.Cliente)}" autocomplete="off"><datalist id="dl-clienti">${d.clienti.map(c => `<option value="${esc(c.Cliente)}">`).join("")}</datalist></div>
     ${ta("f-Oggetto", "Oggetto <span class='req'></span>", v.Oggetto)}
     <div><label class="req" for="f-tipo">Tipo</label>${sel("f-tipo", d.tipo, v.tipo)}</div>
     <div><label class="req" for="f-Stato">Stato</label>${sel("f-Stato", STATI, normStato(v.Stato) || v.Stato, true)}</div>
     ${inp("f-Data ins.", "Data ins. (apertura)", v["Data ins."], "", "date", true)}
-    ${inp("f-Data consegna", "Data consegna", v["Data consegna"], "", "date")}
-    <div class="full"><label for="f-Solution D&A">Solution D&amp;A (testo libero, più nomi separati da / )</label><input id="f-Solution D&A" list="dl-sol" value="${esc(v["Solution D&A"])}" autocomplete="off"><datalist id="dl-sol">${d.solutions.map(s => `<option value="${esc(s)}">`).join("")}</datalist><div class="hint" id="h-sol"></div></div>
+    <div><label for="f-Data consegna">Data consegna</label><input id="f-Data consegna" type="date" value="${esc(v["Data consegna"])}"><div class="hint" id="h-dc"></div></div>
+    <div class="full"><label for="f-Solution D&A">Solution D&amp;A</label><input id="f-Solution D&A" list="dl-sol" value="${esc(v["Solution D&A"])}" autocomplete="off" placeholder="Scegli o scrivi i nomi, separati da /"><datalist id="dl-sol">${OWNERS.map(o => `<option value="${o}">`).join("")}</datalist>
+      <div class="ochips" id="o-chips">${OWNERS.map(o => `<button type="button" class="ochip" data-o="${o}">${o}</button>`).join("")}</div><div class="hint" id="h-sol"></div></div>
+    ${edit ? `<div class="full"><label for="f-Attenzione">Attenzione (colora il nome cliente nell'Excel)</label><select id="f-Attenzione">${attOpts(v.Attenzione)}</select></div>` : ""}
+  </div>
+  <details style="margin-top:14px"><summary>Altri campi</summary><div class="grid" style="margin-top:10px">
     <div><label for="f-SS">Codice SS</label><input id="f-SS" value="${esc(v.SS)}"><div class="hint" id="h-ss"></div></div>
     <div><label for="f-Commessa">Commessa</label><input id="f-Commessa" value="${esc(v.Commessa)}"><div class="hint" id="h-com"></div></div>
-  </div>
-  <details style="margin-top:10px"><summary>Altri campi</summary><div class="grid" style="margin-top:8px">
     ${inp("f-Legal Entity", "Legal Entity", v["Legal Entity"])}${inp("f-Salesman", "Salesman", v.Salesman)}
     ${inp("f-Data Opt review", "Data Opt review", v["Data Opt review"], "", "date")}${inp("f-Referenti vertical", "Referenti vertical", v["Referenti vertical"])}
     ${ta("f-Tecnologie di riferimento D&A", "Tecnologie di riferimento D&A", v["Tecnologie di riferimento D&A"])}${ta("f-Note", "Note", v.Note)}</div></details>
@@ -686,13 +689,23 @@ function openForm(row) {
   const g = id => (F_(id) || {}).value ?? "";
   const dirty = {SS: edit, Commessa: edit};
   ["SS", "Commessa"].forEach(k => F_(k).oninput = () => dirty[k] = true);
-  const hintSol = () => { const s = g("Solution D&A").trim(); $("#h-sol", el).textContent = s ? "" : "Senza Solution D&A la riga comparirà nei punti di attenzione."; $("#h-sol", el).className = "hint warn"; };
+  const hintSol = () => {
+    const s = g("Solution D&A").trim(), names = splitSol(s).map(x => x.toLowerCase());
+    $("#h-sol", el).textContent = s ? "" : "Senza Solution D&A la riga comparirà nei punti di attenzione."; $("#h-sol", el).className = "hint warn";
+    el.querySelectorAll(".ochip").forEach(c => c.classList.toggle("on", names.includes(c.dataset.o.toLowerCase())));
+  };
   F_("Solution D&A").oninput = hintSol; hintSol();
+  el.querySelectorAll(".ochip").forEach(c => c.onclick = () => {                 // un clic aggiunge/toglie il nome, gli altri nomi scritti a mano restano
+    const cur = splitSol(g("Solution D&A")), i = cur.findIndex(x => x.toLowerCase() === c.dataset.o.toLowerCase());
+    i >= 0 ? cur.splice(i, 1) : cur.push(c.dataset.o); F_("Solution D&A").value = cur.join(" / "); hintSol();
+  });
+  const hintDc = () => { const h = $("#h-dc", el); h.textContent = !edit && !g("Data consegna") ? `Se la lasci vuota: fine mese (${fmt(endOfMonthIso(g("Data ins.")))})` : ""; };
+  F_("Data consegna").addEventListener("input", hintDc); F_("Data ins.").addEventListener("input", hintDc); hintDc();
   let tmr;
   const suggest = async () => {
     if (edit || !g("Cliente").trim()) return;
     try {
-      const s = await api("/api/suggest", {method: "POST", body: {Cliente: g("Cliente"), Vertical: g("Vertical"), "Data consegna": g("Data consegna"), "Data ins.": g("Data ins.")}});
+      const s = await api("/api/suggest", {method: "POST", body: {Cliente: g("Cliente"), Vertical: g("Vertical"), "Data consegna": g("Data consegna") || endOfMonthIso(g("Data ins.")), "Data ins.": g("Data ins.")}});
       if (!dirty.SS && s.ss) F_("SS").value = s.ss;
       if (!dirty.Commessa && s.commessa) F_("Commessa").value = s.commessa;
       $("#h-ss", el).textContent = s.ss ? `Proposto: prefisso ${s.prefisso}, opportunità n. ${s.numero} per questo cliente` : "";
@@ -714,11 +727,12 @@ function openForm(row) {
   $("#f-save", el).onclick = async () => {
     const F = ["Cliente", "Vertical", "Market", "Oggetto", "tipo", "Stato", "Data ins.", "Data consegna", "Solution D&A", "SS", "Commessa", "Legal Entity", "Salesman", "Data Opt review", "Referenti vertical", "Tecnologie di riferimento D&A", "Note"];
     const vals = {}; F.forEach(f => vals[f] = g(f).trim() || null); vals.Attenzione = +g("Attenzione") || 0;
+    if (!edit && !vals["Data consegna"] && vals["Data ins."]) vals["Data consegna"] = endOfMonthIso(vals["Data ins."]);     // senza data di consegna: fine mese
     const err = $("#f-err", el); err.textContent = "";
     const miss = ["Cliente", "Vertical", "Market", "Oggetto", "tipo", "Data ins.", "Stato"].filter(f => !vals[f]);
     if (miss.length) { err.textContent = "Campi obbligatori mancanti: " + miss.join(", "); return; }
     const send = async force => {
-      if (edit) { const ch = {}; F.forEach(f => { if ((vals[f] || null) !== (row[f] || null)) ch[f] = vals[f]; }); if (vals.Attenzione !== (row.Attenzione || 0)) ch.Attenzione = vals.Attenzione; if (!Object.keys(ch).length) { closeModal(); return; }
+      if (edit) { const ch = {}; F.forEach(f => { if ((vals[f] || null) !== (row[f] || null)) ch[f] = vals[f]; }); if (F_("Attenzione") && vals.Attenzione !== (row.Attenzione || 0)) ch.Attenzione = vals.Attenzione; if (!Object.keys(ch).length) { closeModal(); return; }
         await withBusy(() => api("/api/rows/" + row._row, {method: "PUT", body: {changes: ch}})); toast("Modifiche salvate (da esportare nell'Excel)"); }
       else { await withBusy(() => api("/api/rows", {method: "POST", body: {...vals, _force: force}})); toast("Offerta aggiunta (da esportare nell'Excel)"); }
       closeModal(); await loadAll(true);
