@@ -356,12 +356,6 @@ function renderTable(m) {
 
 // ------------------------------------------------------------ consegne WIP (una sola lista, modificabile sul posto)
 // Le modifiche (data di consegna, stato) vanno nel database locale; nell'Excel solo con "Esporta in Excel".
-const WIP_BANDS = [
-  {k: "late", t: "Scadute", note: "Verificare se consegnata o aggiornare lo stato"},
-  {k: "week", t: "Questa settimana", note: ""},
-  {k: "two", t: "Prossime 2 settimane", note: ""},
-  {k: "over", t: "Oltre", note: ""},
-];
 const SEL_KEY = "gare.wip.sel.v1";
 const selLoad = () => { try { return new Set(JSON.parse(localStorage.getItem(SEL_KEY) || "[]")); } catch (e) { return new Set(); } };
 const selSave = set => { try { localStorage.setItem(SEL_KEY, JSON.stringify([...set])); } catch (e) {} };
@@ -399,16 +393,8 @@ const dayText = g => g === null ? "" : g < 0 ? `scaduta da ${-g} gg` : g === 0 ?
 const dayBadge = (g, band) => g === null ? "" : `<span class="tag d-${band}">${dayText(g)}</span>`;
 const ownerOf = it => it.r["Solution D&A"] || "n.d.";
 
-function wipText(items, ctx) {
-  const L = [`CONSEGNE WIP – settimana dal ${fmtD(ctx.monday)} al ${fmtD(ctx.sunday)}`, `Generato il ${fmtD(ctx.today)} – ${items.length} gare`, ""];
-  WIP_BANDS.forEach(b => {
-    const its = items.filter(i => i.band === b.k); if (!its.length) return;
-    L.push(`== ${b.t.toUpperCase()} (${its.length}) ==`);
-    its.forEach(i => L.push(`• ${(i.r.Cliente || "n.d.").toUpperCase()} – ${i.r.Oggetto || "n.d."} | ${ownerOf(i)} | ${i.d ? `Consegna ${fmtD(i.d)} (${dayText(i.days)})` : "Consegna n.d."} | SS: ${i.r.SS || "n.d."}${i.r.Attenzione ? ` | ATTENZIONE: ${ATT[i.r.Attenzione].label}` : ""}`));
-    L.push("");
-  });
-  return L.join("\n");
-}
+// testo per appunti e .txt: una riga per gara, solo "Cliente: Descrizione"
+function wipText(items) { return items.map(i => `${i.r.Cliente || "n.d."}: ${i.r.Oggetto || "n.d."}`).join("\n") + "\n"; }
 function downloadText(txt, ctx) {
   const t = ctx.today, name = `consegne-wip_${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}.txt`;
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + txt], {type: "text/plain;charset=utf-8"})); a.download = name;
@@ -461,7 +447,7 @@ function renderWip(m) {
   <div id="w-load"></div>
   <div class="card wbar">
     <div class="row">
-      <button id="w-selweek">Seleziona questa settimana</button><button id="w-selvis">Seleziona le visibili</button><button id="w-selnone">Deseleziona tutto</button>
+      <button id="w-selweek">Seleziona questa settimana</button><button id="w-selcol" title="Seleziona le offerte con il colore di attenzione (giallo, arancione, rosso)">Seleziona le colorate <span class="vc" id="w-ncol"></span></button><button id="w-selvis">Seleziona le visibili</button><button id="w-selnone">Deseleziona tutto</button>
       <span class="wcount" id="w-count"></span>
       <span style="margin-left:auto" class="row"><button id="w-meet" class="primary">${ico("calendar-clock")}Vista riunione</button><button id="w-txt">Scarica .txt</button><button id="w-copy">Copia negli appunti</button></span>
     </div>
@@ -476,7 +462,7 @@ function renderWip(m) {
     return its.sort((a, b) => (W.order.has(a.id) ? W.order.get(a.id) : 1e6) - (W.order.has(b.id) ? W.order.get(b.id) : 1e6) || byDate(a, b));
   };
   const selected = () => all().filter(i => W.sel.has(i.key) && i.wip && i.d);
-  const exportItems = () => { const s = selected(); return s.length ? s : visible().filter(i => i.wip); };
+  const exportItems = () => (selected().length ? selected() : visible().filter(i => i.wip)).sort(byDate);
   const counters = () => {
     const n = selected().length;
     $("#w-count").textContent = `${n} selezionate`;
@@ -518,6 +504,7 @@ function renderWip(m) {
     const nb = $("#w-nodate"); if (nb) nb.onclick = () => goTable({rows: nodate.map(i => i.id), rowsLabel: `WIP senza data di consegna (${nodate.length})`});
     counters();
     const vis = visible();
+    $("#w-ncol").textContent = vis.filter(i => i.wip && i.r.Attenzione).length;
     $("#w-list").innerHTML = vis.length ? `<div class="wh"><span></span><span>Cliente</span><span>Descrizione</span><span>Tipo</span><span>Attenzione</span><span>Consegna</span><span>Stato</span></div>${vis.map(rowHtml).join("")}` : `<div class="empty" style="padding:var(--pad)">Nessuna offerta WIP con questi filtri.</div>`;
     $("#w-list").querySelectorAll(".wchk input").forEach(c => c.onchange = () => { c.checked ? W.sel.add(c.dataset.key) : W.sel.delete(c.dataset.key); selSave(W.sel); c.closest(".wr2").classList.toggle("sel", c.checked); counters(); });
     $("#w-list").querySelectorAll(".inl-dt").forEach(btn => btn.onclick = () => { const inp = btn.nextElementSibling; try { inp.showPicker(); } catch (e) { inp.focus(); inp.click(); } });
@@ -545,6 +532,7 @@ function renderWip(m) {
   $("#w-tipo").onchange = e => { W.tipo = e.target.value; resetWipView(); draw(); };
   $("#w-att").onchange = e => { W.att = e.target.value; resetWipView(); draw(); };
   $("#w-selweek").onclick = () => { visible().filter(i => i.wip && i.band === "week").forEach(i => W.sel.add(i.key)); selSave(W.sel); draw(); };
+  $("#w-selcol").onclick = () => { visible().filter(i => i.wip && i.r.Attenzione).forEach(i => W.sel.add(i.key)); selSave(W.sel); draw(); };
   $("#w-selvis").onclick = () => { visible().filter(i => i.wip).forEach(i => W.sel.add(i.key)); selSave(W.sel); draw(); };
   $("#w-selnone").onclick = () => { W.sel.clear(); selSave(W.sel); draw(); };
   $("#w-txt").onclick = () => downloadText(wipText(exportItems(), ctx), ctx);
@@ -552,30 +540,63 @@ function renderWip(m) {
   $("#w-meet").onclick = () => openMeeting();
 }
 
-// vista riunione a schermo intero (tema chiaro, solo righe selezionate)
+// ------------------------------------------------------------ vista riunione (densa, come la tabella)
+const DISC_KEY = "gare.wip.disc.v1", MGRP_KEY = "gare.wip.mgrp.v1";
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+const MEET_URG = [{k: "late", t: "Scadute"}, {k: "week", t: "Questa settimana"}, {k: "two", t: "Prossimi 14 giorni"}, {k: "over", t: "Più avanti"}];
+const meetBadge = i => `<span class="tag ${i.days < 0 ? "d-late" : i.days <= 7 ? "d-week" : "d-over"}">${dayText(i.days)}</span>`;
+
 function openMeeting() {
-  const ctx = wipContext(), items = wipItems().filter(i => S.wip.sel.has(i.key) && i.wip && i.d);
+  const ctx = wipContext();
+  const items = wipItems().filter(i => S.wip.sel.has(i.key) && i.wip && i.d).sort(byDate);
+  let disc = new Set(lsGet(DISC_KEY, [])), byOwner = !!lsGet(MGRP_KEY, false);
+  const collapsed = new Set();
   const el = document.createElement("div"); el.id = "meeting";
+  const week = `${fmtD(ctx.monday).slice(0, 5)} – ${fmtD(ctx.sunday)}`;
   const cnt = k => items.filter(i => i.band === k).length;
-  const bands = WIP_BANDS.map(b => {
-    const its = items.filter(i => i.band === b.k); if (!its.length) return "";
-    const owners = new Map(); its.forEach(i => { const o = i.r["Solution D&A"] || NOASS; (owners.get(o) || owners.set(o, []).get(o)).push(i); });
-    return `<section class="mt-band mb-${b.k}"><h2>${b.t} <em>${its.length}</em></h2>${b.note ? `<div class="mt-note">${b.note}</div>` : ""}` +
-      [...owners.entries()].sort((a, b) => a[0].localeCompare(b[0], "it")).map(([o, g]) => `<h3>${esc(o)}</h3>` + g.map(i => `<div class="mt-item"><div class="mt-c"><b>${attDot(i.r)}${esc(i.r.Cliente)}</b><span>${esc(i.r.Oggetto)}</span></div>
-        <div class="mt-m"><div><small>Owner</small>${esc(ownerOf(i))}</div><div><small>Consegna</small>${i.d ? fmtD(i.d) : "n.d."}</div><div><small>Giorni</small>${i.days === null ? "—" : `<span class="tag d-${i.band}">${dayText(i.days)}</span>`}</div><div><small>SS</small>${esc(i.r.SS || "n.d.")}</div></div></div>`).join("")).join("") + `</section>`;
-  }).join("");
-  el.innerHTML = `<div class="mt-bar"><button id="mt-exit">${ico("x")}Esci (Esc)</button><span style="flex:1"></span><button id="mt-txt">Scarica .txt</button><button id="mt-copy">Copia negli appunti</button><button id="mt-print">Stampa</button></div>
-    <div class="mt-page"><div class="mt-head"><h1>Consegne WIP – settimana dal ${fmtD(ctx.monday)} al ${fmtD(ctx.sunday)}</h1><div class="mt-gen">Generato il ${fmtD(ctx.today)}</div></div>
-    ${items.length ? bands : `<p class="mt-empty">Nessuna gara selezionata. Torna indietro e spunta le gare da discutere.</p>`}
-    <div class="mt-sum"><div><b>${items.length}</b><span>gare totali</span></div><div class="s-late"><b>${cnt("late")}</b><span>scadute</span></div><div class="s-week"><b>${cnt("week")}</b><span>questa settimana</span></div></div></div>`;
+  const done = () => items.filter(i => disc.has(i.key)).length;
+  const row = i => `<div class="mr ${disc.has(i.key) ? "disc" : ""}" data-key="${esc(i.key)}">
+      <label class="mchk"><input type="checkbox" ${disc.has(i.key) ? "checked" : ""} aria-label="Discussa: ${esc(i.r.Cliente)}"></label>
+      <div class="mcl" title="${esc(i.r.Cliente)} · ${esc(i.r.Oggetto)}">${attDot(i.r)}<b>${esc(i.r.Cliente)}</b><span class="mds">· ${esc(i.r.Oggetto || "")}</span></div>
+      <div class="mtipo">${tipoChip(i.r.tipo)}</div><div class="mow">${orNil(i.r["Solution D&A"])}</div>
+      <div class="mdt"><span>${fmtD(i.d)}</span>${meetBadge(i)}</div></div>`;
+  const sections = () => {
+    if (byOwner) {
+      const g = new Map(); items.forEach(i => { const o = i.r["Solution D&A"] || NOASS; (g.get(o) || g.set(o, []).get(o)).push(i); });
+      return [...g.entries()].sort((a, b) => a[0].localeCompare(b[0], "it")).map(([o, its]) => ({id: "o:" + o, t: o, band: "owner", its}));
+    }
+    return MEET_URG.map(u => ({id: u.k, t: u.t, band: u.k, its: items.filter(i => i.band === u.k)})).filter(x => x.its.length);
+  };
+  const upd = () => {
+    const n = items.length, d = done();
+    $("#rm-sub", el).textContent = `${n} ${n === 1 ? "gara selezionata" : "gare selezionate"} · ${d} di ${n} discusse`;
+    $("#rm-bar", el).style.width = n ? `${(100 * d / n).toFixed(1)}%` : "0";
+  };
+  const draw = () => {
+    const y = el.scrollTop;
+    el.innerHTML = `<div class="rm-top"><div class="rm-head"><div><h1>Riunione consegne · ${week}</h1><div class="rm-sub" id="rm-sub"></div></div>
+      <div class="rm-actions"><button id="rm-copy">Copia</button><button id="rm-txt">Scarica .txt</button><button id="rm-back" class="primary">${ico("x")}Torna alla lista</button></div></div>
+      <div class="rm-prog" role="progressbar" aria-label="Gare discusse"><i id="rm-bar"></i></div></div>
+      <div class="rm-body">
+        <div class="rm-cards"><div class="card rm-card late"><div class="n">${cnt("late")}</div><div class="l">Scadute</div></div><div class="card rm-card week"><div class="n">${cnt("week")}</div><div class="l">Questa settimana</div></div><div class="card rm-card"><div class="n">${cnt("two")}</div><div class="l">Prossimi 14 gg</div></div></div>
+        <div class="rm-tools"><label class="sw"><input type="checkbox" id="rm-grp" ${byOwner ? "checked" : ""}> Raggruppa per owner</label><button class="linkbtn" id="rm-reset" title="Toglie la spunta “discussa” da tutte le gare">Nuova riunione</button></div>
+        ${items.length ? sections().map(sec => `<section class="card rm-sec mb-${sec.band} ${collapsed.has(sec.id) ? "closed" : ""}" data-sec="${esc(sec.id)}"><button class="rm-sh" aria-expanded="${!collapsed.has(sec.id)}"><span class="rm-t">${esc(sec.t)}</span><span class="bc">${sec.its.length}</span></button><div class="rm-rows">${sec.its.map(row).join("")}</div></section>`).join("") : `<div class="card empty" style="padding:var(--pad)">Nessuna gara selezionata. Torna alla lista e spunta le gare da discutere.</div>`}
+      </div>`;
+    el.scrollTop = y; upd();
+    $("#rm-back", el).onclick = close;
+    $("#rm-txt", el).onclick = () => downloadText(wipText(items), ctx);
+    $("#rm-copy", el).onclick = () => copyText(wipText(items));
+    $("#rm-grp", el).onchange = e => { byOwner = e.target.checked; lsSet(MGRP_KEY, byOwner); draw(); };
+    $("#rm-reset", el).onclick = () => { if (disc.size && !confirm("Togliere la spunta “discussa” da tutte le gare e ricominciare?")) return; disc = new Set(); lsSet(DISC_KEY, []); draw(); };
+    el.querySelectorAll(".rm-sh").forEach(h => h.onclick = () => { const sec = h.closest(".rm-sec"), id = sec.dataset.sec; collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id); sec.classList.toggle("closed", collapsed.has(id)); h.setAttribute("aria-expanded", !collapsed.has(id)); });
+    el.querySelectorAll(".mr input").forEach(c => c.onchange = () => { const r = c.closest(".mr"), k = r.dataset.key; c.checked ? disc.add(k) : disc.delete(k); lsSet(DISC_KEY, [...disc]); r.classList.toggle("disc", c.checked); upd(); });
+  };
   document.body.appendChild(el); document.body.style.overflow = "hidden";
   const close = () => { el.remove(); document.body.style.overflow = ""; document.removeEventListener("keydown", onKey); };
   const onKey = e => { if (e.key === "Escape") close(); };
   document.addEventListener("keydown", onKey);
-  $("#mt-exit", el).onclick = close;
-  $("#mt-txt", el).onclick = () => downloadText(wipText(items, ctx), ctx);
-  $("#mt-copy", el).onclick = () => copyText(wipText(items, ctx));
-  $("#mt-print", el).onclick = () => window.print();
+  draw();
 }
 
 // ------------------------------------------------------------ pulizia dati (SOLO suggerimenti: si corregge nell'Excel)
