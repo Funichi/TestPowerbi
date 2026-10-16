@@ -391,16 +391,10 @@ button.apill{font:inherit;font-weight:400}
 .dtin{position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;pointer-events:none;border:0;padding:0}
 .inl-st{width:100%;text-overflow:ellipsis}
 
-/* Consegnata + fascia "per tipo" */
+/* Consegnata */
 .wst{display:flex;align-items:center;gap:8px}.wst .inl-st{width:118px;flex:none}
 .btn-cons{padding:3px 10px;font-size:12.5px;gap:5px;border-radius:999px;white-space:nowrap;font-weight:600;color:var(--st-won-fg);background:var(--st-won-bg);border-color:transparent}
 .btn-cons svg{width:14px;height:14px}.btn-cons:hover{background:var(--st-won);border-color:transparent}
-.strip-h{display:flex;align-items:baseline;gap:12px;margin-bottom:10px;flex-wrap:wrap}.strip-h h2{margin:0;font-size:15px}.strip-h span{color:var(--text-3);font-size:13px}
-.tipo-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
-.tcard{display:block;text-align:left;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;font-weight:400}
-.tcard:hover{border-color:var(--border-hover);background:var(--card)}.tcard.on{border-color:var(--accent);background:var(--accent-soft)}
-.tcard .lname{display:flex;flex-direction:column}.tcard .lname b{font-weight:600}.tcard .lname span{font-size:12px;color:var(--text-3)}
-#w-load{margin-bottom:var(--gap)}
 @media(max-width:1200px){.wst,.watt{grid-column:2/-1}}
 
 /* ---------- livello di attenzione ---------- */
@@ -421,3 +415,16 @@ button.apill{font:inherit;font-weight:400}
 .ttrack{display:block;height:16px}.tbar{display:flex;height:100%;background:var(--chart-3);border-radius:6px;overflow:hidden}.tw{display:block;height:100%;background:var(--st-won)}
 .trow .tv{display:flex;align-items:center;gap:8px}.trow .tv b{font-size:15px;min-width:22px}
 .wonpill{font-style:normal;font-size:12px;font-weight:600;background:var(--st-won-bg);color:var(--st-won-fg);border-radius:999px;padding:1px 9px;white-space:nowrap}
+
+/* ---------- cruscotto: attenzioni e WIP per scadenza ---------- */
+.hbar i.s-late{background:var(--urg-late);color:var(--accent-ink)}
+.hbar i.s-week{background:var(--urg-week)}
+.hbar i.s-two{background:var(--urg-two)}
+.hbar i.s-over{background:var(--urg-over)}
+.hbar i.s-nodate{background:var(--st-closed)}
+.legend i.lg-s-late{background:var(--urg-late)}.legend i.lg-s-week{background:var(--urg-week)}.legend i.lg-s-two{background:var(--urg-two)}.legend i.lg-s-over{background:var(--urg-over)}.legend i.lg-s-nodate{background:var(--st-closed)}
+.aslice{cursor:pointer}.aslice:hover{opacity:.85}
+.alegend{display:flex;flex-direction:column;gap:2px;width:100%;margin-top:12px}
+.arow2{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:center;width:100%;text-align:left;border:0;background:none;padding:6px 8px;border-radius:10px;font-weight:400}
+.arow2:hover:not(:disabled){background:var(--row-hover)}.arow2:disabled{opacity:.5;cursor:default}
+.arow2 i{width:12px;height:12px;border-radius:50%;display:block}.arow2 small{color:var(--text-3)}.arow2 b{font-weight:600}

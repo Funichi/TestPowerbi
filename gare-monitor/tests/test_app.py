@@ -217,6 +217,10 @@ def test_cruscotto_kpi_trend_esito_eta(client, tmp_path):
     top = db["top_clienti"]
     assert top[0]["nome"] in ("Terna", "TERNA ", "TERNA") and top[0]["totale"] == 2 and top[0]["won"] == 1 and len(top[0]["rows"]) == 2
     assert db["pillole"]["attenzione"] == {"totale": 1, "rosse": 0, "arancioni": 0, "gialle": 1}
+    assert db["attenzione_chart"]["wip"] == {"3": 0, "2": 0, "1": 1, "0": 0}                                   # Terna (WIP) è gialla
+    assert db["attenzione_chart"]["tutte"] == {"3": 1, "2": 1, "1": 1, "0": 3}                                 # Enel rosso, Inps arancione
+    wt = {w["nome"]: w for w in db["wip_tipo"]}                                                                 # oggi 15/10: la consegna del 16/10 è questa settimana
+    assert wt["Gara"] == {"nome": "Gara", "scadute": 0, "settimana": 1, "prossima": 0, "oltre": 0, "senza_data": 0, "totale": 1}
     eta = {f["k"]: f["n"] for f in db["eta_attesa"]["fasce"]}
     assert eta["31-90"] == 1 and eta["nd"] == 0 and db["eta_attesa"]["totale"] == 1
     assert db["pillole"]["imminenti"] == 1 and db["pillole"]["scadute"] == 0

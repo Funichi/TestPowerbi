@@ -3,7 +3,7 @@ const STATI = ["WIP", "Waiting For response", "Sospeso", "Won", "Lost", "NoBID",
 const BCLASS = {"WIP": "WIP", "Waiting For response": "Waiting", "Sospeso": "Sospeso", "Won": "Won", "Lost": "Lost", "NoBID": "NoBID", "Closed": "Closed"};
 const COLOR = {"WIP": "var(--st-wip)", "Waiting For response": "var(--st-waiting)", "Sospeso": "var(--st-sospeso)", "Won": "var(--st-won)", "Lost": "var(--st-lost)", "NoBID": "var(--st-nobid)", "Closed": "var(--st-closed)", "Altro": "var(--st-altro)"};
 const STATO_COL = {"WIP": "s-WIP", "Waiting For response": "s-Waiting", "Won": "s-Won", "Lost": "s-Lost", "NoBID": "s-NoBID", "Sospeso": "s-Sospeso", "Closed": "s-Closed", "Altro": "s-Altro"};
-const S = {data: null, dash: null, view: "dash", months: "12", trendSeries: "inserite", trendCum: true, pipeBy: "vertical",
+const S = {data: null, dash: null, view: "dash", months: "12", trendSeries: "inserite", trendCum: true, pipeBy: "vertical", attScope: "wip",
   filt: {q: "", stato: "", vertical: "", market: "", solution: "", anno: ""}, sort: {k: "Data ins.", dir: -1}, clean: null, state: null};
 const EMPTY_FILT = () => ({q: "", stato: "", vertical: "", market: "", tipo: "", solution: "", anno: "", loc: "", att: "", rows: null, rowsLabel: ""});
 
@@ -170,6 +170,32 @@ function topClienti(list) {
     <span class="tv"><b>${c.totale}</b>${c.won ? `<em class="wonpill">${c.won} ${c.won === 1 ? "vinta" : "vinte"}</em>` : ""}</span></button>`).join("")}</div>
     <div class="legend"><span><i style="background:var(--st-won)"></i>Vinte</span><span><i style="background:var(--chart-3)"></i>Altre opportunità</span></div>`;
 }
+// torta delle attenzioni: giallo / arancione / rosso, sulle WIP o su tutte le offerte
+function attCard(counts) {
+  const sl = [["3", "Urgente", "rosso"], ["2", "Da attenzionare", "arancione"], ["1", "Rilevante", "giallo"]];
+  const tot = sl.reduce((a, [k]) => a + (counts[k] || 0), 0), none = counts["0"] || 0, R = 70, C = 2 * Math.PI * R, gap = sl.filter(([k]) => counts[k]).length > 1 ? 3 : 0;
+  let off = 0, arcs = "";
+  sl.forEach(([k, n, c]) => { const v = counts[k] || 0; if (!v) return; const len = Math.max(C * v / tot - gap, 1);
+    arcs += `<circle class="aslice" data-att="${k}" cx="100" cy="100" r="${R}" fill="none" stroke="var(--att-${k})" stroke-width="22" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 100 100)"><title>${n} (${c}): ${v}</title></circle>`; off += C * v / tot; });
+  return `<div class="donut"><svg viewBox="0 0 200 200" role="img" aria-label="Offerte per livello di attenzione"><circle cx="100" cy="100" r="${R}" fill="none" stroke="var(--chart-grid)" stroke-width="22"/>${arcs}
+    <text x="100" y="104" text-anchor="middle" style="font-size:32px;font-weight:600;fill:var(--text)">${tot}</text><text x="100" y="124" text-anchor="middle">con attenzione</text></svg>
+    <div class="alegend">${sl.map(([k, n, c]) => `<button type="button" class="arow2" data-att="${k}" ${counts[k] ? "" : "disabled"}><i style="background:var(--att-${k})"></i><span>${n} <small>(${c})</small></span><b>${counts[k] || 0}</b></button>`).join("")}</div>
+    <div class="hint">${none} ${S.attScope === "wip" ? "offerte WIP" : "offerte"} senza attenzione</div></div>`;
+}
+// WIP per tipo e per scadenza
+const WT_SEGS = [["scadute", "Scadute", "s-late"], ["settimana", "Questa settimana", "s-week"], ["prossima", "Prossima settimana", "s-two"], ["oltre", "Oltre", "s-over"], ["senza_data", "Senza data", "s-nodate"]];
+function wipTipoCard(list) {
+  if (!list.length) return `<div class="empty">Nessuna offerta in corso.</div>`;
+  const mx = Math.max(...list.map(g => g.totale));
+  return `<div class="hb">${list.map(g => `<div class="hn cl" title="${esc(g.nome)}" data-wt="${esc(g.nome)}">${esc(g.nome)}</div><div class="hbwrap"><div class="hbar" style="width:${(100 * g.totale / mx).toFixed(1)}%">${WT_SEGS.map(([k, l, c]) => g[k] ?
+    `<i class="${c}" style="width:${(100 * g[k] / g.totale).toFixed(2)}%" data-wt="${esc(g.nome)}" title="${esc(g.nome)} · ${l}: ${g[k]}">${g[k] / mx >= .08 ? g[k] : ""}</i>` : "").join("")}</div><span class="ht-n">${g.totale}</span></div>`).join("")}</div>
+    <div class="legend">${WT_SEGS.map(([k, l, c]) => `<span><i class="lg-${c}"></i>${l}</span>`).join("")}</div>`;
+}
+// tipi reali (come nel filtro) che stanno dietro a un gruppo del grafico
+function tipiOfGroup(nome) {
+  if (nome !== "Altro") return [nome];
+  return [...new Set(S.data.rows.filter(r => normStato(r.Stato) === "WIP" && !TIPI_MAIN.includes(r.tipo)).map(r => r.tipo || NOIND))];
+}
 function etaCard(e) {
   const mx = Math.max(1, ...e.fasce.map(f => f.n)), over = e.oltre180;
   const frase = e.totale === 0 ? "Nessuna offerta in attesa di risposta."
@@ -204,11 +230,17 @@ function renderDash(m) {
     <button class="apill" data-scroll="sec-att"><i style="background:var(--accent)"></i><b>${pl.attenzioni}</b> punti di attenzione</button>
   </div>
   <div class="g12">
-    <div class="card c8"><div class="card-h"><div><h2>Trend anno su anno</h2><div class="sub">${k.anno} contro ${k.prec}, per mese di Data ins.</div></div>
+    <div class="card c12"><div class="card-h"><div><h2>Trend anno su anno</h2><div class="sub">${k.anno} contro ${k.prec}, per mese di Data ins.</div></div>
       <div class="row"><div class="seg"><button data-ts="inserite" class="${S.trendSeries === "inserite" ? "on" : ""}">Inserite</button><button data-ts="won" class="${S.trendSeries === "won" ? "on" : ""}">Won</button></div>
       <div class="seg"><button data-tc="0" class="${S.trendCum ? "" : "on"}">Mensile</button><button data-tc="1" class="${S.trendCum ? "on" : ""}">Cumulato</button></div></div></div>
       <div id="yoy" class="yoy"></div></div>
+  </div>
+  <div class="g12">
     <div class="card c4"><h2>Età delle offerte in attesa</h2><div class="sub">Quanto aspettiamo una risposta</div>${etaCard(d.eta_attesa)}</div>
+    <div class="card c4"><div class="card-h"><div><h2>Offerte per attenzione</h2><div class="sub">Il colore del nome cliente nell'Excel</div></div>
+      <div class="seg"><button data-as="wip" class="${S.attScope === "wip" ? "on" : ""}">In corso</button><button data-as="tutte" class="${S.attScope === "tutte" ? "on" : ""}">Tutte</button></div></div>
+      ${attCard(d.attenzione_chart[S.attScope])}</div>
+    <div class="card c4"><h2>WIP per tipo e scadenza</h2><div class="sub">Offerte in corso: scadute, questa settimana, prossima o oltre. Clicca per aprirle.</div>${wipTipoCard(d.wip_tipo)}</div>
   </div>
   <div class="g12">
     <div class="card c7"><div class="card-h"><div><h2>Pipeline per ${S.pipeBy === "market" ? "Market" : "Vertical"}</h2><div class="sub">Numero di offerte per stato. Clicca un colore per vedere l'elenco.</div></div>
@@ -232,6 +264,9 @@ function renderDash(m) {
   m.querySelectorAll("[data-age]").forEach(c => c.onclick = () => { const f = d.eta_attesa.fasce.find(x => x.k === c.dataset.age); goTable({rows: f.rows, rowsLabel: `In attesa ${f.label} (${f.n})`}); });
   m.querySelectorAll("[data-cl]").forEach(b => b.onclick = () => { const c = d.top_clienti[+b.dataset.cl]; goTable({rows: c.rows, rowsLabel: `Cliente: ${c.nome} (${c.totale})`}); });
   m.querySelectorAll("[data-wipatt]").forEach(c => c.onclick = () => goWip({att: "any"}));
+  m.querySelectorAll("[data-as]").forEach(b => b.onclick = () => { S.attScope = b.dataset.as; render(); });
+  m.querySelectorAll(".aslice, .arow2").forEach(c => c.onclick = () => S.attScope === "wip" ? goWip({att: c.dataset.att}) : goTable({att: c.dataset.att}));
+  m.querySelectorAll("[data-wt]").forEach(c => c.onclick = () => goWip({tipi: tipiOfGroup(c.dataset.wt)}));
   m.querySelectorAll("[data-pb]").forEach(b => b.onclick = () => { S.pipeBy = b.dataset.pb; render(); });
   m.querySelectorAll("[data-ts]").forEach(b => b.onclick = () => { S.trendSeries = b.dataset.ts; render(); });
   m.querySelectorAll("[data-tc]").forEach(b => b.onclick = () => { S.trendCum = b.dataset.tc === "1"; render(); });
@@ -240,7 +275,7 @@ function renderDash(m) {
 
 // grafico a linee anno corrente vs anno precedente (12 mesi)
 function drawYoy(el, t) {
-  const W = 760, H = 310, L = 42, R = 92, T = 18, B = 32, N = 12, m = t.mese, ser = t[S.trendSeries];
+  const W = 1100, H = 310, L = 44, R = 120, T = 18, B = 32, N = 12, m = t.mese, ser = t[S.trendSeries];
   const cum = a => { let s = 0; return a.map(v => s += v); };
   const cur = (S.trendCum ? cum(ser.cur.slice(0, m)) : ser.cur.slice(0, m)), prev = S.trendCum ? cum(ser.prev) : ser.prev;
   const max = Math.max(1, ...cur, ...prev), step = Math.max(1, Math.ceil(max / 4)), nice = step * 4;
@@ -360,9 +395,9 @@ const SEL_KEY = "gare.wip.sel.v1";
 const selLoad = () => { try { return new Set(JSON.parse(localStorage.getItem(SEL_KEY) || "[]")); } catch (e) { return new Set(); } };
 const selSave = set => { try { localStorage.setItem(SEL_KEY, JSON.stringify([...set])); } catch (e) {} };
 // view: all | late | week | future | d7 (d7 arriva dal cruscotto) · touched/order: le righe modificate restano dove sono finché non si cambia vista
-S.wip = {sol: new Set(), tipo: "", att: "", view: "all", sel: selLoad(), touched: new Set(), order: null, redraw: null};
+S.wip = {sol: new Set(), tipi: new Set(), atts: new Set(), view: "all", sel: selLoad(), touched: new Set(), order: null, redraw: null};
 function resetWipView() { S.wip.touched = new Set(); S.wip.order = null; }
-function goWip(f) { S.wip.sol = new Set(); S.wip.tipo = ""; S.wip.att = f.att || ""; S.wip.view = f.band === "late" || f.band === "d7" ? f.band : "all"; resetWipView(); S.view = "wip"; render(); }
+function goWip(f) { S.wip.sol = new Set(); S.wip.tipi = new Set(f.tipi || []); S.wip.atts = f.att === "any" ? new Set(["1", "2", "3"]) : f.att ? new Set([String(f.att)]) : new Set(); S.wip.view = f.band === "late" || f.band === "d7" ? f.band : "all"; resetWipView(); S.view = "wip"; render(); }
 const isoDate = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; };
 const fmtD = d => d ? `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}` : "";
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
@@ -385,8 +420,9 @@ function wipItems() {
 }
 const byDate = (a, b) => (a.d ? a.d.getTime() : Infinity) - (b.d ? b.d.getTime() : Infinity) || String(a.r.Cliente).localeCompare(String(b.r.Cliente), "it");
 const tipoGroup = t => TIPI_MAIN.includes(t) ? t : "Altro";
-const passTipo = it => !S.wip.tipo || (S.wip.tipo === "__altro" ? tipoGroup(it.r.tipo) === "Altro" : it.r.tipo === S.wip.tipo);
-const passAtt = it => !S.wip.att || (S.wip.att === "any" ? !!it.r.Attenzione : String(it.r.Attenzione) === S.wip.att);
+const passTipo = it => !S.wip.tipi.size || S.wip.tipi.has(it.r.tipo || NOIND);
+const passAtt = it => !S.wip.atts.size || S.wip.atts.has(String(it.r.Attenzione || 0));
+const ATT_OPTS = [["3", "Urgente (rosso)"], ["2", "Da attenzionare (arancione)"], ["1", "Rilevante (giallo)"], ["0", "Nessuna"]];
 const passSol = it => !S.wip.sol.size || (it.names.length ? it.names.some(n => S.wip.sol.has(n.toLowerCase())) : S.wip.sol.has(NOASS.toLowerCase()));
 const passView = (it, v = S.wip.view) => v === "all" || (v === "late" ? it.band === "late" : v === "week" ? it.band === "week" : v === "future" ? it.band === "two" || it.band === "over" : it.days !== null && it.days >= 0 && it.days <= 7);
 const dayText = g => g === null ? "" : g < 0 ? `scaduta da ${-g} gg` : g === 0 ? "oggi" : `tra ${g} gg`;
@@ -428,7 +464,7 @@ async function wipEdit(row, changes, msg) {
 function renderWip(m) {
   const ctx = wipContext(), W = S.wip;
   const first = wipItems().filter(i => i.wip);
-  const tipi = [...new Set(first.map(i => i.r.tipo).filter(Boolean))].sort((a, b) => a.localeCompare(b, "it"));
+  const tipiOpts = [...new Set(first.map(i => i.r.tipo || NOIND))].sort((a, b) => a.localeCompare(b, "it")).map(t => [t, t]);
   const names = new Map(); let hasNo = false;
   first.forEach(i => { if (!i.names.length) hasNo = true; i.names.forEach(n => names.has(n.toLowerCase()) || names.set(n.toLowerCase(), n)); });
   const solOpts = [...names.entries()].sort((a, b) => a[1].localeCompare(b[1], "it")); if (hasNo) solOpts.push([NOASS.toLowerCase(), NOASS]);
@@ -437,14 +473,13 @@ function renderWip(m) {
   m.innerHTML = `
   <div class="fbar">
     <div><label>Solution D&amp;A</label><details class="ms" id="w-ms"><summary id="w-ms-s"></summary><div class="ms-list" id="w-ms-l"></div></details></div>
-    <div><label for="w-tipo">Tipo</label><select id="w-tipo"><option value="">Tutti</option>${tipi.map(t => `<option value="${esc(t)}" ${t === W.tipo ? "selected" : ""}>${esc(t)}</option>`).join("")}<option value="__altro" ${W.tipo === "__altro" ? "selected" : ""}>Altro</option></select></div>
-    <div><label for="w-att">Attenzione</label><select id="w-att"><option value="">Tutte</option><option value="any" ${W.att === "any" ? "selected" : ""}>Con attenzione</option>${[3, 2, 1].map(k => `<option value="${k}" ${W.att === String(k) ? "selected" : ""}>${ATT[k].label}</option>`).join("")}</select></div>
+    <div><label>Tipo</label><details class="ms" id="w-mt"><summary id="w-mt-s"></summary><div class="ms-list" id="w-mt-l"></div></details></div>
+    <div><label>Attenzione</label><details class="ms" id="w-ma"><summary id="w-ma-s"></summary><div class="ms-list" id="w-ma-l"></div></details></div>
     <div class="fbar-r">Settimana dal ${fmtD(ctx.monday)} al ${fmtD(ctx.sunday)} · le modifiche restano in locale fino a “Esporta in Excel”</div>
   </div>
   <div id="w-chips"></div>
   <div class="seg seg-lg" id="w-views" role="tablist"></div>
   <div id="w-alert"></div>
-  <div id="w-load"></div>
   <div class="card wbar">
     <div class="row">
       <button id="w-selweek">Seleziona questa settimana</button><button id="w-selcol" title="Seleziona le offerte con il colore di attenzione (giallo, arancione, rosso)">Seleziona le colorate <span class="vc" id="w-ncol"></span></button><button id="w-selvis">Seleziona le visibili</button><button id="w-selnone">Deseleziona tutto</button>
@@ -469,16 +504,21 @@ function renderWip(m) {
     $("#w-exp-hint").textContent = n ? `Il .txt e “Copia” useranno le ${n} gare selezionate.` : `Nessuna selezione: il .txt e “Copia” useranno le ${visible().filter(i => i.wip).length} gare visibili.`;
   };
   const setView = v => { W.view = v; resetWipView(); draw(); };
-  const drawMs = () => {
-    $("#w-ms-s").textContent = W.sol.size ? `${W.sol.size} selezionat${W.sol.size === 1 ? "a" : "e"}` : "Tutte";
-    $("#w-ms-l").innerHTML = solOpts.map(([k, n]) => `<label class="ms-i"><input type="checkbox" data-k="${esc(k)}" ${W.sol.has(k) ? "checked" : ""}> ${esc(n)}</label>`).join("") || `<div class="muted">Nessuna</div>`;
-    $("#w-ms-l").querySelectorAll("input").forEach(c => c.onchange = () => { c.checked ? W.sol.add(c.dataset.k) : W.sol.delete(c.dataset.k); resetWipView(); draw(); });
+  // menu a tendina con scelta multipla (Solution, Tipo, Attenzione): stesso componente
+  const multi = (sumId, listId, opts, set, all) => {
+    const label = k => (opts.find(o => o[0] === k) || [k, k])[1];
+    $("#" + sumId).textContent = !set.size ? all : set.size === 1 ? label([...set][0]) : `${set.size} selezionati`;
+    $("#" + listId).innerHTML = opts.map(([k, n]) => `<label class="ms-i"><input type="checkbox" data-k="${esc(k)}" ${set.has(k) ? "checked" : ""}> ${esc(n)}</label>`).join("") || `<div class="muted">Nessuna</div>`;
+    $("#" + listId).querySelectorAll("input").forEach(c => c.onchange = () => { c.checked ? set.add(c.dataset.k) : set.delete(c.dataset.k); resetWipView(); draw(); });
   };
+  const drawMs = () => { multi("w-ms-s", "w-ms-l", solOpts, W.sol, "Tutte"); multi("w-mt-s", "w-mt-l", tipiOpts, W.tipi, "Tutti"); multi("w-ma-s", "w-ma-l", ATT_OPTS, W.atts, "Tutte"); };
   const drawChips = () => {
-    const items = [...[...W.sol].map(k => ({id: "s:" + k, label: "Solution: " + solName(k)})), ...(W.tipo ? [{id: "t", label: "Tipo: " + (W.tipo === "__altro" ? "Altro" : W.tipo)}] : []), ...(W.att ? [{id: "a", label: "Attenzione: " + (W.att === "any" ? "con attenzione" : ATT[W.att].label)}] : []), ...(W.view === "d7" ? [{id: "v", label: "Entro 7 giorni"}] : [])];
+    const attName = k => (ATT_OPTS.find(o => o[0] === k) || [k, k])[1].replace(/ \(.*\)/, "");
+    const items = [...[...W.sol].map(k => ({id: "s:" + k, label: "Solution: " + solName(k)})), ...[...W.tipi].map(t => ({id: "t:" + t, label: "Tipo: " + t})),
+      ...[...W.atts].map(k => ({id: "a:" + k, label: "Attenzione: " + attName(k)})), ...(W.view === "d7" ? [{id: "v", label: "Entro 7 giorni"}] : [])];
     const box = $("#w-chips"); box.innerHTML = chipsHtml(items);
-    bindChips(box, id => { if (id === "t") { W.tipo = ""; $("#w-tipo").value = ""; } else if (id === "v") W.view = "all"; else if (id === "a") { W.att = ""; $("#w-att").value = ""; } else W.sol.delete(id.slice(2)); resetWipView(); draw(); },
-      () => { W.sol.clear(); W.tipo = ""; W.att = ""; W.view = "all"; $("#w-tipo").value = ""; $("#w-att").value = ""; resetWipView(); draw(); });
+    bindChips(box, id => { if (id === "v") W.view = "all"; else if (id.startsWith("t:")) W.tipi.delete(id.slice(2)); else if (id.startsWith("a:")) W.atts.delete(id.slice(2)); else W.sol.delete(id.slice(2)); resetWipView(); draw(); },
+      () => { W.sol.clear(); W.tipi.clear(); W.atts.clear(); W.view = "all"; resetWipView(); draw(); });
   };
   const rowHtml = i => {
     const r = i.r, sel = W.sel.has(i.key), st = normStato(r.Stato), out = !i.wip;
@@ -516,21 +556,10 @@ function renderWip(m) {
     $("#w-list").querySelectorAll(".btn-cons").forEach(btn => btn.onclick = () => { const row = rowByNum(+btn.dataset.id); if (row) wipEdit(row, {Stato: "Waiting For response"}, `${row.Cliente}: consegnata`); });
     $("#w-list").querySelectorAll(".inl-st").forEach(sel => sel.onchange = () => { const row = rowByNum(+sel.dataset.id); if (row) wipEdit(row, {Stato: sel.value}, `${row.Cliente}: ${sel.value}`); });
 
-    // consegne per tipo (rispetta i filtri Solution e vista; clic = filtra per quel tipo)
-    const per = new Map();
-    all().filter(i => i.wip && i.d && passSol(i) && passAtt(i)).forEach(i => { const g = tipoGroup(i.r.tipo), o = per.get(g) || {n: g, d7: 0, d14: 0, tot: 0}; o.tot++; if (i.days >= 0 && i.days <= 7) o.d7++; if (i.days >= 0 && i.days <= 14) o.d14++; per.set(g, o); });
-    const rows = [...per.values()].sort((a, b) => [...TIPI_MAIN, "Altro"].indexOf(a.n) - [...TIPI_MAIN, "Altro"].indexOf(b.n)), mx = Math.max(1, ...rows.map(r => r.tot));
-    $("#w-load").innerHTML = `<div class="strip-h"><h2>Consegne per tipo</h2><span>Prossimi 7 e 14 giorni e totale WIP con data · clicca un tipo per filtrare</span></div><div class="tipo-strip">` +
-      (rows.map(o => { const key = o.n === "Altro" ? "__altro" : o.n; return `<button type="button" class="tcard ${W.tipo === key ? "on" : ""}" data-t="${esc(key)}"><div class="lname"><b>${esc(o.n)}</b><span>${o.d7} in 7 gg · ${o.d14} in 14 gg · ${o.tot} WIP</span></div>
-        <div class="ltrack"><div class="lbar" style="width:${(100 * o.tot / mx).toFixed(1)}%"><i class="l7" style="width:${(100 * o.d7 / o.tot).toFixed(1)}%"></i><i class="l14" style="width:${(100 * (o.d14 - o.d7) / o.tot).toFixed(1)}%"></i></div></div></button>`; }).join("") || `<div class="empty">Nessun dato.</div>`) +
-      `</div><div class="legend"><span><i style="background:var(--chart-main)"></i>entro 7 gg</span><span><i style="background:var(--chart-2)"></i>8–14 gg</span><span><i style="background:var(--chart-3)"></i>altre WIP</span></div>`;
-    $("#w-load").querySelectorAll(".tcard").forEach(r => r.onclick = () => { W.tipo = W.tipo === r.dataset.t ? "" : r.dataset.t; $("#w-tipo").value = W.tipo; resetWipView(); draw(); });
   };
   W.redraw = draw;
   resetWipView();
   draw();
-  $("#w-tipo").onchange = e => { W.tipo = e.target.value; resetWipView(); draw(); };
-  $("#w-att").onchange = e => { W.att = e.target.value; resetWipView(); draw(); };
   $("#w-selweek").onclick = () => { visible().filter(i => i.wip && i.band === "week").forEach(i => W.sel.add(i.key)); selSave(W.sel); draw(); };
   $("#w-selcol").onclick = () => { visible().filter(i => i.wip && i.r.Attenzione).forEach(i => W.sel.add(i.key)); selSave(W.sel); draw(); };
   $("#w-selvis").onclick = () => { visible().filter(i => i.wip).forEach(i => W.sel.add(i.key)); selSave(W.sel); draw(); };

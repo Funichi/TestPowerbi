@@ -251,6 +251,27 @@ def dashboard(rows, domini, today, months):
                  and GIORNI_SOLLECITO <= (today - ins(r)).days <= GIORNI_RICLASSIFICA]
 
     att_wip = Counter(r["Attenzione"] for r in rows if stato[r["_row"]] == "WIP" and r.get("Attenzione"))
+    # torta delle attenzioni: per livello (3 rosso, 2 arancione, 1 giallo, 0 nessuna), sulle sole WIP o su tutte le offerte
+    attenzione_chart = {
+        "wip": {str(k): sum(1 for r in rows if stato[r["_row"]] == "WIP" and (r.get("Attenzione") or 0) == k) for k in (3, 2, 1, 0)},
+        "tutte": {str(k): sum(1 for r in rows if (r.get("Attenzione") or 0) == k) for k in (3, 2, 1, 0)},
+    }
+
+    # WIP per tipo e per scadenza: scadute / questa settimana / prossima settimana / oltre / senza data
+    week_end = 6 - today.weekday()
+
+    def bucket(r):
+        c = cons(r)
+        if c is None:
+            return "senza_data"
+        g_ = (c - today).days
+        return "scadute" if g_ < 0 else "settimana" if g_ <= week_end else "prossima" if g_ <= week_end + 7 else "oltre"
+    wt = defaultdict(Counter)
+    for r in rows:
+        if stato[r["_row"]] == "WIP":
+            wt[_tipo_group(r["tipo"])][bucket(r)] += 1
+    wip_tipo = [{"nome": n, **{k: wt[n].get(k, 0) for k in ("scadute", "settimana", "prossima", "oltre", "senza_data")}, "totale": sum(wt[n].values())}
+                for n in TIPI_MAIN + ["Altro"] if wt.get(n)]
 
     # ---- Punti di attenzione
     ss_count = Counter()
@@ -297,6 +318,8 @@ def dashboard(rows, domini, today, months):
         "pipeline_vertical": _group_pipeline(scope, stato, "Vertical"),
         "esito_tipo": esito,
         "top_clienti": top_clienti,
+        "attenzione_chart": attenzione_chart,
+        "wip_tipo": wip_tipo,
         "attenzioni": attenzioni,
         "soglie": {"sollecito": GIORNI_SOLLECITO, "riclassifica": GIORNI_RICLASSIFICA, "scadenza": GIORNI_SCADENZA, "min_chiuse": MIN_CHIUSE},
     }
