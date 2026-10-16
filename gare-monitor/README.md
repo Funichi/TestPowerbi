@@ -33,3 +33,9 @@ python -m pytest -q tests
 GARE_NO_BROWSER=1 python app.py      # GARE_CONFIG=percorso/config.json per un altro file di configurazione
 ```
 Il percorso del database si può cambiare con `"db_path"` in `config.json`. Per provare su Linux/Mac la scrittura usa `"writer": "openpyxl"` in `config.json` (perde pivot e validazioni estese: solo per test).
+
+## Aggiornare l'app (Windows)
+
+L'artefatto di GitHub Actions è una cartella (GareOfferte.exe + _internal), non più un singolo exe: gli exe singoli vengono spesso bloccati da Defender come falsi positivi.
+Chiudi l'app, estrai lo zip **sopra** la cartella esistente (es. `C:\Script\Monitoraggio History`) sovrascrivendo i file: `config.json`, `monitoraggio.db` e `backup` restano intatti.
+Se Defender blocca comunque il file: Sicurezza di Windows > Protezione da virus > Cronologia protezione > Consenti sul file; oppure segnalalo come falso positivo su https://www.microsoft.com/wdsi/filesubmission.

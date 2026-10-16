@@ -14,10 +14,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt pyinstaller pytest
+      - run: pip install -r requirements.txt pytest
+      # il bootloader precompilato di PyInstaller è noto a Defender (falsi positivi): lo compiliamo noi dal sorgente
+      - shell: bash
+        run: pip install --no-binary pyinstaller pyinstaller || pip install pyinstaller
       - run: python -m pytest -q tests
-      - run: pyinstaller --onefile --name GareOfferte --add-data "static;static" --hidden-import win32timezone --hidden-import pythoncom --hidden-import win32com.client app.py
+      # cartella (non --onefile): gli exe "autoestraenti" sono molto più spesso scambiati per virus
+      - run: pyinstaller --onedir --noupx --name GareOfferte --add-data "static;static" --hidden-import win32timezone --hidden-import pythoncom --hidden-import win32com.client app.py
       - uses: actions/upload-artifact@v4
         with:
           name: GareOfferte-windows
-          path: gare-monitor/dist/GareOfferte.exe
+          path: gare-monitor/dist/GareOfferte/
