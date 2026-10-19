@@ -3,7 +3,7 @@ const STATI = ["WIP", "Waiting For response", "Sospeso", "Won", "Lost", "NoBID",
 const BCLASS = {"WIP": "WIP", "Waiting For response": "Waiting", "Sospeso": "Sospeso", "Won": "Won", "Lost": "Lost", "NoBID": "NoBID", "Closed": "Closed"};
 const COLOR = {"WIP": "var(--st-wip)", "Waiting For response": "var(--st-waiting)", "Sospeso": "var(--st-sospeso)", "Won": "var(--st-won)", "Lost": "var(--st-lost)", "NoBID": "var(--st-nobid)", "Closed": "var(--st-closed)", "Altro": "var(--st-altro)"};
 const STATO_COL = {"WIP": "s-WIP", "Waiting For response": "s-Waiting", "Won": "s-Won", "Lost": "s-Lost", "NoBID": "s-NoBID", "Sospeso": "s-Sospeso", "Closed": "s-Closed", "Altro": "s-Altro"};
-const S = {cliente: null, prevView: null, tempiMesi: "all", data: null, dash: null, view: "dash", months: "12", trendSeries: "inserite", trendCum: true, pipeBy: "vertical", attScope: "wip",
+const S = {cliente: null, prevView: null, tempiMesi: "all", data: null, dash: null, view: "dash", months: "y" + new Date().getFullYear(), trendSeries: "inserite", trendCum: true, pipeBy: "vertical", attScope: "wip",
   filt: {q: "", stato: "", vertical: "", market: "", solution: "", anno: ""}, sort: {k: "Data ins.", dir: -1}, clean: null, state: null};
 const EMPTY_FILT = () => ({q: "", stato: "", vertical: "", market: "", tipo: "", solution: "", anno: "", loc: "", att: "", rows: null, rowsLabel: ""});
 
@@ -68,7 +68,7 @@ async function loadAll(force) {
   if (!S.state.exists) { openSettings(true); return; }
   try {
     S.data = await api("/api/data" + (force ? "?force=1" : ""));
-    S.dash = await api("/api/dashboard?months=" + S.months);
+    S.dash = await dashApi();
     S.state = await api("/api/state");                  // dopo il primo import automatico: data e righe da esportare aggiornate
   } catch (e) { toast(e.message, true); openSettings(true, e.message); return; }
   const name = S.state.path.split(/[\\/]/).pop(), hh = (S.state.imported_at || "").slice(11, 16);
@@ -107,7 +107,10 @@ async function exportFlow() {
     } catch (e) { $("#x-err", el).textContent = e.message; }
   };
 }
-async function reloadDash() { S.dash = await api("/api/dashboard?months=" + S.months); }
+// periodo del cruscotto: "y2026" = un anno solare (di default quello in corso), "6"/"12"/"24" = ultimi mesi, "all" = tutto
+const dashApi = () => api("/api/dashboard?" + (S.months[0] === "y" ? "anno=" + S.months.slice(1) : "months=" + S.months));
+const defaultPeriod = () => "y" + new Date().getFullYear();
+async function reloadDash() { S.dash = await dashApi(); }
 function rowByNum(n) { return S.data.rows.find(r => r._row === n); }
 
 function render() {
@@ -118,7 +121,10 @@ function render() {
 }
 
 // ------------------------------------------------------------ cruscotto
-const PERIODS = [["6", "Ultimi 6 mesi"], ["12", "Ultimi 12 mesi"], ["24", "Ultimi 24 mesi"], ["all", "Tutto lo storico"]];
+const periods = () => {
+  const cur = new Date().getFullYear(), anni = [...new Set([cur, ...S.data.rows.map(r => +(r["Data ins."] || "").slice(0, 4)).filter(Boolean)])].sort((a, b) => b - a);
+  return [...anni.map(a => ["y" + a, a === cur ? `Anno in corso (${a})` : String(a)]), ["6", "Ultimi 6 mesi"], ["12", "Ultimi 12 mesi"], ["24", "Ultimi 24 mesi"], ["all", "Tutto lo storico"]];
+};
 const MESI = ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"];
 const kpi = (n, label, extra = "", cls = "", attrs = "") => `<div class="card kpi ${cls}" ${attrs}><div class="n">${n}${extra}</div><div class="l">${label}</div></div>`;
 function ytdDelta(cur, prev, anno) {
@@ -212,7 +218,7 @@ function etaCard(e) {
 
 function renderDash(m) {
   const d = S.dash, k = d.kpi, pl = d.pillole, so = d.soglie, t = d.trend;
-  const chips = S.months !== "12" ? [{id: "period", label: PERIODS.find(x => x[0] === S.months)[1]}] : [];
+  const PERIODS = periods(), chips = S.months !== defaultPeriod() ? [{id: "period", label: (PERIODS.find(x => x[0] === S.months) || ["", S.months])[1]}] : [];
   const pb = S.pipeBy === "market" ? d.pipeline_market : d.pipeline_vertical;
   const w12 = k.winrate12;
   $("#page-sub").textContent = `Oggi ${fmt(d.oggi)} · KPI e trend sull'anno solare ${k.anno}`;
@@ -258,7 +264,7 @@ function renderDash(m) {
     ${d.attenzioni.length ? d.attenzioni.map(a => `<details><summary>${esc(a.titolo)} <span class="cnt">(${a.righe.length})</span></summary>${miniTable(a.righe, [["Seq", x => x.Seq], ["Offerta", offer], ["Stato", x => badge(x.Stato)], ["Data ins.", x => fmt(x["Data ins."])], ["", x => esc(x.dettaglio || "")]])}</details>`).join("") : `<div class="empty">Tutto in ordine.</div>`}</div>`;
   const setPeriod = async v => { S.months = v; await reloadDash(); render(); };
   $("#period").onchange = e => setPeriod(e.target.value);
-  bindChips(m, () => setPeriod("12"), () => setPeriod("12"));
+  bindChips(m, () => setPeriod(defaultPeriod()), () => setPeriod(defaultPeriod()));
   m.querySelectorAll("tr[data-row]").forEach(tr => tr.onclick = () => openForm(rowByNum(+tr.dataset.row)));
   m.querySelectorAll(".kpi[data-go]").forEach(c => c.onclick = () => goTable({stato: c.dataset.go}));
   m.querySelectorAll("[data-wipgo]").forEach(c => c.onclick = () => goWip({band: c.dataset.wipgo === "all" ? "" : c.dataset.wipgo}));

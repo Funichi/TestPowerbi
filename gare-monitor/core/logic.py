@@ -153,10 +153,10 @@ def _fascia_eta(age):
     return "0-30" if age <= 30 else "31-90" if age <= 90 else "91-180" if age <= 180 else "181+"
 
 
-def dashboard(rows, domini, today, months):
-    """months: int (ultimi N mesi) o None (tutto). Il periodo vale solo per Pipeline per Market ed Esito per tipo:
+def dashboard(rows, domini, today, months, anno=None):
+    """months: int (ultimi N mesi) o None (tutto); anno: un anno solare (ha la precedenza su months). Il periodo vale solo per Pipeline per Market ed Esito per tipo:
     KPI YTD, win rate a 12 mesi e trend usano l'anno solare / gli ultimi 12 mesi."""
-    cutoff = add_months(today, -(months - 1)) if months else None
+    cutoff = add_months(today, -(months - 1)) if months and not anno else None
 
     def ins(r):
         return to_date(r["Data ins."])
@@ -166,10 +166,13 @@ def dashboard(rows, domini, today, months):
 
     def in_period(r):
         d = ins(r)
+        if anno:                                        # un anno solare: solo le offerte aperte in quell'anno
+            return d is not None and d.year == anno
         return cutoff is None or d is None or d >= cutoff
 
     stato = {r["_row"]: (norm_stato(r["Stato"]) or r["Stato"]) for r in rows}
-    scope = [r for r in rows if in_period(r) or stato[r["_row"]] == "WIP"]
+    # le offerte WIP sono sempre "attuali": restano nel quadro, tranne quando si guarda un anno passato
+    scope = [r for r in rows if in_period(r) or (stato[r["_row"]] == "WIP" and (not anno or anno == today.year))]
 
     # ---- KPI: YTD con confronto allo stesso periodo dell'anno precedente; win rate ultimi 12 mesi
     y0, py0, pend = dt.date(today.year, 1, 1), dt.date(today.year - 1, 1, 1), _prev_year(today)

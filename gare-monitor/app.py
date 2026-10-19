@@ -189,7 +189,7 @@ def dashboard():
     m = request.args.get("months", "12")
     months = None if m == "all" else int(m)
     d = get_data()
-    return jsonify(logic.dashboard(d["rows"], d["domini"], dt.date.today(), months))
+    return jsonify(logic.dashboard(d["rows"], d["domini"], dt.date.today(), months, request.args.get("anno", type=int)))
 
 
 # ------------------------------------------------------------------ clienti, tempi

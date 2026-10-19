@@ -335,3 +335,13 @@ def test_scheda_cliente_filtrata_per_anno(client):
     a25 = c.get("/api/cliente", query_string={"nome": "Enel", "anno": 2025}).get_json()
     assert a25["kpi"]["totale"] == 1 and a25["kpi"]["lost"] == 1 and a25["kpi"]["won"] == 0 and a25["anni_disponibili"] == [2025, 2026]
     assert c.get("/api/cliente", query_string={"nome": "Terna", "anno": 2025}).get_json()["kpi"]["totale"] == 0      # nessuna offerta in quell'anno: scheda vuota, non errore
+
+
+def test_cruscotto_per_anno_solare(client):
+    c, x, _ = client
+    d26 = c.get("/api/dashboard", query_string={"anno": 2026}).get_json()
+    d25 = c.get("/api/dashboard", query_string={"anno": 2025}).get_json()
+    tot = lambda d: sum(g["totale"] for g in d["esito_tipo"])
+    assert tot(d26) == 4 and tot(d25) == 1                       # Enel (2025) solo nel 2025; la riga senza Data ins. non entra in un anno
+    assert [t["nome"] for t in d25["top_clienti"]] == ["Enel"]
+    assert d25["kpi"]["wip"] == 1                                # i KPI "in corso" restano quelli di oggi
