@@ -463,3 +463,5 @@ button.apill{font:inherit;font-weight:400}
 @media(max-width:768px){.tm{grid-template-columns:100px minmax(0,1fr)}.tv2{grid-column:1/-1;margin-bottom:6px}}
 .vopt input{width:auto;flex:none;margin:0}.vopt span{white-space:nowrap}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.sect-h{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:28px 0 12px}.sect{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em}
+details.card>summary{cursor:pointer}

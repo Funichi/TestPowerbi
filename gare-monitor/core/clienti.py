@@ -61,6 +61,11 @@ def scheda(rows, nome, anno=None):
     if not key or not tutte_mie:
         raise ValueError("Cliente non trovato")
     anni_disponibili = sorted({a for a in map(_anno, tutte_mie) if a})
+    per_anno = defaultdict(list)                       # riepilogo pluriennale: sempre su tutte le offerte del cliente
+    for r in tutte_mie:
+        per_anno[_anno(r)].append(r)
+    riepilogo = [{"anno": a, **_esiti(rs), "tempi": _tempi([g for g in map(giorni_consegna, rs) if g is not None])}
+                 for a, rs in sorted(per_anno.items(), key=lambda t: (t[0] is None, -(t[0] or 0)))]
     if anno:
         rows = [r for r in rows if _anno(r) == anno]
     mie = [r for r in rows if client_key(r["Cliente"]) == key]
@@ -80,7 +85,7 @@ def scheda(rows, nome, anno=None):
     cron = sorted(mie, key=lambda r: (to_date(r["Data ins."]) or to_date("1900-01-01")), reverse=True)
     return {
         "nome": _piu_frequente([r["Cliente"] for r in tutte_mie]),
-        "anno": anno, "anni_disponibili": anni_disponibili,
+        "anno": anno, "anni_disponibili": anni_disponibili, "riepilogo": riepilogo,
         "vertical": _piu_frequente([r["Vertical"] for r in tutte_mie]),
         "market": _piu_frequente([r["Market"] for r in tutte_mie if r["Market"] != NOIND]),
         "ss": sorted({p[0] for p in (_split_ss(r["SS"]) for r in tutte_mie) if p}),
