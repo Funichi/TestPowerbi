@@ -942,6 +942,8 @@ function openSettings(first, msg) {
     try { await api("/api/password", {method: "POST", body: {...(off ? {password: ""} : $("#s-pw", el).value ? {password: $("#s-pw", el).value} : {}), listen_all: $("#s-lan", el).checked}}); S.state = await api("/api/state"); toast(off ? "Password tolta: accesso esterno chiuso" : "Impostazioni di accesso salvate"); closeModal(); }
     catch (e) { $("#s-err", el).textContent = e.message; }
   };
+  // la casella "rete locale" si salva subito, senza dover premere altro
+  $("#s-lan", el).onchange = async e => { try { await api("/api/password", {method: "POST", body: {listen_all: e.target.checked}}); toast("Salvato: riavvia l'app per applicarlo"); } catch (err) { $("#s-err", el).textContent = err.message; } };
   $("#s-pw-save", el).onclick = () => savePw(false);
   const off = $("#s-pw-off", el); if (off) off.onclick = () => savePw(true);
   $("#s-save", el).onclick = async () => {
