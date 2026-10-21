@@ -17,7 +17,7 @@ import time
 from flask import Flask, jsonify, redirect, request, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from core import clienti, logic, metrics
+from core import clienti, logic, metrics, updater
 from core.db import Store
 from core.reader import ATT_LABELS, DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
 from core.writer import WriteError, get_writer
@@ -114,7 +114,7 @@ def on_error(e):
 # Dal PC stesso (127.0.0.1, senza intermediari) l'app si apre senza password. Qualunque altra richiesta (rete locale, tunnel internet)
 # richiede la password impostata dal PC; senza password l'accesso esterno è rifiutato.
 
-LOCAL_ONLY = {"set_config", "browse", "cliente_cartella", "set_password"}       # operazioni sul PC che ospita l'app
+LOCAL_ONLY = {"set_config", "browse", "cliente_cartella", "set_password", "update_check", "update_apply"}       # operazioni sul PC che ospita l'app
 _fails = {}                                                                       # ip -> (tentativi, blocco fino a)
 
 
@@ -132,11 +132,13 @@ def _secret_key():
     return cfg["secret_key"]
 
 
+app.secret_key = _secret_key()          # la sessione si apre PRIMA di before_request: la chiave deve esistere già dal primo accesso
+
+
 @app.before_request
 def guard():
     if request.path.startswith("/static/") or request.path == "/favicon.ico" or is_local():
         return None
-    app.secret_key = _secret_key()
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=dt.timedelta(days=30),
                       SESSION_COOKIE_SECURE=request.headers.get("X-Forwarded-Proto") == "https")
     pw = load_config().get("password_hash")
@@ -200,9 +202,46 @@ def set_password():
         else:
             cfg.pop("password_hash", None)
         cfg["secret_key"] = secrets.token_hex(32)          # chiude le sessioni già aperte
+        app.secret_key = cfg["secret_key"]
     if "listen_all" in b:
         cfg["listen_all"] = bool(b["listen_all"])
     save_config(cfg)
+    return jsonify({"ok": True})
+
+
+# ------------------------------------------------------------------ aggiornamento dell'app da GitHub (Release privata)
+
+@app.get("/api/update/check")
+def update_check():
+    cfg = load_config()
+    try:
+        lat = updater.latest(cfg.get("github_repo") or updater.DEFAULT_REPO, cfg.get("github_token"))
+    except updater.UpdateError as e:
+        return jsonify({"error": str(e)}), 400
+    cur = updater.current_version(BASE_DIR)
+    return jsonify({"current": cur, "latest": lat["version"], "name": lat["name"], "size": lat["size"],
+                    "newer": bool(lat["version"] and (cur is None or lat["version"] > cur))})
+
+
+@app.post("/api/update/apply")
+def update_apply():
+    """Scarica l'ultima versione e lancia lo script che chiude l'app, sostituisce i file e la riavvia."""
+    if not (FROZEN and os.name == "nt"):
+        raise ValueError("L'aggiornamento automatico funziona solo con l'app installata (GareOfferte.exe su Windows).")
+    cfg = load_config()
+    try:
+        lat = updater.latest(cfg.get("github_repo") or updater.DEFAULT_REPO, cfg.get("github_token"))
+        zip_path = updater.download(lat["asset_url"], cfg.get("github_token"), os.path.join(BASE_DIR, "update", "app.zip"))
+    except updater.UpdateError as e:
+        return jsonify({"error": str(e)}), 400
+    import shutil
+    import subprocess
+    script = os.path.join(os.environ.get("TEMP", BASE_DIR), "gare_aggiorna.ps1")      # copia: lo script originale viene sostituito durante l'aggiornamento
+    shutil.copyfile(os.path.join(BASE_DIR, "Aggiorna.ps1"), script)
+    subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script,
+                      "-AppDir", BASE_DIR, "-Zip", zip_path, "-WaitPid", str(os.getpid())],
+                     creationflags=0x00000008 | 0x00000200, close_fds=True)               # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    threading.Timer(1.0, lambda: os._exit(0)).start()
     return jsonify({"ok": True})
 
 
@@ -240,7 +279,8 @@ def state():
         except Exception:                              # file in copia o bloccato: riprova alla prossima richiesta
             pass
     return jsonify({"local": is_local(), "password_set": bool(cfg.get("password_hash")), "listen_all": bool(cfg.get("listen_all")),
-                    "excel_newer": newer, "auto_imported": auto,"path": cfg.get("excel_path") or DEFAULT_EXCEL_PATH, "excel_ok": bool(excel_path()), "db_path": st.path,
+                    "excel_newer": newer, "auto_imported": auto, "version": updater.current_version(BASE_DIR), "update_token_set": bool(cfg.get("github_token")),
+                    "github_repo": cfg.get("github_repo") or updater.DEFAULT_REPO, "can_update": FROZEN and os.name == "nt","path": cfg.get("excel_path") or DEFAULT_EXCEL_PATH, "excel_ok": bool(excel_path()), "db_path": st.path,
                     "exists": bool(excel_path()) or st.has_data(), "imported": st.has_data(), "imported_at": st.meta("imported_at"),
                     "pending": st.counts(), "oggi": dt.date.today().isoformat(), "clienti_dir": clienti_dir()})
 
@@ -259,6 +299,9 @@ def set_config():
         if not os.path.isdir(os.path.dirname(os.path.abspath(d))):
             raise FileNotFoundError(f"La cartella del database non esiste: {os.path.dirname(d)}")
         cfg["db_path"] = d
+    for k in ("github_repo", "github_token"):
+        if k in b and (b[k] or "").strip():                   # il token non si vede mai nell'interfaccia: un campo vuoto lo lascia com'è
+            cfg[k] = b[k].strip()
     if "clienti_dir" in b:
         d = (b["clienti_dir"] or "").strip().strip('"')
         if d and not os.path.isdir(d):

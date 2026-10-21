@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     paths: ["gare-monitor/**", ".github/workflows/build-gare-monitor.yml"]
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -21,8 +23,17 @@ jobs:
       - run: python -m pytest -q tests
       # cartella (non --onefile): gli exe "autoestraenti" sono molto più spesso scambiati per virus
       - run: pyinstaller --onedir --noupx --name GareOfferte --add-data "static;static" --hidden-import win32timezone --hidden-import pythoncom --hidden-import win32com.client app.py
-      - run: copy Avvio-automatico.bat, Disattiva-avvio-automatico.bat dist\GareOfferte\
+      - run: copy Avvio-automatico.bat, Disattiva-avvio-automatico.bat, Aggiorna.bat, Aggiorna.ps1 dist\GareOfferte\
+      - run: Set-Content -Path dist\GareOfferte\version.txt -Value "${{ github.run_number }}" -NoNewline
+      - run: Compress-Archive -Path dist\GareOfferte\* -DestinationPath GareOfferte-${{ github.run_number }}.zip
       - uses: actions/upload-artifact@v4
         with:
           name: GareOfferte-windows
           path: gare-monitor/dist/GareOfferte/
+      # Release "latest" (privata come il repository): l'app la legge con un token di sola lettura per aggiornarsi
+      - shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest "GareOfferte-${{ github.run_number }}.zip" --title "build ${{ github.run_number }}" --notes "Build automatica ${{ github.sha }}" --target "${{ github.sha }}"

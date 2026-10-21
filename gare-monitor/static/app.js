@@ -90,7 +90,7 @@ async function loadAll(force) {
   updateExportBtn();
   $("#file-dot").classList.add("ok");
   applyState();
-  render();
+  if (!S.updChecked) { S.updChecked = true; quietUpdateCheck(); }
 }
 // stato del file e funzioni disponibili solo dal PC su cui gira l'app
 function applyState() {
@@ -108,6 +108,22 @@ setInterval(async () => {
     if (st.auto_imported || (st.imported_at && st.imported_at !== prev)) { await loadAll(true); toast("Excel aggiornato: dati riletti"); }
   } catch (e) {}
 }, 60000);
+async function quietUpdateCheck() {
+  const st = S.state || {};
+  if (st.local === false || !st.can_update || !st.update_token_set) return;
+  try { const u = await api("/api/update/check"); if (u.newer) toastAction(`C'è una nuova versione dell'app (build ${u.latest}).`, "Aggiorna", () => openSettings(false)); } catch (e) {}
+}
+async function runUpdate() {
+  $("#busy-t").textContent = "Aggiornamento in corso: l'app si chiude e si riavvia da sola…"; $("#busy").hidden = false;
+  try { await api("/api/update/apply", {method: "POST"}); }
+  catch (e) { $("#busy").hidden = true; toast(e.message, true); return; }
+  const t0 = Date.now();
+  await new Promise(r => setTimeout(r, 6000));
+  const iv = setInterval(async () => {
+    try { const st = await api("/api/state"); if (st.imported !== undefined) { clearInterval(iv); location.reload(); } }
+    catch (e) { if (Date.now() - t0 > 120000) { clearInterval(iv); $("#busy").hidden = true; toast("L'app non è ripartita: apri GareOfferte.exe dalla cartella (vedi aggiornamento.log).", true); } }
+  }, 2500);
+}
 function updateExportBtn() {
   const p = S.state.pending || {new: 0, mod: 0}, n = p.new + p.mod, b = $("#exp-n");
   b.hidden = !n; b.textContent = n; $("#btn-export").classList.toggle("has", n > 0);
@@ -1078,6 +1094,11 @@ function openSettings(first, msg) {
     <p class="hint" style="margin-top:0">Dal PC l'app si apre sempre senza password. Per aprirla da un altro dispositivo (rete di casa o internet tramite un tunnel come Tailscale Funnel) serve una password: senza, l'accesso esterno resta chiuso. Vedi il README.</p>
     <label for="s-pw">${st.password_set ? "Password impostata — scrivine una nuova per cambiarla" : "Password (almeno 8 caratteri)"}</label><div class="row"><input id="s-pw" type="password" style="flex:1" autocomplete="new-password"><button id="s-pw-save">Salva password</button>${st.password_set ? '<button id="s-pw-off">Togli password</button>' : ""}</div>
     <label class="ms-i" style="margin-top:8px"><input type="checkbox" id="s-lan" ${st.listen_all ? "checked" : ""}> Consenti connessioni dalla rete locale (si applica al prossimo avvio dell'app)</label>
+    <h3 class="mh" style="margin-top:18px">Aggiornamenti dell'app</h3>
+    <p class="hint" style="margin-top:0">Versione installata: <b>${st.version ? "build " + st.version : "non indicata (avvio da sorgente)"}</b>. L'app si aggiorna dall'ultima versione pubblicata su GitHub; il repository è privato, quindi serve un <b>token di sola lettura</b> (vedi README).</p>
+    <label for="s-repo">Repository GitHub (utente/nome)</label><input id="s-repo" value="${esc(st.github_repo || "")}">
+    <label for="s-tok" style="margin-top:8px">Token GitHub</label><input id="s-tok" type="password" autocomplete="off" placeholder="${st.update_token_set ? "token salvato — scrivine uno nuovo solo per cambiarlo" : "incolla qui il token"}">
+    <div class="row" style="margin-top:8px"><button id="s-upd-save">Salva</button><button id="s-upd-chk">Controlla aggiornamenti</button><button id="s-upd-go" class="primary" hidden>Aggiorna ora</button></div><div class="hint" id="s-upd-msg"></div>
     <div class="hint">${st.imported_at ? `Ultimo import: ${esc(st.imported_at.replace("T", " "))}` : "Nessun import ancora eseguito."}${st.pending && (st.pending.new + st.pending.mod) ? ` · <b>${st.pending.new + st.pending.mod} modifiche non esportate</b>` : ""}</div>
     <div class="err" id="s-err">${esc(msg || "")}</div>
     <div class="foot">${first ? "" : '<button id="s-cancel">Chiudi</button>'}<button id="s-save" class="primary">${ico("database")}Salva e importa dall'Excel</button></div>
@@ -1085,6 +1106,16 @@ function openSettings(first, msg) {
   modal.locked = !!first;
   const c = $("#s-cancel", el); if (c) c.onclick = closeModal;
   $("#s-browse", el).onclick = async () => { try { const r = await api("/api/browse", {method: "POST"}); if (r.path) $("#s-path", el).value = r.path; } catch (e) { $("#s-err", el).textContent = e.message; } };
+  const um = t => $("#s-upd-msg", el).textContent = t;
+  const saveUpd = async () => { await api("/api/config", {method: "POST", body: {github_repo: $("#s-repo", el).value, github_token: $("#s-tok", el).value}}); $("#s-tok", el).value = ""; S.state = await api("/api/state"); };
+  $("#s-upd-save", el).onclick = async () => { try { await saveUpd(); um("Salvato."); } catch (e) { um(e.message); } };
+  $("#s-upd-chk", el).onclick = async () => {
+    try { await saveUpd(); um("Controllo…"); const u = await api("/api/update/check");
+      if (u.newer) { um(`Disponibile la build ${u.latest} (installata: ${u.current ?? "non indicata"}).${S.state.can_update ? "" : " L'aggiornamento automatico funziona solo con GareOfferte.exe su Windows."}`); if (S.state.can_update) $("#s-upd-go", el).hidden = false; }
+      else um(`Sei già alla versione più recente (build ${u.current ?? u.latest}).`);
+    } catch (e) { um(e.message); }
+  };
+  $("#s-upd-go", el).onclick = () => { if (confirm("L'app si chiude, si aggiorna e si riavvia da sola (config, database e backup restano). Continuare?")) { closeModal(); runUpdate(); } };
   const savePw = async off => {
     try { await api("/api/password", {method: "POST", body: {...(off ? {password: ""} : $("#s-pw", el).value ? {password: $("#s-pw", el).value} : {}), listen_all: $("#s-lan", el).checked}}); S.state = await api("/api/state"); toast(off ? "Password tolta: accesso esterno chiuso" : "Impostazioni di accesso salvate"); closeModal(); }
     catch (e) { $("#s-err", el).textContent = e.message; }

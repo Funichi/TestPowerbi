@@ -440,3 +440,56 @@ def test_cliente_numeri_verificati_a_mano(client):
     assert s["market"] == "Finance" and s["mercato"]["nome"] == "Finance"
     y = c.get("/api/cliente", query_string={"nome": "hera", "anno": 2025}).get_json()
     assert y["kpi"]["totale"] == 0 and y["kpi"]["win"]["rate"] is None and y["alltime"]["totale"] == 10
+
+
+def test_aggiornamento_da_release_privata(client, tmp_path, monkeypatch):
+    import http.server
+    import threading
+    seen = {"blob_auth": "unset"}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+
+        def do_GET(self):
+            base = f"http://127.0.0.1:{self.server.server_port}"
+            if self.path == "/repos/o/r/releases/tags/latest":
+                if self.headers.get("Authorization") != "Bearer ghp_secret123":
+                    self.send_response(401); self.end_headers(); return
+                body = json.dumps({"name": "build 12", "assets": [{"name": "GareOfferte-12.zip", "url": base + "/repos/o/r/releases/assets/1", "size": 5000}]}).encode()
+                self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
+            elif self.path == "/repos/o/r/releases/assets/1":
+                assert self.headers.get("Accept") == "application/octet-stream"
+                self.send_response(302); self.send_header("Location", base + "/blob/x"); self.end_headers()
+            elif self.path == "/blob/x":
+                seen["blob_auth"] = self.headers.get("Authorization")                 # il token NON deve arrivare all'host del file
+                self.send_response(200); self.end_headers(); self.wfile.write(b"z" * 5000)
+            else:
+                self.send_response(404); self.end_headers()
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    from core import updater
+    monkeypatch.setattr(updater, "API", f"http://127.0.0.1:{srv.server_port}")
+    lat = updater.latest("o/r", "ghp_secret123")
+    assert lat["version"] == 12 and lat["size"] == 5000
+    dest = updater.download(lat["asset_url"], "ghp_secret123", str(tmp_path / "u" / "app.zip"))
+    assert os.path.getsize(dest) == 5000 and seen["blob_auth"] is None
+    with pytest.raises(updater.UpdateError, match="token"):
+        updater.latest("o/r", "sbagliato")
+    with pytest.raises(updater.UpdateError, match="token"):
+        updater.latest("o/r", "")
+    # endpoint: token e repository si salvano solo dal PC locale e non tornano mai al browser
+    c, x, _ = client
+    assert c.post("/api/config", json={"github_repo": "o/r", "github_token": "ghp_secret123"}).status_code == 200
+    st = c.get("/api/state").get_json()
+    assert st["update_token_set"] is True and "ghp_secret123" not in json.dumps(st) and st["github_repo"] == "o/r"
+    chk = c.get("/api/update/check").get_json()
+    assert chk["latest"] == 12 and chk["newer"] is True                                  # nessun version.txt (avvio da sorgente): sempre "più nuova"
+    assert c.post("/api/update/apply").status_code == 400                                  # solo con l'exe installato su Windows
+    remote = {"environ_overrides": {"REMOTE_ADDR": "192.168.1.50"}}
+    c.post("/api/password", json={"password": "una-password-lunga"})
+    c.post("/login", data={"password": "una-password-lunga"}, **remote)
+    assert c.get("/api/update/check", **remote).status_code == 403
+    assert c.post("/api/update/apply", **remote).status_code == 403
+    assert updater.current_version(str(tmp_path)) is None
+    (tmp_path / "version.txt").write_text("7")
+    assert updater.current_version(str(tmp_path)) == 7
