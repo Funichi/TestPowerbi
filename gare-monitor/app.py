@@ -238,6 +238,8 @@ def update_apply():
     import subprocess
     script = os.path.join(os.environ.get("TEMP", BASE_DIR), "gare_aggiorna.ps1")      # copia: lo script originale viene sostituito durante l'aggiornamento
     shutil.copyfile(os.path.join(BASE_DIR, "Aggiorna.ps1"), script)
+    with open(os.path.join(BASE_DIR, "aggiornamento.log"), "a", encoding="utf-8") as lg:
+        lg.write(f"{dt.datetime.now().isoformat(timespec='seconds')} L'app lancia l'aggiornamento (build {updater.current_version(BASE_DIR)} -> {lat['version']}).\n")
     subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script,
                       "-AppDir", BASE_DIR, "-Zip", zip_path, "-WaitPid", str(os.getpid())],
                      creationflags=0x00000008 | 0x00000200, close_fds=True)               # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
