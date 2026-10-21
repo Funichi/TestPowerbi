@@ -24,7 +24,7 @@ Alternativa senza exe: con Python installato, doppio click su `Avvia.bat`.
 - Scrittura nell'Excel **tramite Excel stesso** (COM): tabella, formule, pivot e menu a tendina restano intatti. Se il file è già aperto in Excel viene aggiornato quello; altrimenti Excel lo apre in background.
 - **Attenzione**: il colore della cella del nome cliente nell'Excel (giallo = rilevante, arancione = da attenzionare, rosso = urgente) è un livello 1-3 nell'app, modificabile da Consegne WIP, Tabella e form. All'esportazione la cella viene colorata (o ripulita) come a mano.
 - SS = prefisso del cliente (3 lettere, o quello già usato) + progressivo; Commessa da Domini (Vertical + anno della Data consegna, altrimenti Data ins.). Entrambi modificabili.
-- Stati: WIP = in corso; Waiting For response = consegnato, si attende; Sospeso = nessuna risposta; Closed è uno stato a sé (escluso dal win rate); Won/Lost/NoBID = chiusi. Stato e Market vengono normalizzati in lettura (maiuscole, spazi; Market vuoto = "(non indicato)").
+- Stati: WIP = in corso; Waiting For response = consegnato, si attende; Sospeso = gara sospesa o non uscita lato cliente; NoBID = decisione nostra di non partecipare; Won/Lost = esito (lo stato Closed non esiste più). Stato e Market vengono normalizzati in lettura (maiuscole, spazi; Market vuoto = "(non indicato)").
 
 ## Sviluppo / test
 ```
@@ -55,3 +55,8 @@ Attenzione: "Esporta in Excel" scrive nella copia locale. Quelle righe vanno poi
 Usa sempre una password lunga; la rete aziendale potrebbe bloccare questi indirizzi.
 
 **Avvio automatico.** `Avvio-automatico.bat` (nella cartella dell'app) fa partire l'app all'accensione del PC, senza aprire il browser; `Disattiva-avvio-automatico.bat` lo toglie.
+
+## Metriche (core/metrics.py)
+
+Win rate = Won / (Won + Lost) · Bid rate = (offerte non NoBID) / (tutte escluse le Sospeso) · NoBID rate = NoBID / (tutte escluse le Sospeso). Ogni percentuale è mostrata con la numerosità (n); sotto n=5 è un "campione ridotto".
+Colonne facoltative lette se presenti nell'Excel (intestazioni): Valore stimato (o Base d'asta), Valore offerto, Valore aggiudicato, Motivo esito, Motivo NoBID, Aggiudicatario, Gara padre (Seq dell'Accordo Quadro), Pwin. La colonna tecnica "Valore" già presente nel file non viene usata.

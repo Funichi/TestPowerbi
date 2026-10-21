@@ -1,4 +1,5 @@
 """Scheda cliente, tempi medi di consegna, varianti dei nomi cliente e cartelle dei clienti."""
+import datetime as dt
 import difflib
 import os
 import re
@@ -6,11 +7,12 @@ import statistics
 import unicodedata
 from collections import Counter, defaultdict
 
-from .logic import _split_ss, _tipo_group, add_months, client_key, split_solutions, TIPI_MAIN
+from . import metrics
+from .logic import _tipo_group, add_months, client_key, split_solutions, TIPI_MAIN
 from .normalize import NOIND, norm_stato
 from .reader import clean_text, to_date
 
-# per i tempi di consegna contano solo le offerte già consegnate: una WIP ha solo una scadenza prevista, una NoBID non è stata consegnata
+# per la pagina "Tempi di consegna" contano solo le offerte già consegnate: una WIP ha solo una scadenza prevista, una NoBID non è stata consegnata
 ESCLUSI_TEMPI = {"WIP", "NoBID"}
 FORME_SOCIETARIE = {"spa", "srl", "sas", "snc", "scarl", "scpa", "srls", "sapa", "ss"}
 
@@ -35,11 +37,23 @@ def _tempi(giorni):
     return {"n": len(giorni), "media": round(sum(giorni) / len(giorni), 1), "mediana": round(statistics.median(giorni), 1)}
 
 
-def _esiti(rows):
-    c = Counter(_stato(r) for r in rows)
-    w, l = c["Won"], c["Lost"]
-    return {"totale": len(rows), "won": w, "lost": l, "wip": c["WIP"], "waiting": c["Waiting For response"],
-            "altri": len(rows) - w - l - c["WIP"] - c["Waiting For response"], "chiuse": w + l, "rate": (w / (w + l)) if w + l else None}
+def preavviso(r):
+    """Giorni tra Data ins. e Data consegna: il tempo concesso dal cliente per rispondere. None se manca una data o è incoerente."""
+    i, c = to_date(r["Data ins."]), to_date(r["Data consegna"])
+    return (c - i).days if i and c and c >= i else None
+
+
+def _preavviso(rows):
+    return _tempi([g for g in map(preavviso, rows) if g is not None])
+
+
+def _kpi(rows):
+    """Metriche (definite in metrics.py) + preavviso per un insieme di offerte."""
+    k = metrics.summary(rows)
+    k["wip"] = metrics.count(rows)["WIP"]
+    k["waiting"] = metrics.count(rows)["Waiting For response"]
+    k["preavviso"] = _preavviso(rows)
+    return k
 
 
 def _piu_frequente(valori):
@@ -54,51 +68,76 @@ def _anno(r):
     return d.year if d else None
 
 
-def scheda(rows, nome, anno=None):
-    """Scheda di un cliente. anno: considera solo le offerte aperte in quell'anno (clienti e medie generali comprese)."""
+def _opzionali(rows):
+    return sorted({k for r in rows for k, v in (r.get("_opt") or {}).items() if v not in (None, "")})
+
+
+def scheda(rows, nome, anno=None, oggi=None):
+    """Scheda di un cliente. anno: i numeri del periodo (e i benchmark) riguardano solo le offerte aperte in quell'anno;
+    'Da presidiare' e il riepilogo per anno guardano sempre tutte le offerte del cliente."""
+    oggi = oggi or dt.date.today()
     key = client_key(nome)
     tutte_mie = [r for r in rows if client_key(r["Cliente"]) == key]
     if not key or not tutte_mie:
         raise ValueError("Cliente non trovato")
+    opzionali = _opzionali(rows)
     anni_disponibili = sorted({a for a in map(_anno, tutte_mie) if a})
-    per_anno = defaultdict(list)                       # riepilogo pluriennale: sempre su tutte le offerte del cliente
+    per_anno = defaultdict(list)
     for r in tutte_mie:
         per_anno[_anno(r)].append(r)
-    riepilogo = [{"anno": a, **_esiti(rs), "tempi": _tempi([g for g in map(giorni_consegna, rs) if g is not None])}
-                 for a, rs in sorted(per_anno.items(), key=lambda t: (t[0] is None, -(t[0] or 0)))]
-    if anno:
-        rows = [r for r in rows if _anno(r) == anno]
-    mie = [r for r in rows if client_key(r["Cliente"]) == key]
-    gen = _esiti(rows)
-    n_clienti = len({client_key(r["Cliente"]) for r in rows if client_key(r["Cliente"])})
-    g_mie = [g for g in (giorni_consegna(r) for r in mie) if g is not None]
-    g_tutte = [g for g in (giorni_consegna(r) for r in rows) if g is not None]
-    k = _esiti(mie)
-    k.update({"tempi": _tempi(g_mie)})
-    datate = [r for r in mie if to_date(r["Data ins."])]
-    datate.sort(key=lambda r: to_date(r["Data ins."]))
+    riepilogo = [{"anno": a, **_kpi(rs)} for a, rs in sorted(per_anno.items(), key=lambda t: (t[0] is None, -(t[0] or 0)))]
+    universo = [r for r in rows if _anno(r) == anno] if anno else rows
+    mie = [r for r in universo if client_key(r["Cliente"]) == key]
+    mkt = _piu_frequente([r["Market"] for r in tutte_mie if r["Market"] != NOIND])
+    n_clienti = len({client_key(r["Cliente"]) for r in universo if client_key(r["Cliente"])})
+    del_mkt = [r for r in universo if mkt and r["Market"] == mkt]
+    datate = sorted((r for r in tutte_mie if to_date(r["Data ins."])), key=lambda r: to_date(r["Data ins."]))
     ultima = datate[-1] if datate else None
-    anni = defaultdict(list)
+
+    def bench(rs):
+        k = _kpi(rs)
+        return {k_: k[k_] for k_ in ("win", "bid", "nobid_rate", "preavviso", "totale")}
+
+    presidiare = []
+    for r in tutte_mie:
+        st = metrics.stato_of(r)
+        if st not in metrics.APERTE:
+            continue
+        c = to_date(r["Data consegna"])
+        gg = (c - oggi).days if c else None
+        presidiare.append({"_row": r["_row"], "Oggetto": r["Oggetto"], "tipo": r["tipo"], "Stato": st, "referente": r["Solution D&A"],
+                           "Data consegna": r["Data consegna"], "giorni": gg,
+                           "urgente": bool(st == "WIP" and gg is not None and gg <= 3), "non_assegnata": bool(st == "WIP" and metrics.non_assegnata(r))})
+    presidiare.sort(key=lambda x: (x["giorni"] is None, x["giorni"] if x["giorni"] is not None else 0))
+
+    team = defaultdict(list)
     for r in mie:
-        d = to_date(r["Data ins."])
-        anni[d.year if d else None].append(r)
+        for ref in metrics.referenti(r["Solution D&A"]) or [None]:
+            team[ref].append(r)
+    team_out = []
+    for ref, rs in team.items():
+        c = metrics.count(rs)
+        team_out.append({"nome": ref, "totale": len(rs), "aperte": c["WIP"] + c["Waiting For response"], "wip": c["WIP"], "won": c["Won"],
+                         "lost": c["Lost"], "nobid": c["NoBID"], "non_assegnato": ref is None})
+    team_out.sort(key=lambda t: (t["non_assegnato"], -t["totale"], (t["nome"] or "").casefold()))
+
     cron = sorted(mie, key=lambda r: (to_date(r["Data ins."]) or to_date("1900-01-01")), reverse=True)
     return {
         "nome": _piu_frequente([r["Cliente"] for r in tutte_mie]),
-        "anno": anno, "anni_disponibili": anni_disponibili, "riepilogo": riepilogo,
-        "vertical": _piu_frequente([r["Vertical"] for r in tutte_mie]),
-        "market": _piu_frequente([r["Market"] for r in tutte_mie if r["Market"] != NOIND]),
-        "ss": sorted({p[0] for p in (_split_ss(r["SS"]) for r in tutte_mie) if p}),
-        "kpi": k,
-        "media": {"rate": gen["rate"], "chiuse": gen["chiuse"], "tempi": _tempi(g_tutte),
-                  "offerte_per_cliente": round(gen["totale"] / n_clienti, 1) if n_clienti else None},
-        "ultima": {"data": ultima["Data ins."], "stato": _stato(ultima), "oggetto": ultima["Oggetto"]} if ultima else None,
+        "anno": anno, "anni_disponibili": anni_disponibili, "riepilogo": riepilogo, "opzionali": opzionali,
+        "vertical": _piu_frequente([r["Vertical"] for r in tutte_mie]), "market": mkt,
+        "kpi": _kpi(mie), "alltime": _kpi(tutte_mie),
+        "mercato": {"nome": mkt, "n_clienti": len({client_key(r["Cliente"]) for r in del_mkt}), **bench(del_mkt)} if mkt else None,
+        "generale": {**bench(universo), "offerte_per_cliente": round(len(universo) / n_clienti, 1) if n_clienti else None},
+        "aperte": sum(1 for r in tutte_mie if metrics.stato_of(r) in metrics.APERTE),
+        "ultima": {"data": ultima["Data ins."], "stato": metrics.stato_of(ultima), "oggetto": ultima["Oggetto"],
+                   "giorni_fa": (oggi - to_date(ultima["Data ins."])).days} if ultima else None,
         "prima": datate[0]["Data ins."] if datate else None,
-        "anni": [{"anno": a, **{x: v for x, v in _esiti(rs).items() if x in ("totale", "won", "lost", "wip", "waiting", "altri")}}
-                 for a, rs in sorted(anni.items(), key=lambda t: (t[0] is None, t[0] or 0))],
-        "cronologia": [{"_row": r["_row"], "Seq": r["Seq"], "SS": r["SS"], "Oggetto": r["Oggetto"], "tipo": r["tipo"], "Stato": _stato(r),
-                        "Solution D&A": r["Solution D&A"], "Data ins.": r["Data ins."], "Data consegna": r["Data consegna"],
-                        "giorni": giorni_consegna(r), "Attenzione": r.get("Attenzione") or 0, "_state": r.get("_state")} for r in cron],
+        "presidiare": presidiare, "team": team_out, "valore": metrics.valore_stats(mie) if "valore" in opzionali or "valore_offerto" in opzionali else None,
+        "cronologia": [{"_row": r["_row"], "Seq": r["Seq"], "Oggetto": r["Oggetto"], "tipo": r["tipo"], "Stato": metrics.stato_of(r),
+                        "referente": r["Solution D&A"], "non_assegnata": metrics.non_assegnata(r), "Data ins.": r["Data ins."],
+                        "Data consegna": r["Data consegna"], "preavviso": preavviso(r), "Attenzione": r.get("Attenzione") or 0,
+                        "_state": r.get("_state"), "opt": r.get("_opt") or {}} for r in cron],
     }
 
 

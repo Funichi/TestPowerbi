@@ -4,6 +4,7 @@ import re
 from collections import Counter, defaultdict
 
 from .normalize import NOIND, STATI, STATO_MAP, norm_stato, normalization_summary  # noqa: F401  (ri-esportati)
+from . import metrics
 from .reader import DATE_FIELDS, clean_text, to_date
 
 GIORNI_SOLLECITO = 30      # Waiting For response da più di N giorni dalla Data ins. (pillola "da sollecitare")
@@ -114,14 +115,14 @@ def clean_preview(rows, domini):
 # ---------------------------------------------------------------- cruscotto
 
 def _group_pipeline(rows, stato, key):
-    """Offerte per gruppo (Market/Vertical) e stato: WIP, Waiting, Won, Lost; Sospeso/NoBID/altro in 'Altro'."""
+    """Offerte per gruppo (Market/Vertical) e stato (ogni stato ha la sua colonna: NoBID e Sospeso sono separati)."""
     g = defaultdict(Counter)
     for r in rows:
         nome = clean_text(r[key]) or "(non indicato)"
         st = stato[r["_row"]]
-        g[nome][st if st in ("WIP", "Waiting For response", "Won", "Lost") else "Altro"] += 1
+        g[nome][st] += 1
     out = [{"nome": n, "WIP": c["WIP"], "Waiting For response": c["Waiting For response"], "Won": c["Won"], "Lost": c["Lost"],
-            "Altro": c["Altro"], "totale": sum(c.values())} for n, c in g.items()]
+            "NoBID": c["NoBID"], "Sospeso": c["Sospeso"], "totale": sum(c.values())} for n, c in g.items()]
     out.sort(key=lambda x: (-x["totale"], x["nome"].casefold()))
     return out
 
@@ -181,15 +182,15 @@ def dashboard(rows, domini, today, months, anno=None):
         return sum(1 for r in rows if ins(r) and a <= ins(r) <= b and (only is None or stato[r["_row"]] == only))
 
     start12 = _prev_year(today) + dt.timedelta(days=1)
-    w12 = sum(1 for r in rows if ins(r) and start12 <= ins(r) <= today and stato[r["_row"]] == "Won")
-    l12 = sum(1 for r in rows if ins(r) and start12 <= ins(r) <= today and stato[r["_row"]] == "Lost")
+    rows12 = [r for r in rows if ins(r) and start12 <= ins(r) <= today]
+    wr12 = metrics.win_rate(rows12)
     kpi = {
         "anno": today.year, "prec": today.year - 1,
         "wip": sum(1 for r in rows if stato[r["_row"]] == "WIP"),
         "waiting": sum(1 for r in rows if stato[r["_row"]] == "Waiting For response"),
         "inserite_ytd": {"cur": count(y0, today), "prev": count(py0, pend)},
         "won_ytd": {"cur": count(y0, today, "Won"), "prev": count(py0, pend, "Won")},
-        "winrate12": {"won": w12, "chiuse": w12 + l12, "rate": (w12 / (w12 + l12)) if w12 + l12 else None},
+        "winrate12": {"won": wr12["num"], "chiuse": wr12["n"], "rate": wr12["rate"]},
     }
 
     # ---- Trend anno su anno (12 mesi, anno corrente vs precedente)
@@ -205,19 +206,19 @@ def dashboard(rows, domini, today, months, anno=None):
              "won": {"cur": monthly(today.year, "Won"), "prev": monthly(today.year - 1, "Won")}}
 
     # ---- Esito per tipo (segue il periodo)
-    g = defaultdict(Counter)
+    g = defaultdict(list)
     for r in rows:
         if in_period(r):
-            g[_tipo_group(r["tipo"])][stato[r["_row"]]] += 1
+            g[_tipo_group(r["tipo"])].append(r)
     esito = []
     for nome in TIPI_MAIN + ["Altro"]:
-        c = g.get(nome)
-        if not c:
+        rs = g.get(nome)
+        if not rs:
             continue
-        w, l = c["Won"], c["Lost"]
-        esito.append({"nome": nome, "Won": w, "Lost": l, "NoBID": c["NoBID"] + c["Sospeso"],          # Sospeso e NoBID insieme come "No Bid"
-                      "Waiting For response": c["Waiting For response"], "WIP": c["WIP"], "Closed": c["Closed"],
-                      "totale": sum(c.values()), "chiuse": w + l, "rate": (w / (w + l)) if w + l >= MIN_CHIUSE else None})
+        c, wr = metrics.count(rs), metrics.win_rate(rs)
+        esito.append({"nome": nome, "Won": c["Won"], "Lost": c["Lost"], "NoBID": c["NoBID"], "Sospeso": c["Sospeso"],
+                      "Waiting For response": c["Waiting For response"], "WIP": c["WIP"],
+                      "totale": len(rs), "chiuse": wr["n"], "rate": wr["rate"] if wr["n"] >= MIN_CHIUSE else None})
 
     # ---- Top 10 clienti per numero di opportunità
     cl = defaultdict(lambda: {"nomi": Counter(), "tot": 0, "won": 0, "rows": []})
@@ -301,7 +302,7 @@ def dashboard(rows, domini, today, months, anno=None):
         if not r["Stato"]:
             att["Senza Stato"].append(_brief(r))
         if s in ("WIP", "Waiting For response") and not clean_text(r["Solution D&A"]):
-            att["WIP/Waiting senza Solution D&A"].append(_brief(r))
+            att["WIP/Waiting senza Referente Solution"].append(_brief(r))
         mancanti = [f for f in ("Vertical", "tipo", "Oggetto") if not r[f]] + (["Market"] if r["Market"] == NOIND else [])
         if mancanti:
             att["Campi base mancanti (Vertical/Market/tipo/Oggetto)"].append(_brief(r, dettaglio=", ".join(mancanti)))

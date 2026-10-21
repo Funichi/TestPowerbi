@@ -17,7 +17,7 @@ import time
 from flask import Flask, jsonify, redirect, request, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from core import clienti, logic
+from core import clienti, logic, metrics
 from core.db import Store
 from core.reader import ATT_LABELS, DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
 from core.writer import WriteError, get_writer
@@ -292,14 +292,22 @@ def data():
     for r in rows:
         for s in logic.split_solutions(r["Solution D&A"]):
             solutions[s.casefold()] = solutions.get(s.casefold(), s)
-    clienti = {}
+    per_cliente = {}
     for r in rows:  # ultimo inserito per ogni cliente: serve a precompilare Vertical/Market
         if r["Cliente"]:
-            clienti[logic.client_key(r["Cliente"])] = {"Cliente": r["Cliente"], "Vertical": r["Vertical"], "Market": r["Market"]}
+            per_cliente[logic.client_key(r["Cliente"])] = {"Cliente": r["Cliente"], "Vertical": r["Vertical"], "Market": r["Market"]}
     dom = d["domini"]
-    return jsonify({"rows": rows, "loaded": _cache.get("loaded"), "pending": store().counts(),
+    return jsonify({"rows": rows, "opzionali": clienti._opzionali(rows), "loaded": _cache.get("loaded"), "pending": store().counts(),
                     "domini": {"vertical": dom["vertical"], "market": dom["market"], "tipo": dom["tipo"], "stato": logic.STATI,
-                               "solutions": sorted(solutions.values(), key=str.casefold), "clienti": sorted(clienti.values(), key=lambda c: c["Cliente"].casefold())}})
+                               "solutions": sorted(solutions.values(), key=str.casefold), "clienti": sorted(per_cliente.values(), key=lambda c: c["Cliente"].casefold())}})
+
+
+@app.post("/api/metrics")
+def metrics_for():
+    """Metriche (core/metrics.py) di un insieme di righe: serve alla riga di sintesi dell'elenco filtrato."""
+    ids = set((request.json or {}).get("ids", []))
+    rows = [r for r in get_data()["rows"] if r["_row"] in ids]
+    return jsonify(metrics.summary(rows))
 
 
 @app.get("/api/dashboard")

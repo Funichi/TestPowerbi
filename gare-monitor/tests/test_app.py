@@ -25,7 +25,7 @@ def make_xlsx(path):
         ["=ROW()-1", "Enterprise", "Energy&Utility", "Terna", "$EII4506", "TER1", 1, "Uno", None, "Gara", d(2026, 9, 1), None, d(2026, 10, 16), "Melloncelli / Scamuzzo", "WIP"],
         ["=ROW()-1", "Enterprise", "Energy&Utility", "TERNA ", None, "TER2", 1, "Due", None, "Gara", d(2026, 5, 1), None, d(2026, 5, 20), "Scamuzzo", "won"],
         ["=ROW()-1", "Finance", "Finance", "Generali", None, "GEN4", 1, "Tre", None, "RFI", d(2026, 8, 1), None, d(2026, 8, 10), "Grando", "Waiting For response"],
-        ["=ROW()-1", "Finance", "Finance", "Intesa", None, None, 1, "Quattro", None, "RFI", None, None, None, None, "Closed"],
+        ["=ROW()-1", "Finance", "Finance", "Intesa", None, None, 1, "Quattro", None, "RFI", None, None, None, None, "Sospeso"],
         ["=ROW()-1", "Public sector", " public  sector ", "Inps", None, "INP1", 1, "Cinque", None, "Gara", d(2026, 3, 2), None, d(2026, 3, 9), "Grando", "No bid"],
         ["=ROW()-1", "Enterprise", None, "Enel", None, "ENE1", 1, "Sei", None, "Offerta diretta", d(2025, 3, 2), None, d(2025, 3, 20), "Grando", "Lost"],
     ]
@@ -186,7 +186,7 @@ def test_normalizzazione_in_lettura(client):
     rows = rows_by_cliente(c)
     assert rows["Terna"]["Stato"] == "WIP" and rows["TERNA"]["Stato"] == "Won"
     assert rows["Inps"]["Stato"] == "NoBID" and rows["Inps"]["Market"] == "Public Sector"
-    assert rows["Intesa"]["Stato"] == "Closed"                  # stato a sé, non Sospeso
+    assert rows["Intesa"]["Stato"] == "Sospeso"
     assert rows["Enel"]["Market"] == "(non indicato)"
     summ = c.get("/api/clean/summary").get_json()
     assert {"campo": "Stato", "da": "No bid", "a": "NoBID", "righe": 1, "scrivibile": True} in summ
@@ -207,13 +207,13 @@ def test_cruscotto_kpi_trend_esito_eta(client, tmp_path):
     k = db["kpi"]
     assert k["wip"] == 1 and k["waiting"] == 1
     assert k["inserite_ytd"] == {"cur": 4, "prev": 1} and k["won_ytd"] == {"cur": 1, "prev": 0}
-    assert k["winrate12"]["won"] == 1 and k["winrate12"]["chiuse"] == 1      # Closed e NoBID esclusi
+    assert k["winrate12"]["won"] == 1 and k["winrate12"]["chiuse"] == 1      # NoBID e Sospeso esclusi
     t = db["trend"]
     assert t["mese"] == 10 and t["inserite"]["cur"][8] == 1 and t["inserite"]["prev"][2] == 1 and t["won"]["cur"][4] == 1
     tipi = {e["nome"]: e for e in dashboard(d["rows"], d["domini"], dt.date(2026, 10, 15), None)["esito_tipo"]}   # periodo: tutto
     assert tipi["Gara"]["totale"] == 3 and tipi["Gara"]["rate"] is None      # meno di 5 chiuse: nessun win rate
-    assert tipi["RFI"]["Closed"] == 1 and tipi["Offerta diretta"]["Lost"] == 1
-    assert tipi["Gara"]["NoBID"] == 1 and "Sospeso" not in tipi["Gara"]      # Sospeso e NoBID insieme come "No Bid"
+    assert tipi["RFI"]["Sospeso"] == 1 and tipi["Offerta diretta"]["Lost"] == 1 and "Closed" not in tipi["RFI"]
+    assert tipi["Gara"]["NoBID"] == 1 and tipi["Gara"]["Sospeso"] == 0 and tipi["RFI"]["NoBID"] == 0      # NoBID e Sospeso sono separati
     top = db["top_clienti"]
     assert top[0]["nome"] in ("Terna", "TERNA ", "TERNA") and top[0]["totale"] == 2 and top[0]["won"] == 1 and len(top[0]["rows"]) == 2
     assert db["pillole"]["attenzione"] == {"totale": 1, "rosse": 0, "arancioni": 0, "gialle": 1}
@@ -291,9 +291,9 @@ def test_scheda_cliente_tempi_e_cartella(client, tmp_path):
     c, x, _ = client
     s = c.get("/api/cliente", query_string={"nome": "terna"}).get_json()
     assert s["kpi"]["totale"] == 2 and s["kpi"]["won"] == 1 and s["kpi"]["wip"] == 1
-    assert s["kpi"]["tempi"] == {"n": 1, "media": 19.0, "mediana": 19.0}          # la WIP non conta: solo la Won (1/5 -> 20/5)
-    assert s["cronologia"][0]["Oggetto"] == "Uno" and [a["anno"] for a in s["anni"]] == [2026]
-    assert s["media"]["tempi"]["n"] == 3 and c.get("/api/cliente", query_string={"nome": "boh"}).status_code == 400
+    assert s["kpi"]["preavviso"] == {"n": 2, "media": 32.0, "mediana": 32.0}      # preavviso = Consegna - Data ins., anche per la WIP (45 e 19 giorni)
+    assert s["cronologia"][0]["Oggetto"] == "Uno" and [a["anno"] for a in s["riepilogo"]] == [2026]
+    assert s["generale"]["preavviso"]["n"] == 5 and c.get("/api/cliente", query_string={"nome": "boh"}).status_code == 400
     assert s["cartella"]["stato"] == "nessuna"
     t = c.get("/api/tempi").get_json()
     assert t["totale"]["n"] == 3 and {g["nome"] for g in t["tipo"]} == {"Gara", "RFI", "Offerta diretta"} and t["solution"]
@@ -379,3 +379,64 @@ def test_excel_sostituito_viene_riletto_da_solo_se_non_ci_sono_modifiche_locali(
     st = c.get("/api/state").get_json()
     assert st["auto_imported"] is True and st["excel_newer"] is False
     assert any("cambiato" in (r["Oggetto"] or "") for r in c.get("/api/data").get_json()["rows"])
+
+
+def test_metriche_definizioni_uniche_con_numerosita():
+    from core import metrics
+    rows = [{"Stato": st, "Solution D&A": None} for st in ["Won", "Won", "Lost", "NoBID", "NoBID", "Sospeso", "Sospeso", "WIP", "Waiting For response"]]
+    w = metrics.win_rate(rows)
+    assert (w["num"], w["n"]) == (2, 3) and abs(w["rate"] - 2 / 3) < 1e-9 and w["ridotto"]            # Won / (Won + Lost)
+    b, nb = metrics.bid_rate(rows), metrics.nobid_rate(rows)
+    assert (b["num"], b["n"], nb["num"], nb["n"]) == (5, 7, 2, 7)                                      # escluse le 2 Sospeso dal denominatore
+    assert metrics.win_rate([])["rate"] is None and metrics.win_rate([])["n"] == 0
+    assert metrics.referenti("Non Assegnato") == [] and metrics.referenti("Grando / Scamuzzo") == ["Grando", "Scamuzzo"] and metrics.referenti(None) == []
+
+
+def test_scheda_cliente_presidiare_team_benchmark_di_market(client):
+    c, x, _ = client
+    c.post("/api/rows", json={**NEW, "Cliente": "Terna", "Oggetto": "Da fare", "Solution D&A": "Non Assegnato", "Stato": "WIP", "Data consegna": dt.date.today().isoformat()})
+    s = c.get("/api/cliente", query_string={"nome": "Terna"}).get_json()
+    pre = {p["Oggetto"]: p for p in s["presidiare"]}
+    assert set(pre) == {"Uno", "Da fare"} and pre["Da fare"]["urgente"] and pre["Da fare"]["non_assegnata"] and pre["Da fare"]["giorni"] == 0
+    assert s["aperte"] == 2 and s["ultima"]["giorni_fa"] >= 0
+    team = {t["nome"]: t for t in s["team"]}
+    assert team[None]["non_assegnato"] and team[None]["wip"] == 1 and team["Scamuzzo"]["won"] == 1 and s["team"][-1]["nome"] is None
+    assert s["mercato"]["nome"] == "Energy&Utility" and s["mercato"]["win"]["n"] >= 1          # benchmark = Market del cliente, non la media generale
+    assert "generale" in s and "alltime" in s and s["kpi"]["win"]["n"] == 1
+    m = c.post("/api/metrics", json={"ids": [r["_row"] for r in c.get("/api/data").get_json()["rows"]]}).get_json()
+    assert m["totale"] == 7 and m["win"]["num"] == 1 and m["bid"]["n"] == 6                    # 7 offerte, 1 Sospeso fuori dal denominatore
+
+
+def test_colonne_opzionali_assenti_o_presenti(client, tmp_path):
+    c, x, _ = client
+    d = c.get("/api/data").get_json()
+    assert d["opzionali"] == [] and c.get("/api/cliente", query_string={"nome": "Terna"}).get_json()["valore"] is None
+    wb = openpyxl.load_workbook(x); ws = wb["gare e offerte"]
+    ws.cell(1, 21).value = "Valore stimato"; ws.cell(1, 22).value = "Pwin"; ws.cell(1, 23).value = "Motivo esito"
+    for r, (v, p_, m) in {2: (100000, 50, None), 3: ("200.000,00", None, None), 4: (50000, 80, None), 7: (30000, None, "prezzo")}.items():
+        ws.cell(r, 21).value, ws.cell(r, 22).value, ws.cell(r, 23).value = v, p_, m
+    ws.tables["Tabella4"].ref = "A1:W7"
+    wb.save(x)
+    c.post("/api/import", json={"force": True})
+    d = c.get("/api/data").get_json()
+    assert {"valore", "pwin", "motivo_esito"} <= set(d["opzionali"])
+    s = c.get("/api/cliente", query_string={"nome": "Terna"}).get_json()
+    v = s["valore"]                                                                          # Terna: WIP 100k (pwin 50) + Won 200k
+    assert v["vinto"] == 200000 and v["win_rate"] == 1.0 and v["pipeline"] == 100000 and v["pipeline_pesata"] == 50000 and v["presentato"] == 200000
+
+
+def test_cliente_numeri_verificati_a_mano(client):
+    """HERA: 3 Won, 2 Lost, 2 NoBID, 1 Sospeso, 1 WIP, 1 Waiting (10 offerte). Calcolati a mano:
+    win rate 3/5 = 60% (n=5); bid rate (10-1-2)/(10-1) = 7/9; NoBID rate 2/9 (n=9); presentate = 1+3+2 = 6."""
+    c, x, _ = client
+    stati = ["Won"] * 3 + ["Lost"] * 2 + ["NoBID"] * 2 + ["Sospeso", "WIP", "Waiting For response"]
+    for i, st in enumerate(stati):
+        assert c.post("/api/rows", json={**NEW, "Cliente": "HERA", "Oggetto": f"h{i}", "Stato": st, "SS": f"HER{i}"}).status_code == 200
+    s = c.get("/api/cliente", query_string={"nome": "hera"}).get_json()
+    k = s["kpi"]
+    assert k["totale"] == 10 and k["aperte"] == 2 and k["won"] == 3 and k["lost"] == 2 and k["nobid"] == 2 and k["sospeso"] == 1
+    assert (k["win"]["num"], k["win"]["n"]) == (3, 5) and abs(k["win"]["rate"] - 0.6) < 1e-9 and not k["win"]["ridotto"]
+    assert (k["bid"]["num"], k["bid"]["n"]) == (7, 9) and (k["nobid_rate"]["num"], k["nobid_rate"]["n"]) == (2, 9)
+    assert s["market"] == "Finance" and s["mercato"]["nome"] == "Finance"
+    y = c.get("/api/cliente", query_string={"nome": "hera", "anno": 2025}).get_json()
+    assert y["kpi"]["totale"] == 0 and y["kpi"]["win"]["rate"] is None and y["alltime"]["totale"] == 10

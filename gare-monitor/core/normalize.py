@@ -2,11 +2,11 @@
 import re
 from collections import Counter, defaultdict
 
-STATI = ["WIP", "Waiting For response", "Sospeso", "Won", "Lost", "NoBID", "Closed"]
+STATI = ["WIP", "Waiting For response", "Sospeso", "Won", "Lost", "NoBID"]
 STATO_MAP = {
     "wip": "WIP", "won": "Won", "win": "Won", "lost": "Lost",
     "nobid": "NoBID", "no bid": "NoBID", "no-bid": "NoBID",
-    "sospeso": "Sospeso", "closed": "Closed",          # Closed è uno stato a sé (escluso dal win rate)
+    "sospeso": "Sospeso",
     "waiting for response": "Waiting For response", "waiting": "Waiting For response",
 }
 NOIND = "(non indicato)"

@@ -22,6 +22,43 @@ FIELDS = [
 ]
 
 
+# Colonne facoltative: se nell'Excel ci sono (intestazioni qui sotto, maiuscole/minuscole indifferenti) l'app le usa, altrimenti
+# le sezioni che le richiedono non compaiono. "Valore" non è tra queste: nel file è già una colonna tecnica.
+OPTIONAL = {
+    "valore": ["valore stimato", "base d'asta", "base asta", "valore base", "importo base"],
+    "valore_offerto": ["valore offerto"],
+    "valore_agg": ["valore aggiudicato"],
+    "motivo_esito": ["motivo esito"],
+    "motivo_nobid": ["motivo nobid", "motivo no bid"],
+    "aggiudicatario": ["aggiudicatario"],
+    "gara_padre": ["gara padre"],
+    "pwin": ["pwin", "pwin %", "pwin%"],
+}
+NUMERIC_OPT = {"valore", "valore_offerto", "valore_agg", "pwin"}
+
+
+def to_number(v):
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = re.sub(r"[€%\s]", "", str(v))
+    if not s:
+        return None
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def optional_columns(headers):
+    """{chiave: intestazione presente nel file}."""
+    low = {h.casefold(): h for h in headers}
+    return {k: low[n] for k, names in OPTIONAL.items() for n in names if n in low}
+
+
 ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?$")
 
 
@@ -161,7 +198,7 @@ def read_excel(path):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def build_row(rid, xl, cells, orig=None, state="orig", att=0):
+def build_row(rid, xl, cells, orig=None, state="orig", att=0, optional=None):
     """Riga per l'app a partire dai valori del database.
     cells = valori attuali; orig = valori importati dall'Excel (None per le righe nuove)."""
     row = {"_row": rid, "_xl": xl, "_state": state, "Attenzione": att or 0}
@@ -179,6 +216,12 @@ def build_row(rid, xl, cells, orig=None, state="orig", att=0):
                 textdates.append(f)
         else:
             row[f] = clean_text(v)
+    opt = {}
+    for k, h in (optional or {}).items():
+        v = cells.get(h)
+        opt[k] = to_number(v) if k in NUMERIC_OPT else (clean_text(v) if k != "gara_padre" else (to_number(v) and int(to_number(v)) or clean_text(v)))
+    if opt:
+        row["_opt"] = opt
     row["_invalid_dates"] = invalid
     if textdates:
         row["_textdates"] = textdates

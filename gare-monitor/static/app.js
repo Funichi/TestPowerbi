@@ -1,11 +1,23 @@
 "use strict";
-const STATI = ["WIP", "Waiting For response", "Sospeso", "Won", "Lost", "NoBID", "Closed"];
-const BCLASS = {"WIP": "WIP", "Waiting For response": "Waiting", "Sospeso": "Sospeso", "Won": "Won", "Lost": "Lost", "NoBID": "NoBID", "Closed": "Closed"};
-const COLOR = {"WIP": "var(--st-wip)", "Waiting For response": "var(--st-waiting)", "Sospeso": "var(--st-sospeso)", "Won": "var(--st-won)", "Lost": "var(--st-lost)", "NoBID": "var(--st-nobid)", "Closed": "var(--st-closed)", "Altro": "var(--st-altro)"};
-const STATO_COL = {"WIP": "s-WIP", "Waiting For response": "s-Waiting", "Won": "s-Won", "Lost": "s-Lost", "NoBID": "s-NoBID", "Sospeso": "s-Sospeso", "Closed": "s-Closed", "Altro": "s-Altro"};
+// Palette degli stati: UNICA fonte per badge, grafici e legende (i colori veri stanno nei token CSS --st-*).
+// Il colore non è l'unico segnale: i badge hanno sempre il testo, le barre una etichetta, e Sospeso (tratteggio) e NoBID (scuro) si distinguono anche dal motivo.
+const ST = {
+  "WIP":                  {cls: "WIP",     short: "WIP",     color: "var(--st-wip)"},
+  "Waiting For response": {cls: "Waiting", short: "Waiting", color: "var(--st-waiting)"},
+  "Sospeso":              {cls: "Sospeso", short: "Sospeso", color: "url(#pat-sosp)", hatched: true},
+  "Won":                  {cls: "Won",     short: "Won",     color: "var(--st-won)"},
+  "Lost":                 {cls: "Lost",    short: "Lost",    color: "var(--st-lost)"},
+  "NoBID":                {cls: "NoBID",   short: "No Bid",  color: "var(--st-nobid)", dark: true},
+};
+const STATI = ["WIP", "Waiting For response", "Sospeso", "Won", "Lost", "NoBID"];
+const SEGS = ["WIP", "Waiting For response", "Won", "Lost", "NoBID", "Sospeso"];        // ordine di impilamento nei grafici
+const BCLASS = Object.fromEntries(STATI.map(k => [k, ST[k].cls]));
+const COLOR = Object.fromEntries(STATI.map(k => [k, ST[k].color]));
+const STATO_COL = Object.fromEntries(STATI.map(k => [k, "s-" + ST[k].cls]));
 const S = {cliente: null, prevView: null, tempiMesi: "all", data: null, dash: null, view: "dash", months: "y" + new Date().getFullYear(), trendSeries: "inserite", trendCum: true, pipeBy: "vertical", attScope: "wip",
   filt: {q: "", stato: "", vertical: "", market: "", solution: "", anno: ""}, sort: {k: "Data ins.", dir: -1}, clean: null, state: null};
-const EMPTY_FILT = () => ({q: "", stato: "", vertical: "", market: "", tipo: "", solution: "", anno: "", loc: "", att: "", rows: null, rowsLabel: ""});
+const EMPTY_FILT = () => ({q: "", stato: new Set(), market: new Set(), tipo: new Set(), solution: new Set(), aperte: false, vertical: "", anno: "", loc: "", att: "", rows: null, rowsLabel: ""});
+S.filt = EMPTY_FILT();
 
 // icone Lucide (definite in icons.js)
 const ico = n => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ""}</svg>`;
@@ -21,7 +33,7 @@ const TITLES = {
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const fmt = iso => iso ? iso.split("-").reverse().join("/") : "";
-const normStato = s => { const m = {"closed": "Closed", "no bid": "NoBID", "no-bid": "NoBID", "nobid": "NoBID", "waiting": "Waiting For response"}; const k = (s || "").trim().toLowerCase(); return STATI.find(x => x.toLowerCase() === k) || m[k] || s; };
+const normStato = s => { const m = {"no bid": "NoBID", "no-bid": "NoBID", "nobid": "NoBID", "waiting": "Waiting For response"}; const k = (s || "").trim().toLowerCase(); return STATI.find(x => x.toLowerCase() === k) || m[k] || s; };
 const badge = s => s ? `<span class="badge b-${BCLASS[normStato(s)] || "x"}">${esc(s)}</span>` : "";
 const splitSol = v => (v || "").split(/\s*[\/,+&;]\s*/).map(x => x.trim()).filter(Boolean);
 const nil = () => `<span class="nil">—</span>`;
@@ -30,7 +42,7 @@ const num = n => Number(n).toLocaleString("it-IT");
 const TIPO_SHORT = {"Offerta diretta": "Offerta", "Incontro Cliente": "Incontro", "Incontro Interno": "Interno", "Gara sotto AQ": "Gara AQ", "Gara": "Gara", "RFI": "RFI", "Manif. Interesse": "Manif."};
 const tipoChip = t => t ? `<span class="tchip" title="${esc(t)}">${esc(TIPO_SHORT[t] || t)}</span>` : nil();
 const NOIND = "(non indicato)";
-const OWNERS = ["Scamuzzo", "Grando", "Melloncelli"];      // suggerimenti per Solution D&A (gli altri nomi si scrivono a mano)
+const OWNERS = ["Scamuzzo", "Grando", "Melloncelli"];      // suggerimenti per Referente Solution (gli altri nomi si scrivono a mano)
 const endOfMonthIso = iso => { const d = isoDate(iso) || new Date(); const e = new Date(d.getFullYear(), d.getMonth() + 1, 0); return `${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, "0")}-${String(e.getDate()).padStart(2, "0")}`; };
 // livello di attenzione = colore del nome cliente nell'Excel (giallo / arancione / rosso)
 const ATT = {1: {label: "Rilevante", color: "giallo"}, 2: {label: "Da attenzionare", color: "arancione"}, 3: {label: "Urgente", color: "rosso"}};
@@ -135,6 +147,7 @@ function render() {
   document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.view === S.view));
   $("#page-title").textContent = TITLES[S.view][0]; $("#page-sub").textContent = TITLES[S.view][1];
   const m = $("#main");
+  if (S.view !== "table") setHash("");
   ({dash: renderDash, table: renderTable, wip: renderWip, cliente: renderCliente, tempi: renderTempi, clean: renderClean})[S.view](m);
 }
 
@@ -156,18 +169,20 @@ function miniTable(items, cols) {
 }
 const clLink = n => n ? `<a href="#" class="cl-link" data-cliente="${esc(n)}" title="Apri la scheda del cliente">${esc(n)}</a>` : "";
 const offer = x => `<div class="offer"><b>${clLink(x.Cliente)}</b><span>${esc((x.Oggetto || "").slice(0, 90))}</span></div>`;
-const legendItem = s => `<span><i style="background:${COLOR[s]}"></i>${s === "Altro" ? "Sospeso / NoBID / Closed" : s === "NoBID" ? "No Bid" : s === "Waiting For response" ? "Waiting" : s}</span>`;
+const legendItem = s => `<span><i class="lg-${ST[s].cls}"></i>${ST[s].short}</span>`;
+const SVG_DEFS = `<defs><pattern id="pat-sosp" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#E4E1F3"/><line x1="0" y1="0" x2="0" y2="6" stroke="#8B83C4" stroke-width="2"/></pattern></defs>`;
+const segLabel = s => s === "Waiting For response" ? "Waiting" : s;
 
 function hbars(groups) {
   if (!groups.length) return `<div class="empty">Nessun dato.</div>`;
-  const mx = Math.max(...groups.map(g => g.totale)), segs = ["WIP", "Waiting For response", "Won", "Lost", "Altro"];
+  const mx = Math.max(...groups.map(g => g.totale)), segs = SEGS;
   return `<div class="hb">${groups.map(g => `<div class="hn cl" title="${esc(g.nome)}" data-grp="${esc(g.nome)}">${esc(g.nome)}</div><div class="hbwrap"><div class="hbar" style="width:${(100 * g.totale / mx).toFixed(1)}%">${segs.map(s => g[s] ?
-    `<i class="${STATO_COL[s]}" style="width:${(100 * g[s] / g.totale).toFixed(2)}%" data-grp="${esc(g.nome)}" data-st="${s}" title="${esc(g.nome)} · ${s === "Altro" ? "Sospeso / NoBID / Closed" : s}: ${g[s]}">${g[s] / mx >= .06 ? g[s] : ""}</i>` : "").join("")}</div><span class="ht-n">${g.totale}</span></div>`).join("")}</div>
+    `<i class="${STATO_COL[s]}" style="width:${(100 * g[s] / g.totale).toFixed(2)}%" data-grp="${esc(g.nome)}" data-st="${s}" title="${esc(g.nome)} · ${segLabel(s)}: ${g[s]}">${g[s] / mx >= .06 ? g[s] : ""}</i>` : "").join("")}</div><span class="ht-n">${g.totale}</span></div>`).join("")}</div>
     <div class="legend">${segs.map(legendItem).join("")}</div>`;
 }
 function vcolumns(groups) {
   if (!groups.length) return `<div class="empty">Nessun dato.</div>`;
-  const segs = ["WIP", "Waiting For response", "Won", "Lost", "Altro"], W = 640, H = 300, L = 40, T = 30, B = 44, n = groups.length;
+  const segs = SEGS, W = 640, H = 300, L = 40, T = 30, B = 44, n = groups.length;
   const mx = Math.max(...groups.map(g => g.totale)), step0 = Math.max(1, Math.ceil(mx / 4)), nice = step0 * 4, plot = H - T - B;
   const y = v => T + plot * (1 - v / nice), stepX = (W - L - 12) / n, bw = Math.min(120, stepX * .6);
   let g = "";
@@ -175,21 +190,21 @@ function vcolumns(groups) {
   groups.forEach((gr, i) => {
     const x = L + i * stepX + (stepX - bw) / 2; let acc = 0;
     segs.forEach(s => { const v = gr[s]; if (!v) return; const y1 = y(acc + v), h = y(acc) - y1; acc += v;
-      g += `<rect class="vseg" x="${x}" y="${y1}" width="${bw}" height="${Math.max(h - 1, 1)}" fill="${COLOR[s]}" rx="3" data-grp="${esc(gr.nome)}" data-st="${s}"><title>${esc(gr.nome)} · ${s === "Altro" ? "Sospeso / NoBID / Closed" : s}: ${v}</title></rect>`;
-      if (h >= 17) g += `<text x="${x + bw / 2}" y="${y1 + h / 2 + 4}" text-anchor="middle" style="fill:var(--eng-dark);font-weight:600;pointer-events:none">${v}</text>`; });
+      g += `<rect class="vseg" x="${x}" y="${y1}" width="${bw}" height="${Math.max(h - 1, 1)}" fill="${COLOR[s]}" rx="3" data-grp="${esc(gr.nome)}" data-st="${s}"><title>${esc(gr.nome)} · ${segLabel(s)}: ${v}</title></rect>`;
+      if (h >= 17) g += `<text x="${x + bw / 2}" y="${y1 + h / 2 + 4}" text-anchor="middle" style="fill:${ST[s].dark ? "#fff" : "var(--eng-dark)"};font-weight:600;pointer-events:none">${v}</text>`; });
     g += `<text x="${x + bw / 2}" y="${y(gr.totale) - 7}" text-anchor="middle" style="fill:var(--text);font-weight:700;font-size:13px">${gr.totale}</text>
       <text class="vname" x="${x + bw / 2}" y="${H - 16}" text-anchor="middle" data-grp="${esc(gr.nome)}" style="fill:var(--text);font-weight:600;font-size:13px">${esc(gr.nome)}</text>`;
   });
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Offerte per Vertical e stato">${g}</svg><div class="legend">${segs.map(legendItem).join("")}</div>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Offerte per Vertical e stato">${SVG_DEFS}${g}</svg><div class="legend">${segs.map(legendItem).join("")}</div>`;
 }
-const ESITO_SEGS = ["Won", "Lost", "NoBID", "Waiting For response", "WIP", "Closed"];        // NoBID = Sospeso + NoBID
+const ESITO_SEGS = ["Won", "Lost", "NoBID", "Sospeso", "Waiting For response", "WIP"];
 function esitoRows(list, minChiuse) {
   if (!list.length) return `<div class="empty">Nessuna offerta nel periodo.</div>`;
   const mx = Math.max(...list.map(g => g.totale));
   return `<div class="eb">${list.map(g => `<div class="hn cl" title="${esc(g.nome)}" data-tipo="${esc(g.nome)}">${esc(g.nome)}</div><div class="hbwrap"><div class="hbar" style="width:${(100 * g.totale / mx).toFixed(1)}%">${ESITO_SEGS.map(s => g[s] ?
-    `<i class="${STATO_COL[s]}" style="width:${(100 * g[s] / g.totale).toFixed(2)}%" data-tipo="${esc(g.nome)}" data-st="${s}" title="${esc(g.nome)} · ${s}: ${g[s]}">${g[s] / mx >= .06 ? g[s] : ""}</i>` : "").join("")}</div><span class="ht-n">${g.totale}</span></div>
-    <div class="erate">${g.rate === null ? `<b class="nil">—</b><span>pochi dati</span>` : `<b>${Math.round(g.rate * 100)}%</b><span>${g.Won} su ${g.chiuse} chiuse</span>`}</div>`).join("")}</div>
-    <div class="legend">${ESITO_SEGS.map(legendItem).join("")}</div><div class="hint">Win rate = Won / (Won + Lost); mostrato solo con almeno ${minChiuse} offerte chiuse. Closed non rientra nel calcolo.</div>`;
+    `<i class="${STATO_COL[s]}" style="width:${(100 * g[s] / g.totale).toFixed(2)}%" data-tipo="${esc(g.nome)}" data-st="${s}" title="${esc(g.nome)} · ${segLabel(s)}: ${g[s]}">${g[s] / mx >= .06 ? g[s] : ""}</i>` : "").join("")}</div><span class="ht-n">${g.totale}</span></div>
+    <div class="erate">${g.rate === null ? `<b class="nil">—</b><span>pochi dati</span>` : `<b>${Math.round(g.rate * 100)}%</b><span>n=${g.chiuse} (${g.Won} Won)</span>`}</div>`).join("")}</div>
+    <div class="legend">${ESITO_SEGS.map(legendItem).join("")}</div><div class="hint">Win rate = Won / (Won + Lost); mostrato solo con almeno ${minChiuse} offerte chiuse (n = Won + Lost). NoBID e Sospeso non rientrano nel calcolo.</div>`;
 }
 function topClienti(list) {
   if (!list.length) return `<div class="empty">Nessuna opportunità nel periodo.</div>`;
@@ -288,7 +303,7 @@ function renderDash(m) {
   m.querySelectorAll("[data-wipgo]").forEach(c => c.onclick = () => goWip({band: c.dataset.wipgo === "all" ? "" : c.dataset.wipgo}));
   m.querySelectorAll("[data-solleciti]").forEach(c => c.onclick = () => goTable({rows: pl.solleciti, rowsLabel: `Da sollecitare (${pl.solleciti.length})`}));
   m.querySelectorAll("[data-scroll]").forEach(c => c.onclick = () => document.getElementById(c.dataset.scroll).scrollIntoView({behavior: "smooth"}));
-  m.querySelectorAll(".hb [data-grp], .vseg, .vname").forEach(c => c.onclick = () => goTable({[S.pipeBy]: c.dataset.grp, stato: c.dataset.st && c.dataset.st !== "Altro" ? c.dataset.st : ""}));
+  m.querySelectorAll(".hb [data-grp], .vseg, .vname").forEach(c => c.onclick = () => goTable({[S.pipeBy]: c.dataset.grp, stato: c.dataset.st || ""}));
   m.querySelectorAll(".eb [data-tipo]").forEach(c => c.onclick = () => goTable({tipo: c.dataset.tipo === "Altro" ? "__altro" : c.dataset.tipo, stato: c.dataset.st || ""}));
   m.querySelectorAll("[data-age]").forEach(c => c.onclick = () => { const f = d.eta_attesa.fasce.find(x => x.k === c.dataset.age); goTable({rows: f.rows, rowsLabel: `In attesa ${f.label} (${f.n})`}); });
   m.querySelectorAll("[data-cl]").forEach(b => b.onclick = () => goCliente(d.top_clienti[+b.dataset.cl].nome));
@@ -339,16 +354,52 @@ function drawYoy(el, t) {
 }
 
 // ------------------------------------------------------------ tabella
-function goTable(f) { S.filt = {...EMPTY_FILT(), ...f, rows: f.rows ? new Set(f.rows) : null}; S.view = "table"; render(); }
+// ---- stato dei filtri dell'elenco: stato / market / tipo / referente sono insiemi (multi-selezione), il resto valori singoli
+const SETKEYS = ["stato", "market", "tipo", "solution"];
+function goTable(f) {
+  const nf = EMPTY_FILT();
+  for (const [k, v] of Object.entries(f)) {
+    if (SETKEYS.includes(k)) nf[k] = new Set(Array.isArray(v) ? v : v ? [v] : []);
+    else if (k === "rows") nf.rows = v ? new Set(v) : null;
+    else nf[k] = v;
+  }
+  S.filt = nf; S.view = "table"; render();
+}
+// la vista filtrata vive nell'indirizzo (#tabella?stato=WIP,Won&q=...): si può copiare e condividere
+function filtToHash(f) {
+  const p = new URLSearchParams();
+  if (f.q) p.set("q", f.q);
+  SETKEYS.forEach(k => f[k].size && p.set(k, [...f[k]].join("|")));
+  ["aperte", "loc"].forEach(k => f[k] && p.set(k, "1"));
+  ["vertical", "anno", "att"].forEach(k => f[k] && p.set(k, f[k]));
+  const s = p.toString(); return "#tabella" + (s ? "?" + s : "");
+}
+function hashToFilt(h) {
+  const p = new URLSearchParams(h.split("?")[1] || ""), f = EMPTY_FILT();
+  f.q = p.get("q") || "";
+  SETKEYS.forEach(k => { const v = p.get(k); if (v) f[k] = new Set(v.split("|")); });
+  ["aperte", "loc"].forEach(k => f[k] = p.get(k) === "1");
+  ["vertical", "anno", "att"].forEach(k => f[k] = p.get(k) || "");
+  return f;
+}
+function setHash(h) { try { history.replaceState(null, "", h || location.pathname); } catch (e) {} }
+
 const COLDEFS = [
   {k: "Seq", l: "Seq", on: true}, {k: "Cliente", l: "Cliente", on: true}, {k: "Oggetto", l: "Oggetto", on: true}, {k: "Market", l: "Market", on: true},
   {k: "Vertical", l: "Vertical", on: false}, {k: "tipo", l: "Tipo", on: true}, {k: "Data ins.", l: "Data ins.", on: true}, {k: "Data consegna", l: "Consegna", on: true},
-  {k: "Solution D&A", l: "Solution D&A", on: true}, {k: "Stato", l: "Stato", on: true}, {k: "SS", l: "SS", on: true},
+  {k: "_scade", l: "Scade tra", on: true}, {k: "Solution D&A", l: "Referente Solution", on: true}, {k: "Stato", l: "Stato", on: true},
 ];
-const COL_KEY = "gare.table.cols.v1";
+const COL_KEY = "gare.table.cols.v2";
 const colsLoad = () => { try { const v = JSON.parse(localStorage.getItem(COL_KEY)); if (Array.isArray(v)) return new Set(v); } catch (e) {} return new Set(COLDEFS.filter(c => c.on).map(c => c.k)); };
 const colsSave = () => { try { localStorage.setItem(COL_KEY, JSON.stringify([...S.cols])); } catch (e) {} };
 S.cols = colsLoad();
+// giorni alla consegna: solo per le offerte WIP
+const scadeDays = r => {
+  if (r.Stato !== "WIP" || !r["Data consegna"]) return null;
+  const t = new Date((S.state && S.state.oggi || new Date().toISOString().slice(0, 10)) + "T00:00:00"), d = new Date(r["Data consegna"] + "T00:00:00");
+  return Math.round((d - t) / 864e5);
+};
+const scadeCell = r => { if (r.Stato !== "WIP") return `<td></td>`; const g = scadeDays(r); return `<td>${g === null ? `<span class="tag d-none">senza data</span>` : g < 0 ? `<span class="tag d-late">scaduta da ${-g} gg</span>` : g <= 3 ? `<span class="tag d-late">${g === 0 ? "oggi" : g + " gg"}</span>` : g <= 7 ? `<span class="tag d-week">${g} gg</span>` : `<span class="tag d-over">${g} gg</span>`}</td>`; };
 const CELLS = {
   "Seq": r => `<td>${r.Seq === null || r.Seq === undefined ? nil() : esc(r.Seq)}</td>`,
   "Cliente": r => `<td class="cl">${attDot(r)}${r.Cliente ? clLink(r.Cliente) : nil()}${r._state === "new" ? ` <span class="lchip new">nuova</span>` : r._state === "mod" ? ` <span class="lchip mod">modificata</span>` : ""}</td>`,
@@ -358,64 +409,99 @@ const CELLS = {
   "tipo": r => `<td>${tipoChip(r.tipo)}</td>`,
   "Data ins.": r => `<td>${r["Data ins."] ? fmt(r["Data ins."]) : nil()}</td>`,
   "Data consegna": r => `<td>${r["Data consegna"] ? fmt(r["Data consegna"]) : nil()}</td>`,
-  "Solution D&A": r => `<td>${orNil(r["Solution D&A"])}</td>`,
+  "_scade": scadeCell,
+  "Solution D&A": r => `<td>${refCell(r)}</td>`,
   "Stato": r => `<td>${r.Stato ? badge(r.Stato) : nil()}</td>`,
-  "SS": r => `<td>${orNil(r.SS)}</td>`,
 };
-function filteredRows() {
-  const f = S.filt, q = f.q.toLowerCase();
+const OPEN_STATES = ["WIP", "Waiting For response"];
+// skip = nome di un filtro da ignorare: serve a contare le offerte per ogni stato tenendo conto di tutti gli altri filtri
+function filteredRows(skip) {
+  const f = S.filt, q = f.q.trim().toLowerCase();
   return S.data.rows.filter(r => {
-    if (f.stato && (normStato(r.Stato) !== f.stato)) return false;
+    if (skip !== "stato" && f.stato.size && !f.stato.has(normStato(r.Stato))) return false;
+    if (f.aperte && !OPEN_STATES.includes(normStato(r.Stato))) return false;
     if (f.vertical && r.Vertical !== f.vertical) return false;
-    if (f.market && r.Market !== f.market) return false;
+    if (f.market.size && !f.market.has(r.Market)) return false;
     if (f.rows && !f.rows.has(r._row)) return false;
     if (f.loc && r._state === "orig") return false;
     if (f.att && (f.att === "any" ? !r.Attenzione : String(r.Attenzione) !== f.att)) return false;
-    if (f.tipo && (f.tipo === "__altro" ? TIPI_MAIN.includes(r.tipo) : r.tipo !== f.tipo)) return false;
+    if (f.tipo.size && !(f.tipo.has(r.tipo) || (f.tipo.has("__altro") && !TIPI_MAIN.includes(r.tipo)))) return false;
     if (f.anno && (r["Data ins."] || "").slice(0, 4) !== f.anno) return false;
-    if (f.solution) { const s = splitSol(r["Solution D&A"]).map(x => x.toLowerCase()); if (f.solution === "(non assegnata)" ? s.length : !s.includes(f.solution.toLowerCase())) return false; }
-    if (q && ![r.Cliente, r.Oggetto, r.SS, r["Solution D&A"], r.Market, r.Note, r["Referenti vertical"]].some(v => (v || "").toLowerCase().includes(q))) return false;
+    if (f.solution.size) { const s = splitSol(r["Solution D&A"]).map(x => x.toLowerCase()).filter(x => x !== "non assegnato"); if (!(s.length ? s.some(x => f.solution.has(x)) : f.solution.has("non assegnato"))) return false; }
+    if (q && ![r.Cliente, r.Oggetto].some(v => (v || "").toLowerCase().includes(q))) return false;
     return true;
   });
+}
+const msHtml = (id, label, opts, sel) => `<details class="ms" id="${id}"><summary>${label}${sel.size ? ` <span class="ms-n">${sel.size}</span>` : ""}</summary><div class="ms-list">${opts.map(([v, l]) => `<label class="ms-i"><input type="checkbox" data-v="${esc(v)}" ${sel.has(v) ? "checked" : ""}> ${esc(l)}</label>`).join("")}</div></details>`;
+function downloadCsv(rows, cols) {
+  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const val = (r, k) => k === "_scade" ? (scadeDays(r) ?? "") : k === "Stato" ? normStato(r.Stato) : r[k];
+  const csv = "﻿" + [cols.map(c => q(c.l)).join(";"), ...rows.map(r => cols.map(c => q(val(r, c.k))).join(";"))].join("\r\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv;charset=utf-8"}));
+  a.download = `offerte_${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 function renderTable(m) {
   const d = S.data.domini, f = S.filt;
   const anni = [...new Set(S.data.rows.map(r => (r["Data ins."] || "").slice(0, 4)).filter(Boolean))].sort().reverse();
   const markets = [...new Set([...d.market, ...S.data.rows.map(r => r.Market).filter(x => x && x !== NOIND)])].sort((a, b) => a.localeCompare(b, "it"));
   m.innerHTML = `<div class="fbar">
-    <div class="grow"><label for="f-q">Cerca</label><input id="f-q" value="${esc(f.q)}" placeholder="cliente, oggetto, codice SS, solution…"></div>
-    <div><label for="f-stato">Stato</label><select id="f-stato">${optionsHtml(STATI, f.stato)}</select></div>
-    <div><label for="f-market">Market</label><select id="f-market">${optionsHtml([NOIND, ...markets], f.market)}</select></div>
-    <div><label for="f-tipo">Tipo</label><select id="f-tipo"><option value="">Tutti</option>${[...d.tipo, "__altro"].map(t => `<option value="${esc(t)}" ${f.tipo === t ? "selected" : ""}>${t === "__altro" ? "Altro" : esc(t)}</option>`).join("")}</select></div>
-    <div><label for="f-vertical">Vertical</label><select id="f-vertical">${optionsHtml(d.vertical, f.vertical)}</select></div>
-    <div><label for="f-solution">Solution</label><select id="f-solution">${optionsHtml(["(non assegnata)", ...d.solutions], f.solution)}</select></div>
-    <div><label for="f-att">Attenzione</label><select id="f-att"><option value="">Tutte</option><option value="any" ${f.att === "any" ? "selected" : ""}>Con attenzione</option>${[3, 2, 1].map(k => `<option value="${k}" ${f.att === String(k) ? "selected" : ""}>${ATT[k].label}</option>`).join("")}</select></div>
-    <div><label for="f-loc">Locale</label><select id="f-loc"><option value="">Tutte</option><option value="1" ${f.loc ? "selected" : ""}>Da esportare</option></select></div>
-    <div><label for="f-anno">Anno (Data ins.)</label><select id="f-anno">${optionsHtml(anni, f.anno)}</select></div>
+    <div class="grow"><label for="f-q">Cerca</label><input id="f-q" value="${esc(f.q)}" placeholder="cliente o oggetto…"></div>
+    <div><label>&nbsp;</label><button id="f-open" class="chip fchip ${f.aperte ? "on" : ""}" aria-pressed="${f.aperte}" title="Mostra solo le offerte WIP e in attesa di risposta">Solo aperte</button></div>
+    <div><label>Market</label>${msHtml("ms-market", "Market", [[NOIND, NOIND], ...markets.map(x => [x, x])], f.market)}</div>
+    <div><label>Tipo</label>${msHtml("ms-tipo", "Tipo", [...d.tipo.map(x => [x, x]), ["__altro", "Altro"]], f.tipo)}</div>
+    <div><label>Referente Solution</label>${msHtml("ms-sol", "Referente Solution", [["non assegnato", "Non Assegnato"], ...d.solutions.map(x => [x.toLowerCase(), x])], f.solution)}</div>
     <div class="fbar-r"><span id="f-count"></span>
-      <details class="ms cols-menu"><summary style="min-width:0">${ico("columns-3")}Colonne</summary><div class="ms-list" style="right:0;left:auto;min-width:200px">${COLDEFS.map(c => `<label class="ms-i"><input type="checkbox" data-col="${esc(c.k)}" ${S.cols.has(c.k) ? "checked" : ""}> ${esc(c.l)}</label>`).join("")}</div></details></div></div>
+      <details class="ms cols-menu"><summary style="min-width:0">${ico("sliders-horizontal")}Altri filtri</summary><div class="ms-list" style="right:0;left:auto;min-width:230px;padding:12px">
+        <label for="f-vertical">Vertical</label><select id="f-vertical">${optionsHtml(d.vertical, f.vertical)}</select>
+        <label for="f-anno" style="margin-top:8px">Anno (Data ins.)</label><select id="f-anno">${optionsHtml(anni, f.anno)}</select>
+        <label for="f-att" style="margin-top:8px">Attenzione</label><select id="f-att"><option value="">Tutte</option><option value="any" ${f.att === "any" ? "selected" : ""}>Con attenzione</option>${[3, 2, 1].map(k => `<option value="${k}" ${f.att === String(k) ? "selected" : ""}>${ATT[k].label}</option>`).join("")}</select>
+        <label for="f-loc" style="margin-top:8px">Locale</label><select id="f-loc"><option value="">Tutte</option><option value="1" ${f.loc ? "selected" : ""}>Da esportare</option></select></div></details>
+      <details class="ms cols-menu"><summary style="min-width:0">${ico("columns-3")}Colonne</summary><div class="ms-list" style="right:0;left:auto;min-width:200px">${COLDEFS.map(c => `<label class="ms-i"><input type="checkbox" data-col="${esc(c.k)}" ${S.cols.has(c.k) ? "checked" : ""}> ${esc(c.l)}</label>`).join("")}</div></details>
+      <button id="f-csv" class="btn-sec" title="Scarica la vista filtrata come file CSV (si apre in Excel)">${ico("download")}Esporta CSV</button></div></div>
+  <div id="f-stati" class="chips"></div>
   <div id="f-chips"></div>
+  <div id="f-sum" class="tsum"></div>
+  <div class="tleg"><span><i class="adot a1"></i>Rilevante</span><span><i class="adot a2"></i>Da attenzionare</span><span><i class="adot a3"></i>Urgente</span><span class="muted">— pallino accanto al cliente = colore del nome cliente nell'Excel</span></div>
   <div class="card tablecard"><table class="dt"><thead id="th"></thead><tbody id="tb"></tbody></table></div>`;
-  const LABEL = {q: v => `Cerca: ${v}`, stato: v => `Stato: ${v}`, tipo: v => `Tipo: ${v === "__altro" ? "Altro" : v}`, rows: () => f.rowsLabel || "Selezione", market: v => `Market: ${v}`, vertical: v => `Vertical: ${v}`, solution: v => `Solution: ${v}`, anno: v => `Anno: ${v}`, loc: () => "Da esportare", att: v => `Attenzione: ${v === "any" ? "con attenzione" : ATT[v].label}`};
-  const drawChips = () => {
-    const box = $("#f-chips"); box.innerHTML = chipsHtml(Object.keys(LABEL).filter(k => f[k]).map(k => ({id: k, label: LABEL[k](f[k])})));
-    bindChips(box, id => { S.filt[id] = ""; renderTable(m); }, () => { S.filt = EMPTY_FILT(); renderTable(m); });
-  };
+  const LABEL = {q: v => `Cerca: ${v}`, rows: () => f.rowsLabel || "Selezione", aperte: () => "Solo aperte", vertical: v => `Vertical: ${v}`, anno: v => `Anno: ${v}`, loc: () => "Da esportare", att: v => `Attenzione: ${v === "any" ? "con attenzione" : ATT[v].label}`};
+  const SETLAB = {stato: v => `Stato: ${v}`, market: v => `Market: ${v}`, tipo: v => `Tipo: ${v === "__altro" ? "Altro" : v}`, solution: v => `Referente: ${v === "non assegnato" ? "Non Assegnato" : v}`};
+  const chipItems = () => [...Object.keys(LABEL).filter(k => f[k]).map(k => ({id: k, label: LABEL[k](f[k])})), ...SETKEYS.flatMap(k => [...f[k]].map(v => ({id: k + ":" + v, label: SETLAB[k](v)})))];
+  const clearChip = id => { const [k, v] = id.split(/:(.*)/s); if (SETKEYS.includes(k)) f[k].delete(v); else f[k] = (k === "rows") ? null : ""; if (k === "rows") f.rowsLabel = ""; renderTable(m); };
+  let metricsTimer;
   const draw = () => {
     const cols = COLDEFS.filter(c => S.cols.has(c.k));
     $("#th").innerHTML = `<tr>${cols.map(c => `<th class="sort" data-k="${esc(c.k)}">${c.l}${S.sort.k === c.k ? (S.sort.dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr>`;
     const rows = filteredRows(), k = S.sort.k, dir = S.sort.dir;
-    rows.sort((a, b) => { const x = a[k] ?? "", y = b[k] ?? ""; return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "it", {numeric: true})) * dir; });
+    const key = r => k === "_scade" ? scadeDays(r) : k === "Stato" ? normStato(r.Stato) : r[k];
+    rows.sort((a, b) => { const x = key(a), y = key(b); if (x === null || x === undefined || x === "") return (y === null || y === undefined || y === "") ? 0 : 1; if (y === null || y === undefined || y === "") return -1;
+      return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "it", {numeric: true})) * dir; });
     $("#f-count").textContent = rows.length + " righe";
-    $("#tb").innerHTML = rows.map(r => `<tr class="click" data-row="${r._row}">${cols.map(c => CELLS[c.k](r)).join("")}</tr>`).join("");
+    $("#tb").innerHTML = rows.map(r => `<tr class="click ${r.Stato === "WIP" && isNonAss(r["Solution D&A"]) ? "pre-org" : ""}" data-row="${r._row}">${cols.map(c => CELLS[c.k](r)).join("")}</tr>`).join("");
     $("#tb").querySelectorAll("tr").forEach(tr => tr.onclick = () => openForm(rowByNum(+tr.dataset.row)));
     $("#th").querySelectorAll("th").forEach(th => th.onclick = () => { S.sort = {k: th.dataset.k, dir: S.sort.k === th.dataset.k ? -S.sort.dir : 1}; draw(); });
-    drawChips();
+    const box = $("#f-chips"); box.innerHTML = chipsHtml(chipItems()); bindChips(box, clearChip, () => { S.filt = EMPTY_FILT(); renderTable(m); });
+    // chip di stato con il numero di offerte (tenendo conto degli altri filtri)
+    const base = filteredRows("stato"), cnt = {}; base.forEach(r => { const s = normStato(r.Stato); cnt[s] = (cnt[s] || 0) + 1; });
+    $("#f-stati").innerHTML = STATI.map(s => `<button class="chip fchip ${f.stato.has(s) ? "on" : ""}" data-st="${esc(s)}" aria-pressed="${f.stato.has(s)}">${esc(s)} <span class="muted">${cnt[s] || 0}</span></button>`).join("");
+    $("#f-stati").querySelectorAll("[data-st]").forEach(b => b.onclick = () => { f.stato.has(b.dataset.st) ? f.stato.delete(b.dataset.st) : f.stato.add(b.dataset.st); draw(); });
+    setHash(filtToHash(f));
+    clearTimeout(metricsTimer);                       // riga di sintesi: calcolata dal server con le stesse definizioni del cruscotto e delle schede
+    metricsTimer = setTimeout(async () => {
+      try { const s = await api("/api/metrics", {method: "POST", body: {ids: rows.map(r => r._row)}}); if (!$("#f-sum")) return;
+        $("#f-sum").innerHTML = `<b>${num(s.totale)}</b> offerte · <b>${num(s.aperte)}</b> aperte · win rate <b>${pctN(s.win)}</b>${s.win.ridotto ? ` <span class="ridotto">(campione ridotto)</span>` : ""} · NoBID rate <b>${pctN(s.nobid_rate)}</b>${s.valore ? ` · valore presentato <b>${eur(s.valore.presentato)}</b>` : ""}`; }
+      catch (e) {}
+    }, 120);
+    return rows;
   };
-  draw();
-  const bind = (id, key) => $(id).oninput = e => { S.filt[key] = e.target.value; draw(); };
-  bind("#f-q", "q"); bind("#f-att", "att"); bind("#f-loc", "loc"); bind("#f-stato", "stato"); bind("#f-tipo", "tipo"); bind("#f-market", "market"); bind("#f-vertical", "vertical"); bind("#f-solution", "solution"); bind("#f-anno", "anno");
-  m.querySelectorAll("[data-col]").forEach(c => c.onchange = () => { c.checked ? S.cols.add(c.dataset.col) : S.cols.delete(c.dataset.col); colsSave(); draw(); });
+  let current = draw();
+  const redraw = () => { current = draw(); };
+  const bindMs = (id, key) => $(id).querySelectorAll("[data-v]").forEach(c => c.onchange = () => { c.checked ? f[key].add(c.dataset.v) : f[key].delete(c.dataset.v); const n = f[key].size, s = $(id + " summary"); s.innerHTML = s.firstChild.textContent.trim() + (n ? ` <span class="ms-n">${n}</span>` : ""); redraw(); });
+  bindMs("#ms-market", "market"); bindMs("#ms-tipo", "tipo"); bindMs("#ms-sol", "solution");
+  $("#f-q").oninput = e => { f.q = e.target.value; redraw(); };
+  $("#f-open").onclick = e => { f.aperte = !f.aperte; e.currentTarget.classList.toggle("on", f.aperte); e.currentTarget.setAttribute("aria-pressed", f.aperte); redraw(); };
+  ["att", "loc", "vertical", "anno"].forEach(k => $("#f-" + k).oninput = e => { f[k] = e.target.value; redraw(); });
+  $("#f-csv").onclick = () => downloadCsv(current, COLDEFS.filter(c => S.cols.has(c.k)));
+  m.querySelectorAll("[data-col]").forEach(c => c.onchange = () => { c.checked ? S.cols.add(c.dataset.col) : S.cols.delete(c.dataset.col); colsSave(); redraw(); });
 }
 
 // ------------------------------------------------------------ consegne WIP (una sola lista, modificabile sul posto)
@@ -501,7 +587,7 @@ function renderWip(m) {
 
   m.innerHTML = `
   <div class="fbar">
-    <div><label>Solution D&amp;A</label><details class="ms" id="w-ms"><summary id="w-ms-s"></summary><div class="ms-list" id="w-ms-l"></div></details></div>
+    <div><label>Referente Solution</label><details class="ms" id="w-ms"><summary id="w-ms-s"></summary><div class="ms-list" id="w-ms-l"></div></details></div>
     <div><label>Tipo</label><details class="ms" id="w-mt"><summary id="w-mt-s"></summary><div class="ms-list" id="w-mt-l"></div></details></div>
     <div><label>Attenzione</label><details class="ms" id="w-ma"><summary id="w-ma-s"></summary><div class="ms-list" id="w-ma-l"></div></details></div>
     <div class="fbar-r">Settimana dal ${fmtD(ctx.monday)} al ${fmtD(ctx.sunday)} · le modifiche restano in locale fino a “Esporta in Excel”</div>
@@ -543,7 +629,7 @@ function renderWip(m) {
   const drawMs = () => { multi("w-ms-s", "w-ms-l", solOpts, W.sol, "Tutte"); multi("w-mt-s", "w-mt-l", tipiOpts, W.tipi, "Tutti"); multi("w-ma-s", "w-ma-l", ATT_OPTS, W.atts, "Tutte"); };
   const drawChips = () => {
     const attName = k => (ATT_OPTS.find(o => o[0] === k) || [k, k])[1].replace(/ \(.*\)/, "");
-    const items = [...[...W.sol].map(k => ({id: "s:" + k, label: "Solution: " + solName(k)})), ...[...W.tipi].map(t => ({id: "t:" + t, label: "Tipo: " + t})),
+    const items = [...[...W.sol].map(k => ({id: "s:" + k, label: "Referente: " + solName(k)})), ...[...W.tipi].map(t => ({id: "t:" + t, label: "Tipo: " + t})),
       ...[...W.atts].map(k => ({id: "a:" + k, label: "Attenzione: " + attName(k)})), ...(W.view === "d7" ? [{id: "v", label: "Entro 7 giorni"}] : [])];
     const box = $("#w-chips"); box.innerHTML = chipsHtml(items);
     bindChips(box, id => { if (id === "v") W.view = "all"; else if (id.startsWith("t:")) W.tipi.delete(id.slice(2)); else if (id.startsWith("a:")) W.atts.delete(id.slice(2)); else W.sol.delete(id.slice(2)); resetWipView(); draw(); },
@@ -699,13 +785,15 @@ $("#main").addEventListener("click", e => { const a = e.target.closest("[data-cl
 const durata = t => t && t.media !== null ? `${num(Math.round(t.media))} gg` : "—";
 const vsMedia = (txt) => `<span class="d">${txt}</span>`;
 const pct = r => r === null || r === undefined ? "—" : Math.round(r * 100) + "%";
-const stGroups = (rows, keyOf, order) => {
-  const g = {};
-  rows.forEach(r => { const k = keyOf(r); if (k === null) return; const e = g[k] = g[k] || {nome: k, WIP: 0, "Waiting For response": 0, Won: 0, Lost: 0, Altro: 0, totale: 0};
-    e[["WIP", "Waiting For response", "Won", "Lost"].includes(r.Stato) ? r.Stato : "Altro"]++; e.totale++; });
-  const out = Object.values(g);
-  return order ? out.sort((x, y) => order.indexOf(x.nome) - order.indexOf(y.nome)) : out.sort((x, y) => x.nome.localeCompare(y.nome, "it"));
-};
+// ---- helper metriche: le definizioni stanno in core/metrics.py, qui si formattano soltanto (sempre con la numerosità)
+const pctN = m => m.rate === null ? `— · n=${m.n}` : `${Math.round(m.rate * 100)}% · n=${m.n}`;
+const eur = v => v === null || v === undefined ? "—" : Number(v).toLocaleString("it-IT", {style: "currency", currency: "EUR", maximumFractionDigits: 0});
+const isNonAss = v => { const t = (v || "").trim().toLowerCase(); return !t || t === "non assegnato"; };
+const refCell = x => x.Stato === "WIP" && isNonAss(x.referente ?? x["Solution D&A"]) ? `<span class="nonass" title="Offerta in corso senza referente">Non Assegnato</span>` : orNil(x.referente ?? x["Solution D&A"]);
+const giorniFa = n => n === 0 ? "oggi" : n === 1 ? "ieri" : `${n} giorni fa`;
+const kcard = (n, label, lines, cls = "") => `<div class="card kpi ${cls}"><div class="n">${n}</div><div class="l">${label}</div>${lines.filter(Boolean).map(l => `<div class="kl">${l}</div>`).join("")}</div>`;
+const annoOpts = full => [["", "Tutti gli anni"], ...full.anni_disponibili.slice().reverse().map(a => [String(a), String(a)])];
+
 function renderCliente(m) {
   const names = S.data.domini.clienti.map(c => c.Cliente);
   const attivi = Object.entries(S.data.rows.reduce((a, r) => { if (r.Cliente) a[r.Cliente.trim()] = (a[r.Cliente.trim()] || 0) + 1; return a; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 14);
@@ -724,81 +812,140 @@ function renderCliente(m) {
   q.oninput = () => show(q.value); q.onchange = () => show(q.value);
   const bk = $("#cl-back"); if (bk) bk.onclick = () => { S.view = S.prevView || "dash"; S.prevView = null; render(); };
   const loadBody = async () => {
-    const nome = S.cliente; q.value = nome; S.clTipo = ""; S.clAnno = String(annoCorrente());
+    const nome = S.cliente; q.value = nome; S.clTipo = ""; S.clAnno = ""; S.clStati = new Set(); S.clOpen = new Set();      // di default: tutti gli anni
     body.innerHTML = `<p class="muted pad">Caricamento…</p>`;
-    const url = "/api/cliente?nome=" + encodeURIComponent(nome);
-    try { [S.clFull, S.clYear] = await Promise.all([api(url), api(url + "&anno=" + S.clAnno)]); }
+    try { S.clFull = S.clYear = await api("/api/cliente?nome=" + encodeURIComponent(nome)); }
     catch (e) { body.innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div></div>`; return; }
     if (S.view !== "cliente" || S.cliente !== nome) return;
     drawCliente(body);
   };
   if (S.cliente) loadBody(); else picker();
 }
-const annoCorrente = () => new Date().getFullYear();
 async function setAnnoCliente(body, anno) {
-  S.clAnno = String(anno);
-  try { S.clYear = await api(`/api/cliente?nome=${encodeURIComponent(S.cliente)}&anno=${anno}`); drawCliente(body); }
+  S.clAnno = String(anno || ""); S.clStati = new Set(); S.clOpen = new Set();
+  try { S.clYear = S.clAnno ? await api(`/api/cliente?nome=${encodeURIComponent(S.cliente)}&anno=${S.clAnno}`) : S.clFull; drawCliente(body); }
   catch (e) { toast(e.message, true); }
 }
-const storicoRows = list => list.map(x => `<tr class="click" data-row="${x._row}"><td>${x["Data ins."] ? fmt(x["Data ins."]) : nil()}</td><td class="og" title="${esc(x.Oggetto)}">${attDot(x)}${orNil(x.Oggetto)}</td><td>${tipoChip(x.tipo)}</td><td>${orNil(x["Solution D&A"])}</td><td>${badge(x.Stato)}</td><td>${x["Data consegna"] ? fmt(x["Data consegna"]) : nil()}</td><td class="num">${x.giorni === null ? nil() : x.giorni}</td><td>${orNil(x.SS)}</td></tr>`).join("");
-const STORICO_HEAD = `<thead><tr><th>Data ins.</th><th>Oggetto</th><th>Tipo</th><th>Solution D&amp;A</th><th>Stato</th><th>Consegna</th><th class="num">Giorni</th><th>SS</th></tr></thead>`;
-// prima la situazione dell'anno scelto (di default l'anno in corso), sotto la visione pluriennale
+
+// percorso delle offerte: totali -> NoBID / Sospese / in lavorazione / presentate -> in attesa, Won, Lost
+function funnelHtml(rows) {
+  const n = st => rows.filter(x => x.Stato === st).length, tot = rows.length;
+  if (!tot) return `<div class="empty">Nessuna offerta${S.clTipo ? " di questo tipo" : ""}.</div>`;
+  const pres = n("Waiting For response") + n("Won") + n("Lost");
+  const row = (label, v, cls, base, sub = false) => `<div class="fn ${sub ? "fn-sub" : ""}"><div class="fn-l">${label}</div><div class="fn-t"><i class="${cls}" style="width:${Math.max(base ? 100 * v / base : 0, v ? 2 : 0).toFixed(1)}%"></i></div><div class="fn-v"><b>${v}</b><span>${base ? Math.round(100 * v / base) + "%" : ""}</span></div></div>`;
+  return `<div class="funnel">${row("Opportunità totali", tot, "fn-tot", tot)}${row("NoBID", n("NoBID"), "s-NoBID", tot)}${row("Sospese", n("Sospeso"), "s-Sospeso", tot)}${row("In lavorazione (WIP)", n("WIP"), "s-WIP", tot)}${row("Presentate", pres, "fn-pres", tot)}
+    ${row("In attesa", n("Waiting For response"), "s-Waiting", pres || 1, true)}${row("Won", n("Won"), "s-Won", pres || 1, true)}${row("Lost", n("Lost"), "s-Lost", pres || 1, true)}</div>
+    <div class="hint">I valori sotto “Presentate” sono in % delle presentate; gli altri in % delle opportunità totali.</div>`;
+}
+
+// trend: barre impilate per stato + win rate (asse destro). Un anno scelto = dettaglio mensile; altrimenti trimestri di tutti gli anni.
+function trendHtml(rows, anno) {
+  const dated = rows.filter(x => x["Data ins."]);
+  if (!dated.length) return `<div class="empty">Nessuna offerta con Data ins.</div>`;
+  const key = anno ? x => +x["Data ins."].slice(5, 7) - 1 : x => +x["Data ins."].slice(0, 4) * 4 + Math.floor((+x["Data ins."].slice(5, 7) - 1) / 3);
+  const ks = dated.map(key), lo = anno ? 0 : Math.min(...ks), hi = anno ? 11 : Math.max(...ks);
+  const lab = k => anno ? MESI[k] : `T${k % 4 + 1} ${String(Math.floor(k / 4)).slice(2)}`;
+  const B = []; for (let k = lo; k <= hi; k++) { const rs = dated.filter(x => key(x) === k), c = {}; SEGS.forEach(s => c[s] = rs.filter(x => x.Stato === s).length); const w = c.Won + c.Lost; B.push({k, c, tot: rs.length, w, rate: w ? c.Won / w : null}); }
+  const W = 700, H = 320, L = 40, R = 44, T = 26, Bt = 44, n = B.length, plot = H - T - Bt, mx = Math.max(1, ...B.map(b => b.tot)), step0 = Math.max(1, Math.ceil(mx / 4)), nice = step0 * 4;
+  const y = v => T + plot * (1 - v / nice), yr = r => T + plot * (1 - r), sx = (W - L - R) / n, bw = Math.min(46, sx * .66), cx = i => L + i * sx + sx / 2;
+  let g = SVG_DEFS;
+  for (let q = 0; q <= 4; q++) g += `<line x1="${L}" x2="${W - R}" y1="${y(step0 * q)}" y2="${y(step0 * q)}" stroke="var(--chart-grid)"/><text x="${L - 8}" y="${y(step0 * q) + 4}" text-anchor="end">${step0 * q}</text><text x="${W - R + 8}" y="${yr(q / 4) + 4}">${q * 25}%</text>`;
+  const every = Math.ceil(n / 14);
+  B.forEach((b, i) => { let acc = 0; const x = cx(i) - bw / 2;
+    SEGS.forEach(s => { const v = b.c[s]; if (!v) return; const y1 = y(acc + v), h = y(acc) - y1; acc += v;
+      g += `<rect x="${x}" y="${y1}" width="${bw}" height="${Math.max(h - 1, 1)}" fill="${COLOR[s]}" rx="2"><title>${lab(b.k)} · ${segLabel(s)}: ${v}</title></rect>`;
+      if (h >= 15 && bw >= 18) g += `<text x="${cx(i)}" y="${y1 + h / 2 + 4}" text-anchor="middle" style="fill:${ST[s].dark ? "#fff" : "var(--eng-dark)"};font-weight:600;font-size:11px;pointer-events:none">${v}</text>`; });
+    if (i % every === 0) g += `<text x="${cx(i)}" y="${H - 22}" text-anchor="middle">${lab(b.k)}</text>`; });
+  const pts = B.map((b, i) => b.rate === null ? null : [cx(i), yr(b.rate), b]);
+  let path = "", pen = false; pts.forEach(p => { if (!p) { pen = false; return; } path += `${pen ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`; pen = true; });
+  g += `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2.5"/>` + pts.filter(Boolean).map(p => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4.5" fill="#fff" stroke="var(--accent)" stroke-width="2.5"><title>${lab(p[2].k)} · win rate ${Math.round(p[2].rate * 100)}% · n=${p[2].w}</title></circle>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Offerte per stato e win rate nel tempo">${g}</svg>
+    <div class="legend">${SEGS.map(legendItem).join("")}<span><i class="lg-line"></i>Win rate (asse destro, n = Won + Lost del periodo)</span></div>`;
+}
+
+const PRE_HEAD = `<thead><tr><th>Tipo</th><th>Oggetto</th><th>Referente Solution</th><th>Stato</th><th>Consegna</th><th>Scade tra</th></tr></thead>`;
+function scadeTag(g, stato) {
+  if (g === null) return `<span class="tag d-none">senza data</span>`;
+  if (stato !== "WIP") return `<span class="muted">${g < 0 ? `in attesa da ${-g} gg` : "—"}</span>`;
+  return g < 0 ? `<span class="tag d-late">scaduta da ${-g} gg</span>` : g <= 3 ? `<span class="tag d-late">${g === 0 ? "oggi" : g + " gg"}</span>` : g <= 7 ? `<span class="tag d-week">${g} gg</span>` : `<span class="tag d-over">${g} gg</span>`;
+}
+function presidiareHtml(c) {
+  if (!c.presidiare.length) return `<div class="empty">Nessuna offerta aperta.</div>`;
+  return `<div class="tscroll"><table class="dt">${PRE_HEAD}<tbody>${c.presidiare.map(p => `<tr class="click ${p.urgente ? "pre-red" : p.non_assegnata ? "pre-org" : ""}" data-row="${p._row}"><td>${tipoChip(p.tipo)}</td><td class="og" title="${esc(p.Oggetto)}">${orNil(p.Oggetto)}</td><td>${p.non_assegnata ? `<span class="nonass">Non Assegnato</span>` : orNil(p.referente)}</td><td>${badge(p.Stato)}</td><td>${p["Data consegna"] ? fmt(p["Data consegna"]) : nil()}</td><td>${scadeTag(p.giorni, p.Stato)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
 function drawCliente(body) {
-  const full = S.clFull, c = S.clYear, anno = S.clAnno;
-  const k = c.kpi, md = c.media, tk = k.tempi, tg = md.tempi, cart = full.cartella;
-  const anni = [...new Set([...full.anni_disponibili, annoCorrente()])].sort((a, b) => b - a);
-  const cmpTempo = tk.media === null || tg.media === null ? "" : vsMedia(`media generale ${durata(tg)}`);
-  const tipiPresenti = [...TIPI_MAIN, "Altro"].filter(t => full.cronologia.some(x => tipoGroup(x.tipo) === t));
+  const full = S.clFull, c = S.clYear, anno = S.clAnno, k = c.kpi, at = c.alltime, mk = c.mercato, gn = c.generale, opz = new Set(full.opzionali);
+  const periodo = anno ? `nel ${anno}` : "(tutti gli anni)";
+  const tipiPresenti = [...TIPI_MAIN, "Altro"].filter(t => c.cronologia.some(x => tipoGroup(x.tipo) === t));
+  const rateLines = key => [anno ? `All-time cliente: <b>${pctN(at[key])}</b>` : "", mk ? `Market ${esc(mk.nome)}: <b>${pctN(mk[key])}</b>` : "", `<span class="muted">Media generale: ${pctN(gn[key])}</span>`];
+  const low = m => m.ridotto ? ` · <span class="ridotto">campione ridotto</span>` : "";
+  const val = m => `<span>${m.rate === null ? "—" : Math.round(m.rate * 100) + "%"}</span><span class="nn">n=${m.n}</span>`;
+  const pv = k.preavviso, pm = mk && mk.preavviso, pg = gn.preavviso;
   body.innerHTML = `
   <div class="card chead"><div class="chead-t"><h2 class="cname">${esc(full.nome)}</h2>
-      <div class="cmeta">${full.vertical ? `<span class="tchip">${esc(full.vertical)}</span>` : ""}${full.market ? `<span class="tchip">${esc(full.market)}</span>` : ""}${full.ss.length ? `<span class="tchip" title="Prefisso del codice SS">SS ${esc(full.ss.join(", "))}</span>` : ""}
-      <span class="muted">${full.prima ? `Prima offerta ${fmt(full.prima)}` : ""}${full.ultima ? ` · ultima ${fmt(full.ultima.data)} ${badge(full.ultima.stato)}` : ""}</span></div></div>
-    ${cart.stato !== "nessuna" && S.state.local !== false ? `<button id="cl-folder" class="btn-sec" title="${cart.nome ? esc(cart.nome) : "Scegli la cartella di questo cliente"}">${ico("folder-open")}${cart.stato === "ok" ? "Apri cartella" : "Apri cartella…"}</button>` : ""}</div>
+      <div class="cmeta">${full.vertical ? `<span class="tchip">${esc(full.vertical)}</span>` : ""}${full.market ? `<span class="tchip">${esc(full.market)}</span>` : ""}
+      <span class="cind"><b>${full.aperte}</b> ${full.aperte === 1 ? "aperta" : "aperte"}${full.ultima ? ` · ultima offerta ${giorniFa(full.ultima.giorni_fa)}` : ""}</span>${full.prima ? `<span class="muted">· cliente dal ${fmt(full.prima)}</span>` : ""}</div></div>
+    ${full.cartella.stato !== "nessuna" && S.state.local !== false ? `<button id="cl-folder" class="btn-sec" title="${full.cartella.nome ? esc(full.cartella.nome) : "Scegli la cartella di questo cliente"}">${ico("folder-open")}${full.cartella.stato === "ok" ? "Apri cartella" : "Apri cartella…"}</button>` : ""}</div>
 
-  <div class="sect-h"><h3 class="sect">Situazione ${esc(anno)}</h3>
-    <div><label for="cl-anno" class="sr">Anno</label><select id="cl-anno" title="Cambia l'anno mostrato in questa sezione (Data ins.)">${anni.map(a => `<option value="${a}" ${String(a) === String(anno) ? "selected" : ""}>${a}</option>`).join("")}</select></div></div>
+  <div class="card pre"><div class="pre-h"><h2>Da presidiare</h2><span class="muted">offerte WIP e in attesa di risposta · rosso = consegna entro 3 giorni o scaduta · arancio = senza referente</span></div>${presidiareHtml(full)}</div>
+
+  <div class="sect-h"><h3 class="sect">${anno ? `Anno ${esc(anno)}` : "Tutti gli anni"}</h3>
+    <div><label for="cl-anno" class="sr">Anno</label><select id="cl-anno" title="Mostra indicatori, grafici e tabella di un solo anno (Data ins.)">${annoOpts(full).map(([v, l]) => `<option value="${v}" ${v === anno ? "selected" : ""}>${l}</option>`).join("")}</select></div></div>
   <div class="kpis">
-    ${kpi(num(k.totale), `Offerte nel ${esc(anno)} · ${md.offerte_per_cliente ?? "—"} in media per cliente`)}
-    ${kpi(num(k.wip + k.waiting), `In corso · ${k.wip} WIP, ${k.waiting} in attesa`)}
-    ${kpi(`${k.won}<span class="of">/${k.chiuse}</span>`, "Won su offerte chiuse (Won + Lost)")}
-    ${kpi(pct(k.rate), "Win rate", md.rate === null ? "" : vsMedia(`media generale ${pct(md.rate)}`), k.chiuse ? "key" : "")}
-    ${kpi(durata(tk), `Tempo medio di consegna${tk.n ? ` · mediana ${num(Math.round(tk.mediana))} gg su ${tk.n} offerte` : ""}`, cmpTempo)}
+    ${kcard(num(k.totale), `Offerte ${periodo}`, [`${k.aperte} aperte`, `<span class="muted">${gn.offerte_per_cliente ?? "—"} in media per cliente</span>`])}
+    ${kcard(num(k.wip + k.waiting), "In corso", [`${k.wip} WIP · ${k.waiting} in attesa`])}
+    ${kcard(val(k.win), `Win rate ${periodo}${low(k.win)}`, rateLines("win"), k.win.ridotto || k.win.rate === null ? "" : "key")}
+    ${kcard(val(k.bid), `Bid rate ${periodo}${low(k.bid)}`, [`NoBID rate: <b>${pctN(k.nobid_rate)}</b>`, anno ? `All-time cliente: <b>${pctN(at.bid)}</b>` : "", mk ? `Market ${esc(mk.nome)}: <b>${pctN(mk.bid)}</b> · NoBID ${pctN(mk.nobid_rate)}` : "", `<span class="muted">Media generale: ${pctN(gn.bid)} · NoBID ${pctN(gn.nobid_rate)}</span>`], k.bid.ridotto || k.bid.rate === null ? "" : "key")}
+    ${kcard(pv.media === null ? "—" : `${Math.round(pv.media)} gg`, "Preavviso medio", [`giorni concessi dal cliente per rispondere${pv.n ? ` · mediana ${Math.round(pv.mediana)} gg (n=${pv.n})` : ""}`, pm && pm.mediana !== null ? `Market ${esc(mk.nome)}: mediana ${Math.round(pm.mediana)} gg (n=${pm.n})` : "", pg.mediana !== null ? `<span class="muted">Media generale: mediana ${Math.round(pg.mediana)} gg</span>` : ""])}
   </div>
   <div class="g12">
-    <div class="card c7"><h2>Offerte per mese</h2><div class="sub">Nel ${esc(anno)}, per Data ins., divise per stato.</div><div id="cl-mesi"></div></div>
-    <div class="card c5"><h2>Per tipologia</h2><div class="sub">Offerte del ${esc(anno)} divise per tipo e stato.</div><div id="cl-tipi"></div></div>
+    <div class="card c7"><h2>${anno ? `Offerte per mese · ${esc(anno)}` : "Offerte per trimestre"}</h2><div class="sub">Per Data ins., divise per stato, con il win rate del periodo.${anno ? "" : " Scegli un anno per il dettaglio mensile."}</div><div id="cl-trend"></div></div>
+    <div class="card c5"><div class="card-h"><div><h2>Percorso delle offerte</h2><div class="sub">Dalle opportunità alle presentate e all'esito.</div></div></div>
+      <div class="chips" id="cl-tipi">${[["", "Tutti"], ...tipiPresenti.map(t => [t, TIPO_SHORT[t] || t])].map(([v, l]) => `<button class="chip fchip ${S.clTipo === v ? "on" : ""}" data-tipo="${esc(v)}">${esc(l)} <span class="muted">${v ? c.cronologia.filter(x => tipoGroup(x.tipo) === v).length : c.cronologia.length}</span></button>`).join("")}</div>
+      <div id="cl-funnel"></div></div>
   </div>
-  <div class="card"><h2>Offerte del ${esc(anno)}</h2><div class="sub">Dalla più recente. Giorni = da Data ins. a Data consegna (solo offerte già consegnate).</div>
-    ${c.cronologia.length ? `<div class="tscroll"><table class="dt">${STORICO_HEAD}<tbody>${storicoRows(c.cronologia)}</tbody></table></div>` : `<div class="empty">Nessuna offerta aperta nel ${esc(anno)}.</div>`}</div>
-
-  <div class="sect-h"><h3 class="sect">Visione pluriennale</h3></div>
-  <div class="g12">
-    <div class="card c7"><div class="card-h"><div><h2>Offerte per anno</h2><div class="sub">Tutti gli anni, per Data ins., divise per stato.</div></div>
-      <div><label for="cl-tipo" class="sr">Tipo</label><select id="cl-tipo"><option value="">Tutti i tipi</option>${tipiPresenti.map(t => `<option>${esc(t)}</option>`).join("")}</select></div></div>
-      <div id="cl-anni"></div></div>
-    <div class="card c5"><h2>Per tipologia</h2><div class="sub">Tutti gli anni.</div><div id="cl-tipi-all"></div></div>
-  </div>
-  <div class="card"><h2>Riepilogo per anno</h2><div class="sub">Clicca un anno per vederne la situazione qui sopra.</div>
-    <div class="tscroll"><table class="dt"><thead><tr><th>Anno</th><th class="num">Offerte</th><th class="num">Won</th><th class="num">Lost</th><th class="num">In corso</th><th class="num">Win rate</th><th class="num">Tempo medio</th></tr></thead><tbody>
-    ${full.riepilogo.map(a => `<tr class="${a.anno ? "click" : ""}" ${a.anno ? `data-anno="${a.anno}"` : ""}><td><b>${a.anno ?? "senza data"}</b></td><td class="num">${a.totale}</td><td class="num">${a.won}</td><td class="num">${a.lost}</td><td class="num">${a.wip + a.waiting}</td><td class="num">${pct(a.rate)}</td><td class="num">${durata(a.tempi)}</td></tr>`).join("")}
-    </tbody></table></div></div>
-  <details class="card"><summary><b>Storico completo</b> <span class="muted">(${full.cronologia.length} offerte)</span></summary><div class="tscroll" style="margin-top:12px"><table class="dt">${STORICO_HEAD}<tbody>${storicoRows(full.cronologia)}</tbody></table></div></details>`;
+  <div class="card"><h2>Team sul cliente</h2><div class="sub">Per Referente Solution ${periodo}. Un'offerta con più referenti conta per ciascuno.</div>
+    ${c.team.length ? `<div class="tscroll"><table class="dt"><thead><tr><th>Referente Solution</th><th class="num">Offerte</th><th class="num">Aperte</th><th class="num">Won</th><th class="num">Lost</th><th class="num">NoBID</th></tr></thead><tbody>
+    ${c.team.map(t => `<tr class="${t.non_assegnato && t.wip ? "row-warn" : ""}"><td>${t.non_assegnato ? `<span class="${t.wip ? "nonass" : ""}">Non Assegnato</span>` : esc(t.nome)}</td><td class="num">${t.totale}</td><td class="num">${t.aperte}</td><td class="num">${t.won}</td><td class="num">${t.lost}</td><td class="num">${t.nobid}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Nessuna offerta.</div>`}</div>
+  ${c.valore ? `<div class="card"><h2>Valore</h2><div class="sub">Calcolato sulle offerte ${periodo} con un valore indicato nell'Excel.</div><div class="kpis kpis-s">
+    ${kcard(eur(c.valore.presentato), "Valore presentato", [])}${kcard(eur(c.valore.vinto), "Valore vinto", [])}
+    ${kcard(c.valore.win_rate === null ? "—" : Math.round(c.valore.win_rate * 100) + "%", "Win rate sul valore", ["€ Won / (€ Won + € Lost)"])}
+    ${kcard(eur(c.valore.pipeline), "Pipeline aperta", [])}${c.valore.pipeline_pesata !== null ? kcard(eur(c.valore.pipeline_pesata), "Pipeline pesata", ["Σ valore × Pwin"]) : ""}</div></div>` : ""}
+  <div class="card"><h2>${anno ? `Offerte del ${esc(anno)}` : "Tutte le offerte"}</h2><div class="sub">Dalla più recente. Preavviso = giorni tra Data ins. e Consegna.</div>
+    <div class="chips" id="cl-stati"></div><div id="cl-tab"></div></div>
+  <div class="card"><h2>Riepilogo per anno</h2><div class="sub">Clicca un anno per vederlo qui sopra.</div>
+    <div class="tscroll"><table class="dt"><thead><tr><th>Anno</th><th class="num">Offerte</th><th class="num">Aperte</th><th class="num">Won</th><th class="num">Lost</th><th class="num">NoBID</th><th class="num">Win rate</th><th class="num">Preavviso medio</th></tr></thead><tbody>
+    ${full.riepilogo.map(a => `<tr class="${a.anno ? "click" : ""}" ${a.anno ? `data-anno="${a.anno}"` : ""}><td><b>${a.anno ?? "senza data"}</b></td><td class="num">${a.totale}</td><td class="num">${a.aperte}</td><td class="num">${a.won}</td><td class="num">${a.lost}</td><td class="num">${a.nobid}</td><td class="num">${pctN(a.win)}</td><td class="num">${a.preavviso.media === null ? "—" : Math.round(a.preavviso.media) + " gg"}</td></tr>`).join("")}</tbody></table></div></div>`;
   body.querySelectorAll("tr[data-row]").forEach(tr => tr.onclick = () => openForm(rowByNum(+tr.dataset.row)));
   body.querySelectorAll("tr[data-anno]").forEach(tr => tr.onclick = () => { setAnnoCliente(body, tr.dataset.anno); window.scrollTo({top: 0, behavior: "smooth"}); });
-  const noClick = el => el.querySelectorAll("[data-grp]").forEach(e => e.style.cursor = "default");
-  const mesi = stGroups(c.cronologia, x => x["Data ins."] ? MESI[+x["Data ins."].slice(5, 7) - 1] : null, MESI);
-  $("#cl-mesi").innerHTML = mesi.length ? vcolumns(mesi) : `<div class="empty">Nessuna offerta nel ${esc(anno)}.</div>`; noClick($("#cl-mesi"));
-  $("#cl-tipi").innerHTML = c.cronologia.length ? hbars(stGroups(c.cronologia, x => tipoGroup(x.tipo), [...TIPI_MAIN, "Altro"])) : `<div class="empty">Nessuna offerta nel ${esc(anno)}.</div>`; noClick($("#cl-tipi"));
-  const anniChart = () => {
-    const rows = full.cronologia.filter(x => !S.clTipo || tipoGroup(x.tipo) === S.clTipo);
-    const g = stGroups(rows, x => x["Data ins."] ? x["Data ins."].slice(0, 4) : "senza data");
-    $("#cl-anni").innerHTML = g.length ? vcolumns(g) : `<div class="empty">Nessuna offerta di questo tipo.</div>`; noClick($("#cl-anni"));
-  };
-  anniChart();
-  $("#cl-tipi-all").innerHTML = hbars(stGroups(full.cronologia, x => tipoGroup(x.tipo), [...TIPI_MAIN, "Altro"])); noClick($("#cl-tipi-all"));
   $("#cl-anno").onchange = e => setAnnoCliente(body, e.target.value);
-  $("#cl-tipo").value = S.clTipo || ""; $("#cl-tipo").onchange = e => { S.clTipo = e.target.value; anniChart(); };
+  $("#cl-trend").innerHTML = trendHtml(c.cronologia, anno);
+  const funnel = () => { $("#cl-funnel").innerHTML = funnelHtml(c.cronologia.filter(x => !S.clTipo || tipoGroup(x.tipo) === S.clTipo)); body.querySelectorAll("#cl-tipi .fchip").forEach(b => b.classList.toggle("on", b.dataset.tipo === S.clTipo)); };
+  funnel();
+  body.querySelectorAll("#cl-tipi .fchip").forEach(b => b.onclick = () => { S.clTipo = b.dataset.tipo; funnel(); });
+  drawCliTable(c, opz);
   const f = $("#cl-folder"); if (f) f.onclick = () => apriCartella(full);
+}
+
+// tabella delle offerte del cliente: chip di stato con conteggio, colonne facoltative, offerte "figlie" sotto la gara padre
+function drawCliTable(c, opz) {
+  const cnt = {}; c.cronologia.forEach(x => cnt[x.Stato] = (cnt[x.Stato] || 0) + 1);
+  const chips = $("#cl-stati");
+  chips.innerHTML = STATI.filter(s => cnt[s]).map(s => `<button class="chip fchip ${S.clStati.has(s) ? "on" : ""}" data-st="${esc(s)}">${esc(s)} <span class="muted">${cnt[s]}</span></button>`).join("") + (S.clStati.size ? `<button class="linkbtn" data-st="">Tutti gli stati</button>` : "");
+  chips.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { b.dataset.st ? (S.clStati.has(b.dataset.st) ? S.clStati.delete(b.dataset.st) : S.clStati.add(b.dataset.st)) : S.clStati.clear(); drawCliTable(c, opz); });
+  const rows = c.cronologia.filter(x => !S.clStati.size || S.clStati.has(x.Stato));
+  const padre = opz.has("gara_padre"), seqs = new Set(rows.map(x => x.Seq)), kids = {};
+  if (padre) rows.forEach(x => { const p = x.opt && x.opt.gara_padre; if (p && seqs.has(p) && p !== x.Seq) (kids[p] = kids[p] || []).push(x); });
+  const isKid = x => padre && x.opt && x.opt.gara_padre && seqs.has(x.opt.gara_padre) && x.opt.gara_padre !== x.Seq;
+  const extra = [opz.has("valore") || opz.has("valore_offerto") ? ["Valore", x => `<td class="num">${eur(x.opt.valore_offerto ?? x.opt.valore ?? null)}</td>`] : null, opz.has("motivo_esito") ? ["Motivo esito", x => `<td>${orNil(x.opt.motivo_esito)}</td>`] : null].filter(Boolean);
+  const tr = (x, lvl) => `<tr class="click ${lvl ? "child" : ""}" data-row="${x._row}"><td>${padre && kids[x.Seq] ? `<button class="tog" data-seq="${x.Seq}" aria-expanded="${S.clOpen.has(x.Seq)}" title="Mostra le offerte derivate">${ico("chevron-right")}</button>` : ""}${x["Data ins."] ? fmt(x["Data ins."]) : nil()}</td><td class="og" title="${esc(x.Oggetto)}">${attDot(x)}${orNil(x.Oggetto)}</td><td>${tipoChip(x.tipo)}</td><td>${refCell(x)}</td><td>${badge(x.Stato)}</td><td>${x["Data consegna"] ? fmt(x["Data consegna"]) : nil()}</td><td class="num">${x.preavviso === null ? nil() : x.preavviso}</td>${extra.map(e => e[1](x)).join("")}</tr>`;
+  const out = [];
+  rows.filter(x => !isKid(x)).forEach(x => { out.push(tr(x, 0)); if (kids[x.Seq] && S.clOpen.has(x.Seq)) kids[x.Seq].forEach(k => out.push(tr(k, 1))); });
+  $("#cl-tab").innerHTML = rows.length ? `<div class="tscroll"><table class="dt"><thead><tr><th>Data ins.</th><th>Oggetto</th><th>Tipo</th><th>Referente Solution</th><th>Stato</th><th>Consegna</th><th class="num">Preavviso (gg)</th>${extra.map(e => `<th${e[0] === "Valore" ? ' class="num"' : ""}>${e[0]}</th>`).join("")}</tr></thead><tbody>${out.join("")}</tbody></table></div>` : `<div class="empty">Nessuna offerta con questi filtri.</div>`;
+  const t = $("#cl-tab");
+  t.querySelectorAll("tr[data-row]").forEach(r => r.onclick = () => openForm(rowByNum(+r.dataset.row)));
+  t.querySelectorAll(".tog").forEach(b => b.onclick = e => { e.stopPropagation(); const q = +b.dataset.seq; S.clOpen.has(q) ? S.clOpen.delete(q) : S.clOpen.add(q); drawCliTable(c, opz); });
 }
 async function apriCartella(c) {
   const call = async cartella => { try { await api("/api/cliente/cartella", {method: "POST", body: {cliente: c.nome, cartella}}); toast("Cartella aperta in Esplora risorse"); } catch (e) { toast(e.message, true); } };
@@ -821,7 +968,7 @@ async function renderTempi(m) {
     <div class="fbar-r">Giorni tra Data ins. e Data consegna, solo offerte già consegnate (esclusi WIP e NoBID)</div></div>
   <div class="kpis">${kpi(durata(t.totale), `Tempo medio di consegna · ${num(t.totale.n)} offerte`, "", "key")}${kpi(t.totale.n ? num(Math.round(t.totale.mediana)) + " gg" : "—", "Mediana (meno sensibile ai casi estremi)")}</div>
   <div class="g12"><div class="card c6"><h2>Per tipo di offerta</h2><div class="sub">Quanto serve per consegnare, in media, per ogni tipo.</div>${bars(t.tipo)}</div>
-    <div class="card c6"><h2>Per Solution D&amp;A</h2><div class="sub">Un'offerta con più nomi conta per ciascuno di loro.</div>${bars(t.solution)}</div></div>
+    <div class="card c6"><h2>Per Referente Solution</h2><div class="sub">Un'offerta con più nomi conta per ciascuno di loro.</div>${bars(t.solution)}</div></div>
   <div class="card"><h2>Per Vertical</h2><div class="sub">Utile per stimare una scadenza realistica quando arriva una nuova richiesta.</div>${bars(t.vertical)}</div>`;
   $("#tp").onchange = e => { S.tempiMesi = e.target.value; render(); };
 }
@@ -849,7 +996,7 @@ function openForm(row) {
     <div><label class="req" for="f-Stato">Stato</label>${sel("f-Stato", STATI, normStato(v.Stato) || v.Stato, true)}</div>
     ${inp("f-Data ins.", "Data ins. (apertura)", v["Data ins."], "", "date", true)}
     <div><label for="f-Data consegna">Data consegna</label><input id="f-Data consegna" type="date" value="${esc(v["Data consegna"])}"><div class="hint" id="h-dc"></div></div>
-    <div class="full"><label for="f-Solution D&A">Solution D&amp;A</label><input id="f-Solution D&A" list="dl-sol" value="${esc(v["Solution D&A"])}" autocomplete="off" placeholder="Scegli o scrivi i nomi, separati da /"><datalist id="dl-sol">${OWNERS.map(o => `<option value="${o}">`).join("")}</datalist>
+    <div class="full"><label for="f-Solution D&A">Referente Solution</label><input id="f-Solution D&A" list="dl-sol" value="${esc(v["Solution D&A"])}" autocomplete="off" placeholder="Scegli o scrivi i nomi, separati da /"><datalist id="dl-sol">${OWNERS.map(o => `<option value="${o}">`).join("")}</datalist>
       <div class="ochips" id="o-chips">${OWNERS.map(o => `<button type="button" class="ochip" data-o="${o}">${o}</button>`).join("")}</div><div class="hint" id="h-sol"></div></div>
     ${edit ? `<div class="full"><label for="f-Attenzione">Attenzione (colora il nome cliente nell'Excel)</label><select id="f-Attenzione">${attOpts(v.Attenzione)}</select></div>` : ""}
   </div>
@@ -868,7 +1015,7 @@ function openForm(row) {
   ["SS", "Commessa"].forEach(k => F_(k).oninput = () => dirty[k] = true);
   const hintSol = () => {
     const s = g("Solution D&A").trim(), names = splitSol(s).map(x => x.toLowerCase());
-    $("#h-sol", el).textContent = s ? "" : "Senza Solution D&A la riga comparirà nei punti di attenzione."; $("#h-sol", el).className = "hint warn";
+    $("#h-sol", el).textContent = s ? "" : "Senza referente la riga comparirà nei punti di attenzione."; $("#h-sol", el).className = "hint warn";
     el.querySelectorAll(".ochip").forEach(c => c.classList.toggle("on", names.includes(c.dataset.o.toLowerCase())));
   };
   F_("Solution D&A").oninput = hintSol; hintSol();
@@ -977,4 +1124,5 @@ $("#btn-settings").onclick = () => openSettings(false);
 $("#btn-pin").onclick = () => setPinned(!document.body.classList.contains("pinned"));
 hydrateIcons();
 try { setPinned(localStorage.getItem(PIN_KEY) === "1", false); } catch (e) {}
+if (location.hash.startsWith("#tabella")) { S.view = "table"; S.filt = hashToFilt(location.hash); }       // vista filtrata condivisa tramite indirizzo
 loadAll(false);

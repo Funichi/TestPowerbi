@@ -18,7 +18,7 @@ import threading
 import datetime as dt
 
 from .normalize import normalize_rows
-from .reader import DATE_FIELDS, FIELDS, build_row, clean_text, row_sig, to_iso
+from .reader import DATE_FIELDS, FIELDS, build_row, clean_text, optional_columns, row_sig, to_iso
 
 KEEP_DB_BACKUPS = 20
 
@@ -99,7 +99,8 @@ class Store:
     def load(self):
         domini = self.meta("domini", {})
         with self.conn() as c:
-            rows = [build_row(r["__id"], r["__xl"], cells, orig, r["__state"], r["__att"]) for r, cells, orig in self._rows(c)]
+            opt = optional_columns(self.meta("headers", []))
+            rows = [build_row(r["__id"], r["__xl"], cells, orig, r["__state"], r["__att"], opt) for r, cells, orig in self._rows(c)]
         return {"rows": normalize_rows(rows, domini), "domini": domini}
 
     def counts(self):
