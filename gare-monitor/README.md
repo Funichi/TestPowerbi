@@ -39,3 +39,19 @@ Il percorso del database si può cambiare con `"db_path"` in `config.json`. Per 
 L'artefatto di GitHub Actions è una cartella (GareOfferte.exe + _internal), non più un singolo exe: gli exe singoli vengono spesso bloccati da Defender come falsi positivi.
 Chiudi l'app, estrai lo zip **sopra** la cartella esistente (es. `C:\Script\Monitoraggio History`) sovrascrivendo i file: `config.json`, `monitoraggio.db` e `backup` restano intatti.
 Se Defender blocca comunque il file: Sicurezza di Windows > Protezione da virus > Cronologia protezione > Consenti sul file; oppure segnalalo come falso positivo su https://www.microsoft.com/wdsi/filesubmission.
+
+## Usare l'app da un altro dispositivo o da internet
+
+L'Excel "master" resta quello condiviso su SharePoint. Sul PC dove gira l'app tieni una copia: quando i colleghi hanno modificato il file condiviso, sovrascrivi la copia locale con quella aggiornata. L'app se ne accorge entro un minuto e rilegge i dati da sola; se ci sono modifiche non ancora esportate non tocca nulla e il pallino del file diventa arancione ("Aggiorna dall'Excel" le scarterebbe: esporta prima).
+Attenzione: "Esporta in Excel" scrive nella copia locale. Quelle righe vanno poi riportate nel file condiviso di SharePoint, altrimenti la prossima sovrascrittura le cancella.
+
+**Password.** Impostazioni > "Accesso da altre reti o da internet". Dal PC l'app si apre sempre senza password; da qualsiasi altro percorso (rete locale o tunnel) serve la password, altrimenti l'accesso è rifiutato. Da fuori non si possono cambiare le Impostazioni né aprire le cartelle del PC.
+
+**Rete locale.** Spunta "Consenti connessioni dalla rete locale", riavvia l'app e apri `http://IP-del-PC:8765` dall'altro dispositivo (Windows chiede di autorizzare l'app sulle reti private).
+
+**Internet (gratuito).** L'app resta su 127.0.0.1; un tunnel la pubblica con un indirizzo https:
+- *Tailscale Funnel*: installa Tailscale sul PC, abilita Funnel per il tuo account e lancia `tailscale funnel 8765`; ottieni un indirizzo fisso del tipo `https://nomepc.xxxx.ts.net`.
+- In alternativa ngrok (un dominio statico gratuito) o un Cloudflare quick tunnel (`cloudflared tunnel --url http://127.0.0.1:8765`, indirizzo diverso a ogni avvio).
+Usa sempre una password lunga; la rete aziendale potrebbe bloccare questi indirizzi.
+
+**Avvio automatico.** `Avvio-automatico.bat` (nella cartella dell'app) fa partire l'app all'accensione del PC, senza aprire il browser; `Disattiva-avvio-automatico.bat` lo toglie.

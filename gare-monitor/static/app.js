@@ -54,6 +54,7 @@ async function api(url, opts = {}) {
   if (o.body && typeof o.body !== "string") o.body = JSON.stringify(o.body);
   const r = await fetch(url, o);
   let j = {}; try { j = await r.json(); } catch (e) {}
+  if (r.status === 401 && j.login) { location.href = "/login"; throw new Error("Accesso richiesto"); }
   if (!r.ok) { const e = new Error(j.error || r.statusText); e.status = r.status; e.body = j; throw e; }
   return j;
 }
@@ -76,8 +77,25 @@ async function loadAll(force) {
   $("#file-box").title = `${name}\n${S.data.rows.length} righe · importato alle ${hh}`;
   updateExportBtn();
   $("#file-dot").classList.add("ok");
+  applyState();
   render();
 }
+// stato del file e funzioni disponibili solo dal PC su cui gira l'app
+function applyState() {
+  const st = S.state || {};
+  $("#btn-settings").hidden = st.local === false;
+  const d = $("#file-dot"); d.classList.toggle("warn", !!st.excel_newer); d.classList.toggle("ok", !st.excel_newer);
+  const n = st.excel_newer ? "\nIl file Excel è più recente del database: premi “Aggiorna dall'Excel” (ci sono modifiche locali non esportate)." : "";
+  $("#file-box").title = ($("#file-box").title || "").split("\n")[0] + n;
+}
+// ogni minuto controlla se l'Excel è stato sostituito: se non ci sono modifiche locali l'app lo rilegge da sola
+setInterval(async () => {
+  if (!S.data || document.hidden || $("#modal-root").children.length || $("#meeting")) return;
+  try {
+    const prev = S.state.imported_at, st = await api("/api/state"); S.state = st; applyState();
+    if (st.auto_imported || (st.imported_at && st.imported_at !== prev)) { await loadAll(true); toast("Excel aggiornato: dati riletti"); }
+  } catch (e) {}
+}, 60000);
 function updateExportBtn() {
   const p = S.state.pending || {new: 0, mod: 0}, n = p.new + p.mod, b = $("#exp-n");
   b.hidden = !n; b.textContent = n; $("#btn-export").classList.toggle("has", n > 0);
@@ -735,7 +753,7 @@ function drawCliente(body) {
   <div class="card chead"><div class="chead-t"><h2 class="cname">${esc(full.nome)}</h2>
       <div class="cmeta">${full.vertical ? `<span class="tchip">${esc(full.vertical)}</span>` : ""}${full.market ? `<span class="tchip">${esc(full.market)}</span>` : ""}${full.ss.length ? `<span class="tchip" title="Prefisso del codice SS">SS ${esc(full.ss.join(", "))}</span>` : ""}
       <span class="muted">${full.prima ? `Prima offerta ${fmt(full.prima)}` : ""}${full.ultima ? ` · ultima ${fmt(full.ultima.data)} ${badge(full.ultima.stato)}` : ""}</span></div></div>
-    ${cart.stato !== "nessuna" ? `<button id="cl-folder" class="btn-sec" title="${cart.nome ? esc(cart.nome) : "Scegli la cartella di questo cliente"}">${ico("folder-open")}${cart.stato === "ok" ? "Apri cartella" : "Apri cartella…"}</button>` : ""}</div>
+    ${cart.stato !== "nessuna" && S.state.local !== false ? `<button id="cl-folder" class="btn-sec" title="${cart.nome ? esc(cart.nome) : "Scegli la cartella di questo cliente"}">${ico("folder-open")}${cart.stato === "ok" ? "Apri cartella" : "Apri cartella…"}</button>` : ""}</div>
 
   <div class="sect-h"><h3 class="sect">Situazione ${esc(anno)}</h3>
     <div><label for="cl-anno" class="sr">Anno</label><select id="cl-anno" title="Cambia l'anno mostrato in questa sezione (Data ins.)">${anni.map(a => `<option value="${a}" ${String(a) === String(anno) ? "selected" : ""}>${a}</option>`).join("")}</select></div></div>
@@ -909,6 +927,10 @@ function openSettings(first, msg) {
     <label for="s-path">File Excel (copia sincronizzata di SharePoint)</label><div class="row"><input id="s-path" style="flex:1" value="${esc(st.path || "")}" placeholder="C:\\Users\\…\\HISTORY.xlsx"><button id="s-browse">Sfoglia…</button></div>
     <label for="s-db" style="margin-top:12px">Database locale (si crea da solo se non esiste; tienilo fuori da OneDrive)</label><input id="s-db" value="${esc(st.db_path || "")}">
     <label for="s-cli" style="margin-top:12px">Cartella dei clienti (opzionale: per il pulsante “Apri cartella” nella scheda cliente)</label><input id="s-cli" value="${esc(st.clienti_dir || "")}" placeholder="C:\\Users\\…\\Solution - Documenti\\Clienti">
+    <h3 class="mh" style="margin-top:18px">Accesso da altre reti o da internet</h3>
+    <p class="hint" style="margin-top:0">Dal PC l'app si apre sempre senza password. Per aprirla da un altro dispositivo (rete di casa o internet tramite un tunnel come Tailscale Funnel) serve una password: senza, l'accesso esterno resta chiuso. Vedi il README.</p>
+    <label for="s-pw">${st.password_set ? "Password impostata — scrivine una nuova per cambiarla" : "Password (almeno 8 caratteri)"}</label><div class="row"><input id="s-pw" type="password" style="flex:1" autocomplete="new-password"><button id="s-pw-save">Salva password</button>${st.password_set ? '<button id="s-pw-off">Togli password</button>' : ""}</div>
+    <label class="ms-i" style="margin-top:8px"><input type="checkbox" id="s-lan" ${st.listen_all ? "checked" : ""}> Consenti connessioni dalla rete locale (si applica al prossimo avvio dell'app)</label>
     <div class="hint">${st.imported_at ? `Ultimo import: ${esc(st.imported_at.replace("T", " "))}` : "Nessun import ancora eseguito."}${st.pending && (st.pending.new + st.pending.mod) ? ` · <b>${st.pending.new + st.pending.mod} modifiche non esportate</b>` : ""}</div>
     <div class="err" id="s-err">${esc(msg || "")}</div>
     <div class="foot">${first ? "" : '<button id="s-cancel">Chiudi</button>'}<button id="s-save" class="primary">${ico("database")}Salva e importa dall'Excel</button></div>
@@ -916,6 +938,12 @@ function openSettings(first, msg) {
   modal.locked = !!first;
   const c = $("#s-cancel", el); if (c) c.onclick = closeModal;
   $("#s-browse", el).onclick = async () => { try { const r = await api("/api/browse", {method: "POST"}); if (r.path) $("#s-path", el).value = r.path; } catch (e) { $("#s-err", el).textContent = e.message; } };
+  const savePw = async off => {
+    try { await api("/api/password", {method: "POST", body: {...(off ? {password: ""} : $("#s-pw", el).value ? {password: $("#s-pw", el).value} : {}), listen_all: $("#s-lan", el).checked}}); S.state = await api("/api/state"); toast(off ? "Password tolta: accesso esterno chiuso" : "Impostazioni di accesso salvate"); closeModal(); }
+    catch (e) { $("#s-err", el).textContent = e.message; }
+  };
+  $("#s-pw-save", el).onclick = () => savePw(false);
+  const off = $("#s-pw-off", el); if (off) off.onclick = () => savePw(true);
   $("#s-save", el).onclick = async () => {
     try {
       const n = st.pending ? st.pending.new + st.pending.mod : 0;

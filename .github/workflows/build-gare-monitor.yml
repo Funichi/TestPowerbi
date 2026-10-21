@@ -21,6 +21,7 @@ jobs:
       - run: python -m pytest -q tests
       # cartella (non --onefile): gli exe "autoestraenti" sono molto più spesso scambiati per virus
       - run: pyinstaller --onedir --noupx --name GareOfferte --add-data "static;static" --hidden-import win32timezone --hidden-import pythoncom --hidden-import win32com.client app.py
+      - run: copy Avvio-automatico.bat, Disattiva-avvio-automatico.bat dist\GareOfferte\
       - uses: actions/upload-artifact@v4
         with:
           name: GareOfferte-windows

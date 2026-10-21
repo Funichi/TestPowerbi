@@ -345,3 +345,37 @@ def test_cruscotto_per_anno_solare(client):
     assert tot(d26) == 4 and tot(d25) == 1                       # Enel (2025) solo nel 2025; la riga senza Data ins. non entra in un anno
     assert [t["nome"] for t in d25["top_clienti"]] == ["Enel"]
     assert d25["kpi"]["wip"] == 1                                # i KPI "in corso" restano quelli di oggi
+
+
+def test_accesso_da_altre_reti_richiede_password(client):
+    c, x, tmp = client
+    remote = {"environ_overrides": {"REMOTE_ADDR": "192.168.1.50"}}
+    assert c.get("/api/state").status_code == 200                                   # dal PC stesso: nessuna password
+    assert c.get("/api/state", **remote).status_code == 403                         # accesso esterno non attivo finché non c'è una password
+    assert c.get("/api/state", headers={"X-Forwarded-For": "1.2.3.4"}).status_code == 403   # tunnel internet = esterno anche se arriva da localhost
+    assert c.post("/api/password", json={"password": "corta"}).status_code == 400
+    assert c.post("/api/password", json={"password": "una-password-lunga"}).status_code == 200
+    assert c.post("/api/password", json={"password": "una-password-lunga"}, **remote).status_code in (401, 403)
+    assert c.get("/api/state", **remote).status_code == 401 and c.get("/", **remote).status_code == 302
+    assert c.post("/login", data={"password": "sbagliata"}, **remote).status_code == 401
+    assert c.post("/login", data={"password": "una-password-lunga"}, **remote).status_code == 302
+    assert c.get("/api/state", **remote).get_json()["local"] is False                # ora la sessione è valida
+    assert c.get("/api/data", **remote).status_code == 200
+    assert c.post("/api/config", json={"db_path": str(tmp / "x.db")}, **remote).status_code == 403    # impostazioni e cartelle: solo dal PC locale
+    assert c.post("/api/browse", **remote).status_code == 403
+
+
+def test_excel_sostituito_viene_riletto_da_solo_se_non_ci_sono_modifiche_locali(client):
+    c, x, _ = client
+    assert c.get("/api/state").get_json()["excel_newer"] is False
+    c.get("/api/data")
+    wb = openpyxl.load_workbook(x); wb["gare e offerte"].cell(3, 8).value = "Due (cambiato nell'Excel)"; wb.save(x)
+    os.utime(x, (dt.datetime.now().timestamp() + 60,) * 2)
+    assert c.post("/api/rows", json=NEW).status_code == 200                           # modifica locale: non si tocca
+    st = c.get("/api/state").get_json()
+    assert st["excel_newer"] is True and st["auto_imported"] is False
+    new = [r for r in c.get("/api/data").get_json()["rows"] if r["Oggetto"] == "Nuova"][0]
+    c.delete(f"/api/rows/{new['_row']}")
+    st = c.get("/api/state").get_json()
+    assert st["auto_imported"] is True and st["excel_newer"] is False
+    assert any("cambiato" in (r["Oggetto"] or "") for r in c.get("/api/data").get_json()["rows"])

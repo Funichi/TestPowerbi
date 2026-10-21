@@ -11,7 +11,11 @@ import sys
 import threading
 import webbrowser
 
-from flask import Flask, jsonify, request, send_from_directory
+import secrets
+import time
+
+from flask import Flask, jsonify, redirect, request, send_from_directory, session
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from core import clienti, logic
 from core.db import Store
@@ -106,6 +110,102 @@ def on_error(e):
     return jsonify({"error": str(e)}), code
 
 
+# ------------------------------------------------------------------ accesso da altre reti / internet
+# Dal PC stesso (127.0.0.1, senza intermediari) l'app si apre senza password. Qualunque altra richiesta (rete locale, tunnel internet)
+# richiede la password impostata dal PC; senza password l'accesso esterno è rifiutato.
+
+LOCAL_ONLY = {"set_config", "browse", "cliente_cartella", "set_password"}       # operazioni sul PC che ospita l'app
+_fails = {}                                                                       # ip -> (tentativi, blocco fino a)
+
+
+def is_local():
+    host = (request.host or "").split(":")[0]
+    return (request.remote_addr in ("127.0.0.1", "::1") and host in ("127.0.0.1", "localhost", "[::1]")
+            and not request.headers.get("X-Forwarded-For") and not request.headers.get("Forwarded"))
+
+
+def _secret_key():
+    cfg = load_config()
+    if not cfg.get("secret_key"):
+        cfg["secret_key"] = secrets.token_hex(32)
+        save_config(cfg)
+    return cfg["secret_key"]
+
+
+@app.before_request
+def guard():
+    if request.path.startswith("/static/") or request.path == "/favicon.ico" or is_local():
+        return None
+    app.secret_key = _secret_key()
+    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=dt.timedelta(days=30),
+                      SESSION_COOKIE_SECURE=request.headers.get("X-Forwarded-Proto") == "https")
+    pw = load_config().get("password_hash")
+    if request.path == "/login":
+        return None if pw else (_login_page("L'accesso da altre reti non è attivo: imposta prima una password dalle Impostazioni, sul PC dove gira l'app.", False), 403)
+    if not pw:
+        return jsonify({"error": "Accesso da altre reti non attivo: imposta una password dalle Impostazioni, sul PC dove gira l'app."}), 403
+    if session.get("ok"):
+        if request.endpoint in LOCAL_ONLY:
+            return jsonify({"error": "Questa operazione si può fare solo dal PC su cui gira l'app."}), 403
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Accesso richiesto", "login": True}), 401
+    return redirect("/login")
+
+
+def _login_page(msg="", form=True):
+    return f"""<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Accesso — Gare e Offerte</title>
+<link rel="stylesheet" href="/static/app.css"></head><body style="display:grid;place-items:center;min-height:100vh;background:var(--bg)">
+<main class="card" style="width:min(380px,92vw)"><h2>Gare &amp; Offerte</h2><p class="muted">{msg or "Inserisci la password."}</p>
+{'<form method="post" action="/login"><label for="p">Password</label><input id="p" name="password" type="password" autofocus autocomplete="current-password"><div class="foot"><button class="primary" type="submit">Entra</button></div></form>' if form else ''}</main></body></html>"""
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    n, until = _fails.get(ip, (0, 0))
+    if request.method == "GET":
+        return _login_page()
+    if until > time.time():
+        return _login_page(f"Troppi tentativi. Riprova tra {int(until - time.time()) + 1} secondi."), 429
+    h = load_config().get("password_hash")
+    if h and check_password_hash(h, request.form.get("password", "")):
+        _fails.pop(ip, None)
+        session.permanent = True
+        session["ok"] = True
+        return redirect("/")
+    n += 1
+    _fails[ip] = (n, time.time() + 60 if n >= 5 else 0)
+    time.sleep(1)
+    return _login_page("Password errata."), 401
+
+
+@app.get("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
+@app.post("/api/password")
+def set_password():
+    """Imposta (o toglie, se vuota) la password per l'accesso da altre reti. Solo dal PC locale."""
+    b = request.json or {}
+    cfg = load_config()
+    if "password" in b:
+        pw = b["password"] or ""
+        if pw:
+            if len(pw) < 8:
+                raise ValueError("La password deve avere almeno 8 caratteri")
+            cfg["password_hash"] = generate_password_hash(pw)
+        else:
+            cfg.pop("password_hash", None)
+        cfg["secret_key"] = secrets.token_hex(32)          # chiude le sessioni già aperte
+    if "listen_all" in b:
+        cfg["listen_all"] = bool(b["listen_all"])
+    save_config(cfg)
+    return jsonify({"ok": True})
+
+
 # ------------------------------------------------------------------ pagine / stato
 
 @app.get("/")
@@ -118,11 +218,29 @@ def favicon():
     return "", 204
 
 
+def excel_newer():
+    """True se il file Excel è stato modificato dopo l'ultimo import."""
+    p, ts = excel_path(), store().meta("imported_at")
+    try:
+        return bool(p and ts and os.path.getmtime(p) > dt.datetime.fromisoformat(ts).timestamp() + 2)
+    except (OSError, ValueError):
+        return False
+
+
 @app.get("/api/state")
 def state():
     cfg = load_config()
     st = store()
-    return jsonify({"path": cfg.get("excel_path") or DEFAULT_EXCEL_PATH, "excel_ok": bool(excel_path()), "db_path": st.path,
+    auto = False
+    newer = st.has_data() and excel_newer()
+    if newer and cfg.get("auto_import", True) and not any(st.counts().values()):
+        try:                                           # Excel sostituito e nessuna modifica locale da perdere: rileggo da solo
+            do_import()
+            auto, newer = True, False
+        except Exception:                              # file in copia o bloccato: riprova alla prossima richiesta
+            pass
+    return jsonify({"local": is_local(), "password_set": bool(cfg.get("password_hash")), "listen_all": bool(cfg.get("listen_all")),
+                    "excel_newer": newer, "auto_imported": auto,"path": cfg.get("excel_path") or DEFAULT_EXCEL_PATH, "excel_ok": bool(excel_path()), "db_path": st.path,
                     "exists": bool(excel_path()) or st.has_data(), "imported": st.has_data(), "imported_at": st.meta("imported_at"),
                     "pending": st.counts(), "oggi": dt.date.today().isoformat(), "clienti_dir": clienti_dir()})
 
@@ -428,7 +546,10 @@ def main():
     if not os.environ.get("GARE_NO_BROWSER"):
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     from werkzeug.serving import run_simple
-    run_simple("127.0.0.1", port, app, threaded=True, use_reloader=False)
+    lan = bool(load_config().get("listen_all"))
+    if lan:
+        print(" Accesso dalla rete locale attivo (serve la password impostata nelle Impostazioni).")
+    run_simple("0.0.0.0" if lan else "127.0.0.1", port, app, threaded=True, use_reloader=False)
 
 
 if __name__ == "__main__":
