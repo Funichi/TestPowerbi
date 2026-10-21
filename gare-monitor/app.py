@@ -243,22 +243,37 @@ def update_apply():
         os.remove(flag)
     with open(os.path.join(BASE_DIR, "aggiornamento.log"), "a", encoding="utf-8") as lg:
         lg.write(f"{dt.datetime.now().isoformat(timespec='seconds')} L'app lancia l'aggiornamento (build {updater.current_version(BASE_DIR)} -> {lat['version']}).\n")
-    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script,
-           "-AppDir", BASE_DIR, "-Zip", zip_path, "-WaitPid", str(os.getpid())]
-    base_flags = 0x00000008 | 0x00000200                                       # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-    try:
-        subprocess.Popen(cmd, creationflags=base_flags | 0x01000000, close_fds=True)         # + CREATE_BREAKAWAY_FROM_JOB: non muore con l'app
-    except OSError:
+    ps = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script,
+          "-AppDir", BASE_DIR, "-Zip", zip_path, "-WaitPid", str(os.getpid())]
+    out = os.path.join(BASE_DIR, "update", "powershell.txt")                   # eventuali errori di PowerShell (prima ancora che lo script scriva il log)
+    # Windows non permette di sapere in anticipo quale modo di lanciare PowerShell funzioni (job, console, criteri del PC): si prova in sequenza
+    strategie = [("start", ["cmd", "/c", "start", "", "/min"] + ps, 0x08000000),                      # CREATE_NO_WINDOW
+                 ("distaccato", ps, 0x00000008 | 0x00000200 | 0x01000000),                            # DETACHED | NEW_PROCESS_GROUP | BREAKAWAY_FROM_JOB
+                 ("distaccato2", ps, 0x00000008 | 0x00000200)]
+    lanciato = None
+    for nome, cmd, flags in strategie:
         try:
-            subprocess.Popen(cmd, creationflags=base_flags, close_fds=True)
+            with open(out, "a", encoding="utf-8", errors="replace") as o:
+                subprocess.Popen(cmd, creationflags=flags, close_fds=True, stdout=o, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
         except OSError as e:
-            return jsonify({"error": f"Non riesco a lanciare PowerShell: {e}"}), 400
-    for _ in range(40):
-        if os.path.exists(flag):
+            with open(os.path.join(BASE_DIR, "aggiornamento.log"), "a", encoding="utf-8") as lg:
+                lg.write(f"{dt.datetime.now().isoformat(timespec='seconds')} Lancio '{nome}' non riuscito: {e}\n")
+            continue
+        for _ in range(32):
+            if os.path.exists(flag):
+                lanciato = nome
+                break
+            time.sleep(0.25)
+        if lanciato:
             break
-        time.sleep(0.25)
-    else:
-        return jsonify({"error": "Lo script di aggiornamento non è partito (PowerShell bloccato?). L'app resta aperta: prova Aggiorna.bat dalla cartella dell'app."}), 400
+    if not lanciato:
+        try:
+            with open(out, encoding="utf-8", errors="replace") as o:
+                dettaglio = o.read().strip()[-400:]
+        except OSError:
+            dettaglio = ""
+        return jsonify({"error": "Lo script di aggiornamento non è partito. L'app resta aperta: prova Aggiorna.bat dalla cartella dell'app."
+                                 + (f" Errore di PowerShell: {dettaglio}" if dettaglio else "")}), 400
     threading.Timer(1.0, lambda: os._exit(0)).start()
     return jsonify({"ok": True})
 

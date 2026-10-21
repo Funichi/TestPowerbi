@@ -18,16 +18,25 @@ try {
         $cfg = Get-Content (Join-Path $AppDir "config.json") -Raw | ConvertFrom-Json
         $repo = if ($cfg.github_repo) { $cfg.github_repo } else { "Funichi/TestPowerbi" }
         if (-not $cfg.github_token) { throw "Manca il token GitHub: impostalo nelle Impostazioni dell'app." }
-        $h = @{ Authorization = "Bearer $($cfg.github_token)"; "User-Agent" = "GareOfferte-updater"; "X-GitHub-Api-Version" = "2022-11-28" }
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $auth = "Bearer $($cfg.github_token)"
+        $h = @{ Authorization = $auth; "User-Agent" = "GareOfferte-updater"; "X-GitHub-Api-Version" = "2022-11-28" }
         $rel = Invoke-RestMethod -Headers $h -Uri "https://api.github.com/repos/$repo/releases/tags/latest"
         $asset = $rel.assets | Where-Object { $_.name -like "GareOfferte-*.zip" } | Select-Object -First 1
         if (-not $asset) { throw "Nessun file dell'app nell'ultima versione." }
         $Zip = Join-Path $env:TEMP "GareOfferte-update.zip"
-        $loc = $null
-        try { $x = Invoke-WebRequest -UseBasicParsing -Headers ($h + @{ Accept = "application/octet-stream" }) -Uri $asset.url -MaximumRedirection 0 -ErrorAction Stop; $loc = $x.Headers["Location"] }
-        catch { $resp = $_.Exception.Response; $loc = if ($resp.Headers.Location) { $resp.Headers.Location.ToString() } else { $resp.Headers["Location"] } }
+        # GitHub risponde con un reindirizzamento verso il file vero: lo si legge senza seguirlo (HttpWebRequest va bene in PowerShell 5 e 7)
+        $req = [System.Net.HttpWebRequest]::Create($asset.url)
+        $req.AllowAutoRedirect = $false
+        $req.UserAgent = "GareOfferte-updater"
+        $req.Accept = "application/octet-stream"
+        $req.Headers.Add("Authorization", $auth)
+        $resp = $req.GetResponse()
+        $loc = $resp.Headers["Location"]
+        $resp.Close()
         if (-not $loc) { throw "GitHub non ha indicato dove scaricare il file." }
-        Invoke-WebRequest -UseBasicParsing -Uri $loc -OutFile $Zip       # senza token: il link è già firmato
+        Log "Download da $($loc.Split('?')[0])"
+        (New-Object System.Net.WebClient).DownloadFile($loc, $Zip)       # senza token: il link è già firmato
         Log "Scaricato $Zip."
     }
     if (-not (Test-Path $Zip)) { throw "File zip non trovato: $Zip" }
