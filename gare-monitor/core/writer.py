@@ -35,6 +35,26 @@ BUSY_MSG = ("Excel è occupato: probabilmente hai una cella in modifica o una fi
             "(o OneDrive sta sincronizzando). Esci dalla modifica della cella, chiudi le finestre e riprova.")
 
 
+class NoExcelError(WriteError):
+    """Excel non è installato (o non registrato) su questo PC."""
+
+
+NO_EXCEL_MSG = "Excel non è installato su questo PC: la scrittura passa dal metodo alternativo (senza Excel)."
+_NO_CLASS = (-2147221005, -2147221164, -2147221021)        # classe COM non valida / non registrata
+
+
+def excel_available():
+    """True se su questo PC è registrato Excel (Windows)."""
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        import pythoncom
+        pythoncom.CLSIDFromProgID("Excel.Application")
+        return True
+    except Exception:
+        return False
+
+
 def _retry(fn, tries=20, delay=0.75):
     """Excel rifiuta le chiamate COM mentre è occupato: si riprova per qualche secondo."""
     for i in range(tries):
@@ -168,6 +188,8 @@ class ExcelWriter:
             except Exception as e:  # errori COM
                 if getattr(e, "hresult", None) in _BUSY:
                     raise WriteError(BUSY_MSG) from e
+                if getattr(e, "hresult", None) in _NO_CLASS:
+                    raise NoExcelError(NO_EXCEL_MSG) from e
                 if "Impossibile accedere al file" in str(e):
                     raise WriteError("Il file è aperto o bloccato da un altro Excel. Chiudi il file in Excel; se non basta, apri Gestione attività, "
                                      "termina eventuali processi 'Microsoft Excel' rimasti in background e riprova.") from e
@@ -336,6 +358,8 @@ class OpenpyxlWriter:
             ws.cell(row, c)._style = copy(ws.cell(last_row, c)._style)
         if tab:
             tab.ref = f"{tab.ref.split(':')[0]}:{last[:len(last) - len(str(last_row))]}{row}"
+            if tab.autoFilter is not None:
+                tab.autoFilter.ref = tab.ref
         for f, v in values.items():
             if f in cols:
                 ws.cell(row, cols[f]).value = _value_for(f, v)
@@ -383,10 +407,10 @@ class OpenpyxlWriter:
 def get_writer(path, backup_dir, preference="auto"):
     if preference == "openpyxl":
         return OpenpyxlWriter(path, backup_dir)
-    if sys.platform.startswith("win"):
+    if sys.platform.startswith("win") and excel_available():
         try:
             import win32com.client  # noqa: F401
             return ExcelWriter(path, backup_dir)
         except ImportError:
-            raise WriteError("Manca il componente per parlare con Excel (pywin32).")
-    raise WriteError("La scrittura tramite Excel è disponibile solo su Windows (per test usa \"writer\": \"openpyxl\").")
+            pass
+    return OpenpyxlWriter(path, backup_dir)             # senza Excel: scrittura diretta del file (con copia di backup)

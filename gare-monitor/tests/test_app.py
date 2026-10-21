@@ -505,3 +505,20 @@ def test_presidiare_attesa_oltre_180_giorni_da_aggiornare(client):
     p = {x["Oggetto"]: x for x in c.get("/api/cliente", query_string={"nome": "Terna"}).get_json()["presidiare"]}
     assert p["Vecchia"]["attesa"] == 200 and p["Vecchia"]["da_aggiornare"] is True
     assert p["Recente"]["attesa"] == 10 and p["Recente"]["da_aggiornare"] is False and p["Uno"]["attesa"] is None
+
+
+def test_senza_excel_l_export_ripiega_sulla_scrittura_diretta(client, monkeypatch):
+    import app as appmod
+    from core.writer import NoExcelError
+
+    class SenzaExcel:
+        name = "excel"
+        def export(self, *a):
+            raise NoExcelError("Excel non installato")
+    c, x, tmp = client
+    c.post("/api/rows", json=NEW)
+    monkeypatch.setattr(appmod, "writer", lambda: SenzaExcel())
+    r = c.post("/api/export")
+    assert r.status_code == 200 and r.get_json()["metodo"] == "openpyxl" and r.get_json()["nuove"] == 1
+    assert any(row[7].value == "Nuova" for row in sheet(x).iter_rows(min_row=2))
+    assert sheet(x).tables["Tabella4"].autoFilter is None or sheet(x).tables["Tabella4"].autoFilter.ref == sheet(x).tables["Tabella4"].ref

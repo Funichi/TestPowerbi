@@ -20,7 +20,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from core import clienti, logic, metrics, updater
 from core.db import Store
 from core.reader import ATT_LABELS, DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
-from core.writer import WriteError, get_writer
+from core.writer import NoExcelError, OpenpyxlWriter, WriteError, excel_available, get_writer
 
 FROZEN = getattr(sys, "frozen", False)
 RES_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -297,7 +297,7 @@ def state():
         except Exception:                              # file in copia o bloccato: riprova alla prossima richiesta
             pass
     return jsonify({"local": is_local(), "password_set": bool(cfg.get("password_hash")), "listen_all": bool(cfg.get("listen_all")),
-                    "excel_newer": newer, "auto_imported": auto, "version": updater.current_version(BASE_DIR), "update_token_set": bool(cfg.get("github_token")),
+                    "excel_newer": newer, "auto_imported": auto, "version": updater.current_version(BASE_DIR), "update_token_set": bool(cfg.get("github_token")), "excel_com": excel_available() and cfg.get("writer", "auto") != "openpyxl",
                     "github_repo": cfg.get("github_repo") or updater.DEFAULT_REPO, "can_update": FROZEN and os.name == "nt","path": cfg.get("excel_path") or DEFAULT_EXCEL_PATH, "excel_ok": bool(excel_path()), "db_path": st.path,
                     "exists": bool(excel_path()) or st.has_data(), "imported": st.has_data(), "imported_at": st.meta("imported_at"),
                     "pending": st.counts(), "oggi": dt.date.today().isoformat(), "clienti_dir": clienti_dir()})
@@ -579,13 +579,19 @@ def export_now():
     p = st.pending_items()
     if not p["new"] and not p["mod"]:
         raise ValueError("Non c'è niente da esportare")
-    rows = writer().export([x["values"] for x in p["new"]], [(x["xl"], x["sig"], x["changes"]) for x in p["mod"]])
+    args = ([x["values"] for x in p["new"]], [(x["xl"], x["sig"], x["changes"]) for x in p["mod"]])
+    w = writer()
+    try:
+        rows = w.export(*args)
+    except NoExcelError:                               # Excel non c'è (o non risponde): si scrive il file direttamente
+        w = OpenpyxlWriter(excel_path(), BACKUP_DIR)
+        rows = w.export(*args)
     avviso = None
     try:
         do_import()                                    # rilegge l'Excel: il database torna identico al file
     except Exception as e:
         avviso = f"Esportazione riuscita, ma non sono riuscito a rileggere il file: {e}. Premi “Aggiorna dall'Excel”."
-    return jsonify({"ok": True, "nuove": len(p["new"]), "modificate": len(p["mod"]), "righe": rows, "avviso": avviso})
+    return jsonify({"ok": True, "nuove": len(p["new"]), "modificate": len(p["mod"]), "righe": rows, "avviso": avviso, "metodo": w.name})
 
 
 # ------------------------------------------------------------------ pulizia (solo suggerimenti)
