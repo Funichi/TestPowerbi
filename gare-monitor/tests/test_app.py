@@ -392,15 +392,16 @@ def test_metriche_definizioni_uniche_con_numerosita():
     assert metrics.referenti("Non Assegnato") == [] and metrics.referenti("Grando / Scamuzzo") == ["Grando", "Scamuzzo"] and metrics.referenti(None) == []
 
 
-def test_scheda_cliente_presidiare_team_benchmark_di_market(client):
+def test_scheda_cliente_presidiare_benchmark_di_market(client):
     c, x, _ = client
     c.post("/api/rows", json={**NEW, "Cliente": "Terna", "Oggetto": "Da fare", "Solution D&A": "Non Assegnato", "Stato": "WIP", "Data consegna": dt.date.today().isoformat()})
     s = c.get("/api/cliente", query_string={"nome": "Terna"}).get_json()
     pre = {p["Oggetto"]: p for p in s["presidiare"]}
     assert set(pre) == {"Uno", "Da fare"} and pre["Da fare"]["urgente"] and pre["Da fare"]["non_assegnata"] and pre["Da fare"]["giorni"] == 0
     assert s["aperte"] == 2 and s["ultima"]["giorni_fa"] >= 0
-    team = {t["nome"]: t for t in s["team"]}
-    assert team[None]["non_assegnato"] and team[None]["wip"] == 1 and team["Scamuzzo"]["won"] == 1 and s["team"][-1]["nome"] is None
+    assert "team" not in s                                                                      # sezione "Team sul cliente" eliminata
+    att = [p for p in s["presidiare"] if p["Stato"] != "WIP"]
+    assert all("attesa" in p and "da_aggiornare" in p for p in s["presidiare"]) and all(not p["da_aggiornare"] for p in att)
     assert s["mercato"]["nome"] == "Energy&Utility" and s["mercato"]["win"]["n"] >= 1          # benchmark = Market del cliente, non la media generale
     assert "generale" in s and "alltime" in s and s["kpi"]["win"]["n"] == 1
     m = c.post("/api/metrics", json={"ids": [r["_row"] for r in c.get("/api/data").get_json()["rows"]]}).get_json()
@@ -493,3 +494,14 @@ def test_aggiornamento_da_release_privata(client, tmp_path, monkeypatch):
     assert updater.current_version(str(tmp_path)) is None
     (tmp_path / "version.txt").write_text("7")
     assert updater.current_version(str(tmp_path)) == 7
+
+
+def test_presidiare_attesa_oltre_180_giorni_da_aggiornare(client):
+    c, x, _ = client
+    old = (dt.date.today() - dt.timedelta(days=200)).isoformat()
+    recent = (dt.date.today() - dt.timedelta(days=10)).isoformat()
+    for n, d in (("Vecchia", old), ("Recente", recent)):
+        assert c.post("/api/rows", json={**NEW, "Cliente": "Terna", "Oggetto": n, "Stato": "Waiting For response", "Data ins.": old, "Data consegna": d, "SS": "T" + n}).status_code == 200
+    p = {x["Oggetto"]: x for x in c.get("/api/cliente", query_string={"nome": "Terna"}).get_json()["presidiare"]}
+    assert p["Vecchia"]["attesa"] == 200 and p["Vecchia"]["da_aggiornare"] is True
+    assert p["Recente"]["attesa"] == 10 and p["Recente"]["da_aggiornare"] is False and p["Uno"]["attesa"] is None

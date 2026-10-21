@@ -105,21 +105,12 @@ def scheda(rows, nome, anno=None, oggi=None):
             continue
         c = to_date(r["Data consegna"])
         gg = (c - oggi).days if c else None
+        base = c or to_date(r["Data ins."])                      # attesa = giorni dalla consegna (se manca, dalla Data ins.), come nel cruscotto
+        attesa = max((oggi - base).days, 0) if st == "Waiting For response" and base else None
         presidiare.append({"_row": r["_row"], "Oggetto": r["Oggetto"], "tipo": r["tipo"], "Stato": st, "referente": r["Solution D&A"],
-                           "Data consegna": r["Data consegna"], "giorni": gg,
+                           "Data consegna": r["Data consegna"], "giorni": gg, "attesa": attesa, "da_aggiornare": bool(attesa is not None and attesa > 180),
                            "urgente": bool(st == "WIP" and gg is not None and gg <= 3), "non_assegnata": bool(st == "WIP" and metrics.non_assegnata(r))})
-    presidiare.sort(key=lambda x: (x["giorni"] is None, x["giorni"] if x["giorni"] is not None else 0))
-
-    team = defaultdict(list)
-    for r in mie:
-        for ref in metrics.referenti(r["Solution D&A"]) or [None]:
-            team[ref].append(r)
-    team_out = []
-    for ref, rs in team.items():
-        c = metrics.count(rs)
-        team_out.append({"nome": ref, "totale": len(rs), "aperte": c["WIP"] + c["Waiting For response"], "wip": c["WIP"], "won": c["Won"],
-                         "lost": c["Lost"], "nobid": c["NoBID"], "non_assegnato": ref is None})
-    team_out.sort(key=lambda t: (t["non_assegnato"], -t["totale"], (t["nome"] or "").casefold()))
+    presidiare.sort(key=lambda x: (x["giorni"] is None, x["giorni"] if x["giorni"] is not None else 0))     # il client le divide in WIP e in attesa
 
     cron = sorted(mie, key=lambda r: (to_date(r["Data ins."]) or to_date("1900-01-01")), reverse=True)
     return {
@@ -133,7 +124,7 @@ def scheda(rows, nome, anno=None, oggi=None):
         "ultima": {"data": ultima["Data ins."], "stato": metrics.stato_of(ultima), "oggetto": ultima["Oggetto"],
                    "giorni_fa": (oggi - to_date(ultima["Data ins."])).days} if ultima else None,
         "prima": datate[0]["Data ins."] if datate else None,
-        "presidiare": presidiare, "team": team_out, "valore": metrics.valore_stats(mie) if "valore" in opzionali or "valore_offerto" in opzionali else None,
+        "presidiare": presidiare, "valore": metrics.valore_stats(mie) if "valore" in opzionali or "valore_offerto" in opzionali else None,
         "cronologia": [{"_row": r["_row"], "Seq": r["Seq"], "Oggetto": r["Oggetto"], "tipo": r["tipo"], "Stato": metrics.stato_of(r),
                         "referente": r["Solution D&A"], "non_assegnata": metrics.non_assegnata(r), "Data ins.": r["Data ins."],
                         "Data consegna": r["Data consegna"], "preavviso": preavviso(r), "Attenzione": r.get("Attenzione") or 0,

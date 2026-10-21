@@ -879,51 +879,88 @@ function trendHtml(rows, anno) {
     <div class="legend">${SEGS.map(legendItem).join("")}<span><i class="lg-line"></i>Win rate (asse destro, n = Won + Lost del periodo)</span></div>`;
 }
 
-const PRE_HEAD = `<thead><tr><th>Tipo</th><th>Oggetto</th><th>Referente Solution</th><th>Stato</th><th>Consegna</th><th>Scade tra</th></tr></thead>`;
-function scadeTag(g, stato) {
+const PRE_MAX = 5;                         // righe mostrate per gruppo prima di "Mostra tutte"
+const WIP_HEAD = `<thead><tr><th>Tipo</th><th>Oggetto</th><th>Referente Solution</th><th>Consegna</th><th>Scade tra</th></tr></thead>`;
+const ATT_HEAD = `<thead><tr><th>Tipo</th><th>Oggetto</th><th>Referente Solution</th><th>Consegna</th><th>In attesa da</th></tr></thead>`;
+function scadeTag(g) {
   if (g === null) return `<span class="tag d-none">senza data</span>`;
-  if (stato !== "WIP") return `<span class="muted">${g < 0 ? `in attesa da ${-g} gg` : "—"}</span>`;
   return g < 0 ? `<span class="tag d-late">scaduta da ${-g} gg</span>` : g <= 3 ? `<span class="tag d-late">${g === 0 ? "oggi" : g + " gg"}</span>` : g <= 7 ? `<span class="tag d-week">${g} gg</span>` : `<span class="tag d-over">${g} gg</span>`;
 }
+// divide le offerte aperte del cliente nei due gruppi del box "Da presidiare"
+function preGroups(c) {
+  const wip = c.presidiare.filter(p => p.Stato === "WIP").sort((a, b) => (a.giorni === null) - (b.giorni === null) || a.giorni - b.giorni);
+  const att = c.presidiare.filter(p => p.Stato !== "WIP").sort((a, b) => (a.attesa === null) - (b.attesa === null) || a.attesa - b.attesa);
+  return {wip, att};
+}
+function preSummary(g) {
+  const sc = g.wip.filter(p => p.giorni !== null && p.giorni < 0).length, imm = g.wip.filter(p => p.giorni !== null && p.giorni >= 0 && p.giorni <= 3).length, na = g.wip.filter(p => p.non_assegnata).length;
+  const det = [sc ? `${sc} ${sc === 1 ? "scaduta" : "scadute"}` : "", imm ? `${imm} in scadenza` : "", na ? `${na} senza referente` : ""].filter(Boolean).join(", ");
+  return `Da presidiare: ${g.wip.length} WIP${det ? ` (${det})` : ""} · ${g.att.length} in attesa di risposta`;
+}
 function presidiareHtml(c) {
-  if (!c.presidiare.length) return `<div class="empty">Nessuna offerta aperta.</div>`;
-  return `<div class="tscroll"><table class="dt">${PRE_HEAD}<tbody>${c.presidiare.map(p => `<tr class="click ${p.urgente ? "pre-red" : p.non_assegnata ? "pre-org" : ""}" data-row="${p._row}"><td>${tipoChip(p.tipo)}</td><td class="og" title="${esc(p.Oggetto)}">${orNil(p.Oggetto)}</td><td>${p.non_assegnata ? `<span class="nonass">Non Assegnato</span>` : orNil(p.referente)}</td><td>${badge(p.Stato)}</td><td>${p["Data consegna"] ? fmt(p["Data consegna"]) : nil()}</td><td>${scadeTag(p.giorni, p.Stato)}</td></tr>`).join("")}</tbody></table></div>`;
+  const g = preGroups(c);
+  if (!g.wip.length && !g.att.length) return `<div class="card pre"><div class="pre-h"><h2>Da presidiare</h2></div><div class="empty">Nessuna offerta aperta.</div></div>`;
+  const urgent = g.wip.some(p => p.giorni !== null && p.giorni <= 3);
+  // default: aperto se c'è una WIP scaduta o in scadenza entro 3 giorni; dopo un clic si ricorda la scelta per tutta la sessione
+  const open = S.preOpen === undefined ? urgent : S.preOpen;
+  const more = (n, id, all) => n > PRE_MAX ? `<button class="linkbtn pre-more" data-more="${id}">${all ? "Mostra meno" : `Mostra tutte (${n})`}</button>` : "";
+  const wipRows = (S.preAllWip ? g.wip : g.wip.slice(0, PRE_MAX)).map(p => `<tr class="click ${p.urgente ? "pre-red" : p.non_assegnata ? "pre-org" : ""}" data-row="${p._row}"><td>${tipoChip(p.tipo)}</td><td class="og" title="${esc(p.Oggetto)}">${orNil(p.Oggetto)}</td><td>${p.non_assegnata ? `<span class="nonass">Non Assegnato</span>` : orNil(p.referente)}</td><td>${p["Data consegna"] ? fmt(p["Data consegna"]) : nil()}</td><td>${scadeTag(p.giorni)}</td></tr>`).join("");
+  const attRows = (S.preAllAtt ? g.att : g.att.slice(0, PRE_MAX)).map(p => `<tr class="click ${p.da_aggiornare ? "row-old" : ""}" data-row="${p._row}"><td>${tipoChip(p.tipo)}</td><td class="og" title="${esc(p.Oggetto)}">${orNil(p.Oggetto)}</td><td>${orNil(p.referente)}</td><td>${p["Data consegna"] ? fmt(p["Data consegna"]) : nil()}</td><td>${p.attesa === null ? nil() : `${p.attesa} gg`}${p.da_aggiornare ? ` <span class="tag d-over" title="In attesa da oltre 180 giorni: probabilmente l'esito non è stato registrato nell'Excel">da aggiornare</span>` : ""}</td></tr>`).join("");
+  const attOpen = !!S.preAttOpen;
+  return `<div class="card pre"><button class="pre-h pre-toggle" id="pre-toggle" aria-expanded="${open}">${ico("chevron-right")}<h2>Da presidiare</h2>${open ? `<span class="muted">rosso = consegna entro 3 giorni o scaduta · arancio = senza referente</span>` : `<span class="pre-sum">${esc(preSummary(g).replace(/^Da presidiare: /, ""))}</span>`}</button>
+    ${open ? `<div class="pre-body">
+      <h3 class="pre-g">In lavorazione (WIP) <span class="muted">${g.wip.length}</span></h3>
+      ${g.wip.length ? `<div class="tscroll"><table class="dt">${WIP_HEAD}<tbody>${wipRows}</tbody></table></div>${more(g.wip.length, "wip", S.preAllWip)}` : `<div class="empty sm">Nessuna offerta in lavorazione.</div>`}
+      <button class="pre-g pre-gt" id="pre-att-toggle" aria-expanded="${attOpen}">${ico("chevron-right")}In attesa di risposta <span class="muted">${g.att.length}</span></button>
+      ${attOpen ? (g.att.length ? `<div class="tscroll"><table class="dt">${ATT_HEAD}<tbody>${attRows}</tbody></table></div>${more(g.att.length, "att", S.preAllAtt)}` : `<div class="empty sm">Nessuna offerta in attesa.</div>`) : ""}
+    </div>` : ""}</div>`;
 }
 
+// card KPI: numero grande + n + UNA riga di confronto con il Market. Colore di allarme solo se n >= 5 e il valore è sotto il Market di oltre 15 punti.
+const kpiRate = (title, m, bench, mk) => {
+  const alert = m.n >= 5 && m.rate !== null && bench && bench.rate !== null && (bench.rate - m.rate) * 100 > 15;
+  const line = m.n === 0 ? "nessuna offerta con esito" : mk ? `Market ${esc(mk.nome)}: <b>${bench && bench.rate !== null ? Math.round(bench.rate * 100) + "%" : "—"}</b>` : "";
+  return kcard(`<span class="${alert ? "alert" : ""}">${m.rate === null ? "—" : Math.round(m.rate * 100) + "%"}</span>${m.n ? `<span class="nn">n=${m.n}</span>` : ""}`, `${title}${m.ridotto && m.n ? ` · <span class="ridotto">campione ridotto</span>` : ""}`, [line]);
+};
+const dcard = (title, lines) => `<div class="dcard"><div class="dt-t">${title}</div>${lines.filter(Boolean).map(l => `<div class="dt-l">${l}</div>`).join("")}</div>`;
+
 function drawCliente(body) {
-  const full = S.clFull, c = S.clYear, anno = S.clAnno, k = c.kpi, at = c.alltime, mk = c.mercato, gn = c.generale, opz = new Set(full.opzionali);
+  const full = S.clFull, c = S.clYear, anno = S.clAnno, k = c.kpi, mk = c.mercato, gn = c.generale, opz = new Set(full.opzionali);
   const periodo = anno ? `nel ${anno}` : "(tutti gli anni)";
   const tipiPresenti = [...TIPI_MAIN, "Altro"].filter(t => c.cronologia.some(x => tipoGroup(x.tipo) === t));
-  const rateLines = key => [anno ? `All-time cliente: <b>${pctN(at[key])}</b>` : "", mk ? `Market ${esc(mk.nome)}: <b>${pctN(mk[key])}</b>` : "", `<span class="muted">Media generale: ${pctN(gn[key])}</span>`];
-  const low = m => m.ridotto ? ` · <span class="ridotto">campione ridotto</span>` : "";
-  const val = m => `<span>${m.rate === null ? "—" : Math.round(m.rate * 100) + "%"}</span><span class="nn">n=${m.n}</span>`;
   const pv = k.preavviso, pm = mk && mk.preavviso, pg = gn.preavviso;
+  const med = t => t && t.mediana !== null ? `${Math.round(t.mediana)} gg` : "—";
+  const mkn = mk ? esc(mk.nome) : "Market";
   body.innerHTML = `
   <div class="card chead"><div class="chead-t"><h2 class="cname">${esc(full.nome)}</h2>
       <div class="cmeta">${full.vertical ? `<span class="tchip">${esc(full.vertical)}</span>` : ""}${full.market ? `<span class="tchip">${esc(full.market)}</span>` : ""}
       <span class="cind"><b>${full.aperte}</b> ${full.aperte === 1 ? "aperta" : "aperte"}${full.ultima ? ` · ultima offerta ${giorniFa(full.ultima.giorni_fa)}` : ""}</span>${full.prima ? `<span class="muted">· cliente dal ${fmt(full.prima)}</span>` : ""}</div></div>
     ${full.cartella.stato !== "nessuna" && S.state.local !== false ? `<button id="cl-folder" class="btn-sec" title="${full.cartella.nome ? esc(full.cartella.nome) : "Scegli la cartella di questo cliente"}">${ico("folder-open")}${full.cartella.stato === "ok" ? "Apri cartella" : "Apri cartella…"}</button>` : ""}</div>
 
-  <div class="card pre"><div class="pre-h"><h2>Da presidiare</h2><span class="muted">offerte WIP e in attesa di risposta · rosso = consegna entro 3 giorni o scaduta · arancio = senza referente</span></div>${presidiareHtml(full)}</div>
-
   <div class="sect-h"><h3 class="sect">${anno ? `Anno ${esc(anno)}` : "Tutti gli anni"}</h3>
     <div><label for="cl-anno" class="sr">Anno</label><select id="cl-anno" title="Mostra indicatori, grafici e tabella di un solo anno (Data ins.)">${annoOpts(full).map(([v, l]) => `<option value="${v}" ${v === anno ? "selected" : ""}>${l}</option>`).join("")}</select></div></div>
-  <div class="kpis">
-    ${kcard(num(k.totale), `Offerte ${periodo}`, [`${k.aperte} aperte`, `<span class="muted">${gn.offerte_per_cliente ?? "—"} in media per cliente</span>`])}
-    ${kcard(num(k.wip + k.waiting), "In corso", [`${k.wip} WIP · ${k.waiting} in attesa`])}
-    ${kcard(val(k.win), `Win rate ${periodo}${low(k.win)}`, rateLines("win"), k.win.ridotto || k.win.rate === null ? "" : "key")}
-    ${kcard(val(k.bid), `Bid rate ${periodo}${low(k.bid)}`, [`NoBID rate: <b>${pctN(k.nobid_rate)}</b>`, anno ? `All-time cliente: <b>${pctN(at.bid)}</b>` : "", mk ? `Market ${esc(mk.nome)}: <b>${pctN(mk.bid)}</b> · NoBID ${pctN(mk.nobid_rate)}` : "", `<span class="muted">Media generale: ${pctN(gn.bid)} · NoBID ${pctN(gn.nobid_rate)}</span>`], k.bid.ridotto || k.bid.rate === null ? "" : "key")}
-    ${kcard(pv.media === null ? "—" : `${Math.round(pv.media)} gg`, "Preavviso medio", [`giorni concessi dal cliente per rispondere${pv.n ? ` · mediana ${Math.round(pv.mediana)} gg (n=${pv.n})` : ""}`, pm && pm.mediana !== null ? `Market ${esc(mk.nome)}: mediana ${Math.round(pm.mediana)} gg (n=${pm.n})` : "", pg.mediana !== null ? `<span class="muted">Media generale: mediana ${Math.round(pg.mediana)} gg</span>` : ""])}
+  <div class="kpis kpis-4">
+    ${kcard(num(k.totale), `Offerte ${periodo}`, [`${k.aperte} aperte`])}
+    ${kpiRate("Win rate", k.win, mk && mk.win, mk)}
+    ${kpiRate("Bid rate", k.bid, mk && mk.bid, mk)}
+    ${kcard(pv.n ? `${Math.round(pv.mediana)} gg<span class="nn">n=${pv.n}</span>` : "—", `Preavviso medio${pv.n && pv.n < 5 ? ` · <span class="ridotto">campione ridotto</span>` : ""}`, [mk ? `Market ${mkn}: <b>${med(pm)}</b>` : ""])}
   </div>
-  <div class="g12">
-    <div class="card c7"><h2>${anno ? `Offerte per mese · ${esc(anno)}` : "Offerte per trimestre"}</h2><div class="sub">Per Data ins., divise per stato, con il win rate del periodo.${anno ? "" : " Scegli un anno per il dettaglio mensile."}</div><div id="cl-trend"></div></div>
-    <div class="card c5"><div class="card-h"><div><h2>Percorso delle offerte</h2><div class="sub">Dalle opportunità alle presentate e all'esito.</div></div></div>
-      <div class="chips" id="cl-tipi">${[["", "Tutti"], ...tipiPresenti.map(t => [t, TIPO_SHORT[t] || t])].map(([v, l]) => `<button class="chip fchip ${S.clTipo === v ? "on" : ""}" data-tipo="${esc(v)}">${esc(l)} <span class="muted">${v ? c.cronologia.filter(x => tipoGroup(x.tipo) === v).length : c.cronologia.length}</span></button>`).join("")}</div>
-      <div id="cl-funnel"></div></div>
+
+  ${presidiareHtml(full)}
+
+  <div class="card"><h2>${anno ? `Offerte per mese · ${esc(anno)}` : "Offerte per trimestre"}</h2><div class="sub">Per Data ins., divise per stato, con il win rate del periodo.${anno ? "" : " Scegli un anno per il dettaglio mensile."}</div><div id="cl-trend"></div></div>
+
+  <div class="dcards">
+    ${dcard("NoBID rate", [`Cliente: <b>${pctN(k.nobid_rate)}</b>`, mk ? `Market ${mkn}: ${pctN(mk.nobid_rate)}` : "", `Generale: ${pctN(gn.nobid_rate)}`])}
+    ${dcard("Win rate e bid rate", [`Win rate generale: <b>${pctN(gn.win)}</b>`, `Bid rate generale: <b>${pctN(gn.bid)}</b>`])}
+    ${dcard("Preavviso", [`Cliente: mediana <b>${med(pv)}</b>${pv.n ? ` (n=${pv.n})` : ""}`, mk ? `Market ${mkn}: mediana ${med(pm)}${pm && pm.n ? ` (n=${pm.n})` : ""}` : "", `Generale: mediana ${med(pg)} (n=${pg.n})`])}
+    ${dcard("Offerte per cliente", [`In media <b>${gn.offerte_per_cliente ?? "—"}</b> (tutti i clienti)`])}
+    ${dcard("In corso", [`<b>${k.wip}</b> WIP`, `<b>${k.waiting}</b> in attesa di risposta`])}
   </div>
-  <div class="card"><h2>Team sul cliente</h2><div class="sub">Per Referente Solution ${periodo}. Un'offerta con più referenti conta per ciascuno.</div>
-    ${c.team.length ? `<div class="tscroll"><table class="dt"><thead><tr><th>Referente Solution</th><th class="num">Offerte</th><th class="num">Aperte</th><th class="num">Won</th><th class="num">Lost</th><th class="num">NoBID</th></tr></thead><tbody>
-    ${c.team.map(t => `<tr class="${t.non_assegnato && t.wip ? "row-warn" : ""}"><td>${t.non_assegnato ? `<span class="${t.wip ? "nonass" : ""}">Non Assegnato</span>` : esc(t.nome)}</td><td class="num">${t.totale}</td><td class="num">${t.aperte}</td><td class="num">${t.won}</td><td class="num">${t.lost}</td><td class="num">${t.nobid}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Nessuna offerta.</div>`}</div>
+
+  <div class="card"><div class="card-h"><div><h2>Percorso delle offerte</h2><div class="sub">Dalle opportunità alle presentate e all'esito.</div></div></div>
+    <div class="chips" id="cl-tipi">${[["", "Tutti"], ...tipiPresenti.map(t => [t, TIPO_SHORT[t] || t])].map(([v, l]) => `<button class="chip fchip ${S.clTipo === v ? "on" : ""}" data-tipo="${esc(v)}">${esc(l)} <span class="muted">${v ? c.cronologia.filter(x => tipoGroup(x.tipo) === v).length : c.cronologia.length}</span></button>`).join("")}</div>
+    <div id="cl-funnel"></div></div>
   ${c.valore ? `<div class="card"><h2>Valore</h2><div class="sub">Calcolato sulle offerte ${periodo} con un valore indicato nell'Excel.</div><div class="kpis kpis-s">
     ${kcard(eur(c.valore.presentato), "Valore presentato", [])}${kcard(eur(c.valore.vinto), "Valore vinto", [])}
     ${kcard(c.valore.win_rate === null ? "—" : Math.round(c.valore.win_rate * 100) + "%", "Win rate sul valore", ["€ Won / (€ Won + € Lost)"])}
@@ -936,6 +973,14 @@ function drawCliente(body) {
   body.querySelectorAll("tr[data-row]").forEach(tr => tr.onclick = () => openForm(rowByNum(+tr.dataset.row)));
   body.querySelectorAll("tr[data-anno]").forEach(tr => tr.onclick = () => { setAnnoCliente(body, tr.dataset.anno); window.scrollTo({top: 0, behavior: "smooth"}); });
   $("#cl-anno").onchange = e => setAnnoCliente(body, e.target.value);
+  const redrawPre = () => { const card = body.querySelector(".card.pre"); if (card) { card.outerHTML = presidiareHtml(full); bindPre(); } };
+  const bindPre = () => {
+    const t = $("#pre-toggle"); if (t) t.onclick = () => { S.preOpen = !(t.getAttribute("aria-expanded") === "true"); redrawPre(); };
+    const a = $("#pre-att-toggle"); if (a) a.onclick = () => { S.preAttOpen = !S.preAttOpen; redrawPre(); };
+    body.querySelectorAll(".pre-more").forEach(b => b.onclick = () => { b.dataset.more === "wip" ? S.preAllWip = !S.preAllWip : S.preAllAtt = !S.preAllAtt; redrawPre(); });
+    body.querySelectorAll(".card.pre tr[data-row]").forEach(tr => tr.onclick = () => openForm(rowByNum(+tr.dataset.row)));
+  };
+  bindPre();
   $("#cl-trend").innerHTML = trendHtml(c.cronologia, anno);
   const funnel = () => { $("#cl-funnel").innerHTML = funnelHtml(c.cronologia.filter(x => !S.clTipo || tipoGroup(x.tipo) === S.clTipo)); body.querySelectorAll("#cl-tipi .fchip").forEach(b => b.classList.toggle("on", b.dataset.tipo === S.clTipo)); };
   funnel();
