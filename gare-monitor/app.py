@@ -238,11 +238,27 @@ def update_apply():
     import subprocess
     script = os.path.join(os.environ.get("TEMP", BASE_DIR), "gare_aggiorna.ps1")      # copia: lo script originale viene sostituito durante l'aggiornamento
     shutil.copyfile(os.path.join(BASE_DIR, "Aggiorna.ps1"), script)
+    flag = os.path.join(BASE_DIR, "update", "started.flag")                    # lo script lo crea appena parte: se manca, NON chiudiamo l'app
+    if os.path.exists(flag):
+        os.remove(flag)
     with open(os.path.join(BASE_DIR, "aggiornamento.log"), "a", encoding="utf-8") as lg:
         lg.write(f"{dt.datetime.now().isoformat(timespec='seconds')} L'app lancia l'aggiornamento (build {updater.current_version(BASE_DIR)} -> {lat['version']}).\n")
-    subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script,
-                      "-AppDir", BASE_DIR, "-Zip", zip_path, "-WaitPid", str(os.getpid())],
-                     creationflags=0x00000008 | 0x00000200, close_fds=True)               # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script,
+           "-AppDir", BASE_DIR, "-Zip", zip_path, "-WaitPid", str(os.getpid())]
+    base_flags = 0x00000008 | 0x00000200                                       # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    try:
+        subprocess.Popen(cmd, creationflags=base_flags | 0x01000000, close_fds=True)         # + CREATE_BREAKAWAY_FROM_JOB: non muore con l'app
+    except OSError:
+        try:
+            subprocess.Popen(cmd, creationflags=base_flags, close_fds=True)
+        except OSError as e:
+            return jsonify({"error": f"Non riesco a lanciare PowerShell: {e}"}), 400
+    for _ in range(40):
+        if os.path.exists(flag):
+            break
+        time.sleep(0.25)
+    else:
+        return jsonify({"error": "Lo script di aggiornamento non è partito (PowerShell bloccato?). L'app resta aperta: prova Aggiorna.bat dalla cartella dell'app."}), 400
     threading.Timer(1.0, lambda: os._exit(0)).start()
     return jsonify({"ok": True})
 

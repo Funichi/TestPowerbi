@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $log = Join-Path $AppDir "aggiornamento.log"
 function Log($m) { try { "$(Get-Date -Format s) $m" | Add-Content -Path $log } catch {} }
 $errore = $null
+try { New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "update") | Out-Null; Set-Content -Path (Join-Path $AppDir "update\started.flag") -Value "ok" } catch {}   # segnala all'app che lo script è partito
 Log "Avvio aggiornamento (pid app $WaitPid, zip '$Zip')."
 try {
     if ($WaitPid -gt 0) { try { Wait-Process -Id $WaitPid -Timeout 30 } catch {} }
