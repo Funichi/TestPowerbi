@@ -99,12 +99,29 @@
     const n = ST.nCompletare;
     return `<div class="rf-tabs"><div class="rf-seg"><button class="${ST.vista === "ricerca" ? "on" : ""}" data-v="ricerca">Ricerca</button>
       <button class="${ST.vista === "completare" ? "on" : ""}" data-v="completare">Da completare${n == null ? "" : `<span>${n}</span>`}</button></div>
-      <button class="primary" id="rf-nuova">${icona("plus")}Nuova referenza</button></div>`;
+      <div class="rf-row" style="margin:0"><button class="rf-btn" id="rf-imps">Importa scheda</button><button class="rf-btn" id="rf-impx">Importa da Excel</button>
+        <button class="rf-btn" id="rf-exp">${icona("download")}Esporta in Excel</button><button class="primary" id="rf-nuova">${icona("plus")}Nuova referenza</button></div></div>`;
   }
   function bindBarra(m) {
     m.querySelectorAll(".rf-tabs [data-v]").forEach(b => b.onclick = () => { ST.vista = b.dataset.v; monta(m); });
     qs("#rf-nuova", m).onclick = () => apriEditor(m, null);
+    ST.root = m;
+    qs("#rf-exp", m).onclick = () => { window.location.href = "/api/referenze/export"; };           // scarica tutte le referenze (anche archiviate) nel formato modello
+    qs("#rf-impx", m).onclick = () => caricaModuloDati().then(M => M.importaExcel(ctxDati())).catch(e => toast(e.message, true));
+    qs("#rf-imps", m).onclick = () => caricaModuloDati().then(M => M.importaScheda(ctxDati())).catch(e => toast(e.message, true));
   }
+  // importazione da Excel / JSON: modulo separato, caricato solo al primo clic su "Importa…"
+  let _modDati = null;
+  function caricaModuloDati() {
+    if (_modDati) return _modDati;
+    const v = encodeURIComponent((S.state && S.state.version) || "0");
+    return _modDati = new Promise((ok, ko) => {
+      const sc = document.createElement("script"); sc.src = "/static/referenze_dati.js?v=" + v;
+      sc.onload = () => ok(window.ReferenzeDati); sc.onerror = () => { _modDati = null; ko(new Error("Non riesco a caricare il modulo di importazione")); };
+      document.head.appendChild(sc);
+    });
+  }
+  const ctxDati = () => ({api, toast, ricarica: async () => { await caricaDati(); await aggiornaConteggioCompletare(); monta(ST.root); }});
   async function aggiornaConteggioCompletare() {
     try { const d = await api("/api/referenze/da-completare"); ST.nCompletare = d.referenze.length; } catch (e) {}
   }
