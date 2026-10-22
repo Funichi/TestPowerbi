@@ -267,22 +267,29 @@ def _col(ws, nome):
     return [c.value for c in ws[1]].index(nome) + 1
 
 
+INTESTAZIONI_FILE_CONSOLIDATO = ["ID", "Origine", "Contatore Excel", "Cliente", "Titolo", "Ambito", "Tipologie", "Mercato", "Segmento", "Anno", "Temi", "Tecnologie", "Pitch 30 secondi",
+                                 "Racconto esteso", "Fonti", "Confidenza abbinamento", "Materiale", "Campi mancanti", "Da verificare", "Note di verifica", "Titolo originale Excel",
+                                 "Descrizione originale Excel", "Referente AI&Data", "Referente Mercato", "Referente di progetto", "Owner"]
+
+
 def test_export_formato_colonne_liste_e_racconto_esteso(rc):
     c, tmp = rc
     wb = openpyxl.load_workbook(io.BytesIO(_scarica(c)))
     assert wb.sheetnames == ["Referenze", "Domini", "Leggimi"]
     ws = wb["Referenze"]
     intest = [x.value for x in ws[1]]
-    assert intest[:5] == ["ID", "Origine", "Contatore", "Cliente", "Titolo"] and "Racconto esteso" in intest and intest[-1] == "Archiviata"
+    assert intest == INTESTAZIONI_FILE_CONSOLIDATO                              # stesse colonne e stesso ordine di Referenze_Consolidate.xlsx
+    assert ws["A1"].fill.start_color.rgb == "FFFFF2CC" and ws["B1"].fill.start_color.rgb == "FFC2187A" and ws.freeze_panes == "E2"
+    assert [x.value for x in wb["Domini"][1]] == ["Ambito", "Tipologie AI", "Tipologie Data", "Mercato", "Campi mancanti", "Confidenza", "Materiale"]
     riga = {intest[i]: ws.cell(2, i + 1).value for i in range(len(intest))}
-    assert riga["ID"] == "REF-001" and riga["Cliente"] == "Acme Energia S.p.A." and riga["Da verificare"] == "No" and riga["Archiviata"] == "No"
+    assert riga["ID"] == "REF-001" and riga["Cliente"] == "Acme Energia S.p.A." and riga["Da verificare"] == "No"
     assert riga["Tecnologie"] == "Python ; Azure ML" and riga["Temi"] == "Forecast ; Serie storiche"
     assert riga["Racconto esteso"] == ("## Il contesto e la sfida\nAcme doveva anticipare i picchi di consumo.\n\n"
                                        "## Spunti per la conversazione\n• Quali dati storici avete?\n• Che orizzonte di previsione serve?")
     assert ws.cell(3, intest.index("Da verificare") + 1).value == "Sì"                                  # REF-002
     dm = wb["Domini"]
-    assert dm["A2"].value == "AI" and dm["B2"].value == "Chatbot & Assistenti virtuali" and "Sanità" in [x.value for x in dm["D"]]
-    assert "Leggimi" in wb.sheetnames and "Formato delle celle" in [x.value for x in wb["Leggimi"]["A"]]
+    assert dm["A2"].value == "AI" and dm["B2"].value == "Chatbot & Assistenti virtuali" and dm["C2"].value == "Data Platform & Lakehouse" and "Sanità" in [x.value for x in dm["D"]]
+    assert any("Celle gialle" in str(x.value) for x in wb["Leggimi"]["A"])
 
 
 def test_export_poi_import_dello_stesso_file_non_cambia_niente(rc):
@@ -291,10 +298,14 @@ def test_export_poi_import_dello_stesso_file_non_cambia_niente(rc):
     c.post("/api/referenze", json={**NUOVA, "pitch": "= non è una formula", "note": "riga 1\nriga 2", "esteso": [
         {"sezione": "Il contesto e la sfida", "testo": "Primo paragrafo.\n\nSecondo paragrafo, più lungo: perché sì."}, {"sezione": "Dati e tecnologie", "testo": ["Python", "Azure ML — è già qui"]}]})
     c.post("/api/referenze/REF-003/archivia", json={"archiviata": True})
-    r = _carica_file(c, _scarica(c))
-    assert r.status_code == 200
+    r = _carica_file(c, _scarica(c))                                                        # senza archiviate: 3 referenze, nessuna colonna "Archiviata"
     a = r.get_json()
-    assert (len(a["nuove"]), len(a["aggiornate"]), len(a["errori"]), a["invariate"]) == (0, 0, 0, 4) and a["avvisi"] == []
+    assert r.status_code == 200 and (len(a["nuove"]), len(a["aggiornate"]), len(a["errori"]), a["invariate"]) == (0, 0, 0, 3) and a["avvisi"] == []
+    con = c.get("/api/referenze/export", query_string={"archiviate": 1}).data                # con archiviate: 4 righe e colonna "Archiviata" (Sì per REF-003)
+    ws = openpyxl.load_workbook(io.BytesIO(con))["Referenze"]
+    assert ws.max_row == 5 and [x.value for x in ws[1]][-1] == "Archiviata" and [ws.cell(r, 27).value for r in range(2, 6)] == ["No", "No", "Sì", "No"]
+    b = _carica_file(c, con).get_json()
+    assert (len(b["nuove"]), len(b["aggiornate"]), len(b["errori"]), b["invariate"]) == (0, 0, 0, 4)
 
 
 def test_import_anteprima_e_applicazione_con_errori_nuove_e_aggiornate(rc):
@@ -302,7 +313,7 @@ def test_import_anteprima_e_applicazione_con_errori_nuove_e_aggiornate(rc):
     base = _scarica(c)
 
     def edit(ws):
-        pitch, esteso, mercato, cliente = (_col(ws, x) for x in ("Racconto 30 secondi", "Racconto esteso", "Mercato", "Cliente"))
+        pitch, esteso, mercato, cliente = (_col(ws, x) for x in ("Pitch 30 secondi", "Racconto esteso", "Mercato", "Cliente"))
         ws.cell(2, pitch).value = "Pitch aggiornato da Excel"                                        # REF-001: cambia il pitch
         ws.cell(2, esteso).value = ws.cell(2, esteso).value + "\n\n## Il valore per il cliente\n• -12% di errore"      # e aggiunge una sezione
         ws.append([None] * len(ws[1]))

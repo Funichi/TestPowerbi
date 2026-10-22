@@ -83,7 +83,7 @@ Vista "Referenze" nel menu: ricerca per argomento (con sinonimi), cliente, ambit
 **Materiale proposto**: ricco = almeno 6 sezioni e una fonte; medio = almeno 4 sezioni (3 con fonte); scarso = altrimenti. Lo si può cambiare a mano.
 
 ### Referenze: Excel e schede JSON (passo 3)
-- **Esporta in Excel**: tutte le referenze (anche archiviate) in `Referenze_AAAAMMGG.xlsx`, fogli «Referenze», «Domini» (elenchi a tendina) e «Leggimi». Liste separate da ` ; `; racconto esteso con `## Sezione` e punti elenco `• `. È anche il modello per i caricamenti massivi.
+- **Esporta in Excel**: `Referenze_AAAAMMGG.xlsx` nello stesso formato di `Referenze_Consolidate.xlsx` (foglio «Referenze» con le stesse 26 colonne nello stesso ordine, più «Domini» e «Leggimi»). Liste separate da ` ; `; racconto esteso con `## Sezione` e punti elenco `• `. Le archiviate si includono solo con «Mostra archiviate» attivo (colonna «Archiviata» in più). È anche il modello per i caricamenti massivi: il file consolidato originale si importa così com'è.
 - **Importa da Excel**: riga con ID esistente = aggiorna, senza ID = nuova. Anteprima prima di scrivere (nuove, aggiornate con i campi che cambiano, errori); si leggono solo le colonne presenti; copia di backup prima di applicare. Un file esportato e reimportato senza modifiche dà 0 nuove e 0 cambiamenti.
 - **Importa scheda**: JSON nel formato di `referenze.json` (una scheda, un elenco o `{"referenze": [...]}`). Per ogni scheda: crea come nuova, unisci a una esistente (campo per campo: tieni l'esistente, usa la nuova, unisci le voci/sezioni) o salta.
 - Il codice di importazione (`static/referenze_dati.js`) si carica solo al primo clic su «Importa…».

@@ -310,8 +310,8 @@ def referenze_storico(rid):
 
 @app.get("/api/referenze/export")
 def referenze_export():
-    """Tutte le referenze (anche le archiviate) in un file Excel: è anche il modello per i caricamenti massivi."""
-    buf = referenze_xlsx.esporta(_ref_ok())
+    """Le referenze in un file Excel nel formato di Referenze_Consolidate.xlsx (anche il modello per i caricamenti massivi); ?archiviate=1 aggiunge le archiviate."""
+    buf = referenze_xlsx.esporta(_ref_ok(), bool(request.args.get("archiviate")))
     return send_file(buf, as_attachment=True, download_name=f"Referenze_{dt.date.today():%Y%m%d}.xlsx",
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 

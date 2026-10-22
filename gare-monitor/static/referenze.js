@@ -106,7 +106,7 @@
     m.querySelectorAll(".rf-tabs [data-v]").forEach(b => b.onclick = () => { ST.vista = b.dataset.v; monta(m); });
     qs("#rf-nuova", m).onclick = () => apriEditor(m, null);
     ST.root = m;
-    qs("#rf-exp", m).onclick = () => { window.location.href = "/api/referenze/export"; };           // scarica tutte le referenze (anche archiviate) nel formato modello
+    qs("#rf-exp", m).onclick = () => { window.location.href = "/api/referenze/export" + (ST.mostraArch ? "?archiviate=1" : ""); };     // formato del file consolidato; con "Mostra archiviate" attivo include anche le archiviate
     qs("#rf-impx", m).onclick = () => caricaModuloDati().then(M => M.importaExcel(ctxDati())).catch(e => toast(e.message, true));
     qs("#rf-imps", m).onclick = () => caricaModuloDati().then(M => M.importaScheda(ctxDati())).catch(e => toast(e.message, true));
   }
