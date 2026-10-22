@@ -7,6 +7,8 @@ import sqlite3
 import threading
 import unicodedata
 
+from . import referenze_cfg as cfg
+
 KEEP_BACKUPS = 20
 LISTE = ("tipologie", "temi", "tecnologie", "fonti", "documenti", "campi_mancanti")
 TESTI = ("origine", "cliente", "titolo", "titolo_excel", "ambito", "mercato", "segmento", "anno", "pitch", "confidenza", "materiale", "note",
@@ -208,3 +210,188 @@ class RefStore:
             return []
         with self.conn() as c:
             return [self._riga(x) for x in c.execute("SELECT * FROM referenze WHERE cliente_key=? AND archiviata=0", (k,))]
+
+
+# ================================================================ regole di completezza (un solo posto)
+MODIFICABILI = ["cliente", "titolo", "titolo_excel", "ambito", "tipologie", "mercato", "segmento", "anno", "temi", "tecnologie", "pitch", "esteso", "fonti",
+                "documenti", "confidenza", "materiale", "campi_mancanti", "da_verificare", "note", "descrizione_excel", "tecnologie_excel",
+                "referente_aidata", "referente_mercato", "referente_progetto", "owner"]
+
+
+def _sezioni(r):
+    return {str(s.get("sezione", "")).strip().casefold() for s in r.get("esteso") or []}
+
+
+def mancanti_automatici(r):
+    """Campi mancanti che si ricavano dai dati della scheda (regole semplici, nell'ordine dei domini)."""
+    sez, out = _sezioni(r), []
+    if not str(r.get("anno") or "").strip():
+        out.append("anno")
+    if not r.get("tecnologie"):
+        out.append("tecnologie")
+    if "la soluzione nel dettaglio" not in sez and not (r.get("descrizione_excel") or "").strip():
+        out.append("descrizione dettagliata")
+    if "il valore per il cliente" not in sez:
+        out.append("risultati/benefici")
+    if not any((r.get(k) or "").strip() for k in ("referente_aidata", "referente_mercato", "referente_progetto", "owner")):
+        out.append("referente interno")
+    if not (r.get("mercato") or "").strip():
+        out.append("mercato")
+    if not r.get("fonti") and not r.get("documenti"):
+        out.append("materiale di presentazione (slide/Word)")
+    return [v for v in cfg.CAMPI_MANCANTI if v in out]
+
+
+def risolvi_mancanti(prec, nuovo, inviati):
+    """Campi mancanti finali = quelli calcolati sui dati nuovi + le voci inserite a mano.
+    Una voce è 'a mano' se è tra quelle inviate e non era una voce calcolata sui dati precedenti (così quelle importate dall'Excel restano)."""
+    auto_prec = set(mancanti_automatici(prec)) if prec else set()
+    manuali = {v for v in (inviati or []) if v in cfg.CAMPI_MANCANTI and v not in auto_prec}
+    return [v for v in cfg.CAMPI_MANCANTI if v in manuali or v in set(mancanti_automatici(nuovo))]
+
+
+def materiale_proposto(r):
+    n, so = len(r.get("esteso") or []), cfg.SOGLIE_MATERIALE
+    fonti = bool(r.get("fonti"))
+    if n >= so["ricco_sezioni"] and fonti:
+        return "ricco"
+    if n >= so["medio_sezioni"] or (n >= so["medio_sezioni_con_fonti"] and fonti):
+        return "medio"
+    return "scarso"
+
+
+def punti_completezza(r):
+    """Più è alto, più la scheda è completa (serve a ordinare la vista 'Da completare')."""
+    return (min(len(r.get("esteso") or []), 7) * 2 + (2 if r.get("fonti") else 0) + (1 if r.get("pitch") else 0) + (1 if r.get("tecnologie") else 0)
+            + (1 if (r.get("descrizione_excel") or "").strip() else 0) - len(r.get("campi_mancanti") or []))
+
+
+def valida(r, prec=None):
+    """Controlla una referenza (già normalizzata). I valori già presenti nella scheda precedente restano ammessi anche se fuori dominio."""
+    err = []
+    for k, nome in (("cliente", "Cliente"), ("titolo", "Titolo"), ("ambito", "Ambito"), ("mercato", "Mercato")):
+        if not str(r.get(k) or "").strip():
+            err.append(f"{nome} è obbligatorio")
+    if r.get("ambito") and r["ambito"] not in cfg.AMBITI:
+        err.append(f"Ambito non ammesso: {r['ambito']}")
+    if r.get("mercato") and r["mercato"] not in cfg.MERCATI and r["mercato"] != (prec or {}).get("mercato"):
+        err.append(f"Mercato non ammesso: {r['mercato']}")
+    ammesse = cfg.TIPOLOGIE.get(r.get("ambito"), [])
+    for t in r.get("tipologie") or []:
+        if t not in ammesse and t not in ((prec or {}).get("tipologie") or []):
+            err.append(f"Tipologia '{t}' non ammessa per l'ambito {r.get('ambito')}")
+    if r.get("anno") and not re.fullmatch(r"\d{4}", r["anno"]):
+        err.append("L'anno deve essere di 4 cifre (es. 2024) oppure vuoto")
+    if r.get("materiale") and r["materiale"] not in cfg.MATERIALE:
+        err.append(f"Materiale non ammesso: {r['materiale']}")
+    if r.get("confidenza") and r["confidenza"] not in cfg.CONFIDENZE and r["confidenza"] != (prec or {}).get("confidenza"):
+        err.append(f"Confidenza non ammessa: {r['confidenza']}")
+    for v in r.get("campi_mancanti") or []:
+        if v not in cfg.CAMPI_MANCANTI:
+            err.append(f"Campo mancante non ammesso: {v}")
+    if err:
+        raise RefError("; ".join(err))
+
+
+def _ordina_completezza(rs):
+    ordine = {"scarso": 0, "medio": 1, "ricco": 2}
+    return sorted(rs, key=lambda r: (ordine.get(r["materiale"], 1), punti_completezza(r), -len(r["campi_mancanti"]), r["id"]))
+
+
+class RefStoreMod(RefStore):
+    """Scrittura: creazione, modifica, archiviazione, verifica, eliminazione e storico delle modifiche."""
+
+    def leggi(self, rid):
+        with self.conn() as c:
+            x = c.execute("SELECT * FROM referenze WHERE id=?", (rid,)).fetchone()
+        if not x:
+            raise RefError(f"Referenza {rid} non trovata")
+        return self._riga(x)
+
+    def _salva(self, c, r):
+        sets = ", ".join(f"{k}=?" for k in COLONNE if k != "id") + ", cliente_key=?"
+        c.execute(f"UPDATE referenze SET {sets} WHERE id=?",
+                  [json.dumps(r[k], ensure_ascii=False) if k in JSON_COLS else int(r[k]) if k in ("da_verificare", "archiviata") else r[k] for k in COLONNE if k != "id"]
+                  + [cliente_key(r["cliente"]), r["id"]])
+
+    @staticmethod
+    def _log(c, rid, ora, campo, prima):
+        c.execute("INSERT INTO referenze_log (id_referenza, data_ora, campo, valore_precedente) VALUES (?,?,?,?)", (rid, ora, campo, json.dumps(prima, ensure_ascii=False)))
+
+    def calcola(self, bozza, rid=None):
+        """Per la scheda di modifica: campi mancanti e materiale proposto per i dati correnti della bozza."""
+        r = normalizza({**bozza, "id": rid or "bozza"})
+        prec = self.leggi(rid) if rid and self.exists() else None
+        return {"campi_mancanti": risolvi_mancanti(prec, r, bozza.get("campi_mancanti")), "materiale_proposto": materiale_proposto(r),
+                "automatici": mancanti_automatici(r)}
+
+    def crea(self, dati, ora=None):
+        ora = ora or _ora()
+        self.init()
+        r = normalizza({k: v for k, v in dati.items() if k in MODIFICABILI}, ora)
+        r.update(origine=cfg.ORIGINE_MANUALE, contatore=None, archiviata=False, creata_il=ora, modificata_il=ora)
+        if not r["materiale"]:
+            r["materiale"] = materiale_proposto(r)
+        r["campi_mancanti"] = risolvi_mancanti(None, r, dati.get("campi_mancanti"))
+        valida(r)
+        with self._lock, self.conn() as c:
+            r["id"] = f"REF-{self.prossimo_id(c) + 1:03d}"
+            self.inserisci(c, r)
+            self._log(c, r["id"], ora, "_creata", None)
+        return self.leggi(r["id"])
+
+    def aggiorna(self, rid, cambi, ora=None):
+        ora = ora or _ora()
+        with self._lock, self.conn() as c:
+            x = c.execute("SELECT * FROM referenze WHERE id=?", (rid,)).fetchone()
+            if not x:
+                raise RefError(f"Referenza {rid} non trovata")
+            prec = self._riga(x)
+            nuovo = normalizza({**prec, **{k: v for k, v in cambi.items() if k in MODIFICABILI}}, ora)
+            nuovo.update(id=rid, origine=prec["origine"], contatore=prec["contatore"], archiviata=prec["archiviata"], creata_il=prec["creata_il"])
+            nuovo["campi_mancanti"] = risolvi_mancanti(prec, nuovo, cambi.get("campi_mancanti", prec["campi_mancanti"]))
+            if "materiale" in cambi and not nuovo["materiale"]:
+                nuovo["materiale"] = prec["materiale"]
+            valida(nuovo, prec)
+            diff = [k for k in MODIFICABILI if nuovo[k] != prec[k]]
+            if not diff:
+                return prec
+            nuovo["modificata_il"] = ora
+            self._salva(c, nuovo)
+            for k in diff:
+                self._log(c, rid, ora, k, prec[k])
+        return self.leggi(rid)
+
+    def archivia(self, rid, archiviata=True, ora=None):
+        ora = ora or _ora()
+        with self._lock, self.conn() as c:
+            r = self.leggi(rid)
+            if r["archiviata"] != bool(archiviata):
+                c.execute("UPDATE referenze SET archiviata=?, modificata_il=? WHERE id=?", (int(bool(archiviata)), ora, rid))
+                self._log(c, rid, ora, "archiviata", r["archiviata"])
+        return self.leggi(rid)
+
+    def verifica(self, rid, ora=None):
+        return self.aggiorna(rid, {"da_verificare": False}, ora)
+
+    def elimina(self, rid, ora=None):
+        ora = ora or _ora()
+        with self._lock, self.conn() as c:
+            r = self.leggi(rid)
+            self._log(c, rid, ora, "_eliminata", r)                            # la scheda intera resta nello storico: si può recuperare
+            c.execute("DELETE FROM referenze WHERE id=?", (rid,))
+
+    def storico(self, rid):
+        with self.conn() as c:
+            return [{"data_ora": x["data_ora"], "campo": x["campo"], "valore_precedente": json.loads(x["valore_precedente"])}
+                    for x in c.execute("SELECT * FROM referenze_log WHERE id_referenza=? ORDER BY n DESC", (rid,))]
+
+    def da_completare(self, mancante=None, solo_da_verificare=False, materiale=None):
+        base = self.elenco(archiviate=False)
+        facce = {"mancanti": {v: sum(1 for r in base if v in r["campi_mancanti"]) for v in cfg.CAMPI_MANCANTI},
+                 "da_verificare": sum(1 for r in base if r["da_verificare"]), "materiale": {m: sum(1 for r in base if r["materiale"] == m) for m in cfg.MATERIALE}}
+        sel = [r for r in base if (not mancante or mancante in r["campi_mancanti"]) and (not solo_da_verificare or r["da_verificare"]) and (not materiale or r["materiale"] == materiale)]
+        sel = [r for r in sel if r["campi_mancanti"] or r["da_verificare"] or r["materiale"] != "ricco"]
+        for r in sel:
+            r["punti"] = punti_completezza(r)
+        return {"referenze": _ordina_completezza(sel), "facce": facce}

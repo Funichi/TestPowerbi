@@ -77,7 +77,7 @@ _refstore = {"obj": None}
 def refstore():
     p = referenze_db_path()
     if _refstore["obj"] is None or _refstore["obj"].path != p:
-        _refstore["obj"] = referenze.RefStore(p)
+        _refstore["obj"] = referenze.RefStoreMod(p)
     return _refstore["obj"]
 
 
@@ -251,6 +251,61 @@ def referenze_cliente():
     rs = refstore()
     n = len(rs.per_cliente(request.args.get("nome", ""))) if rs.exists() else 0
     return jsonify({"n": n, "attivo": rs.exists()})
+
+
+def _ref_ok():
+    rs = refstore()
+    if not (rs.exists() and rs.count()):
+        raise referenze.RefError("L'archivio delle referenze non è ancora stato caricato")
+    return rs
+
+
+@app.errorhandler(referenze.RefError)
+def _ref_error(e):
+    return jsonify({"error": str(e)}), 400
+
+
+@app.post("/api/referenze")
+def referenze_crea():
+    return jsonify(_ref_ok().crea(request.get_json(silent=True) or {}))
+
+
+@app.post("/api/referenze/calcola")
+def referenze_calcola():
+    b = request.get_json(silent=True) or {}
+    return jsonify(_ref_ok().calcola(b.get("dati") or {}, b.get("id")))
+
+
+@app.get("/api/referenze/da-completare")
+def referenze_da_completare():
+    a = request.args
+    return jsonify(_ref_ok().da_completare(a.get("mancante") or None, bool(a.get("da_verificare")), a.get("materiale") or None))
+
+
+@app.put("/api/referenze/<rid>")
+def referenze_aggiorna(rid):
+    return jsonify(_ref_ok().aggiorna(rid, request.get_json(silent=True) or {}))
+
+
+@app.post("/api/referenze/<rid>/archivia")
+def referenze_archivia(rid):
+    return jsonify(_ref_ok().archivia(rid, (request.get_json(silent=True) or {}).get("archiviata", True)))
+
+
+@app.post("/api/referenze/<rid>/verifica")
+def referenze_verifica(rid):
+    return jsonify(_ref_ok().verifica(rid))
+
+
+@app.delete("/api/referenze/<rid>")
+def referenze_elimina(rid):
+    _ref_ok().elimina(rid)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/referenze/<rid>/storico")
+def referenze_storico(rid):
+    return jsonify(_ref_ok().storico(rid))
 
 
 @app.post("/api/referenze/carica")

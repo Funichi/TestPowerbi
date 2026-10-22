@@ -38,3 +38,39 @@
 .rf-empty-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;max-width:640px}
 .rf-empty-card h2{margin:0 0 8px}.rf-row{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}.rf-err{color:var(--urg-late-fg);margin-top:10px}
 @media(max-width:760px){.rf-bar{grid-template-columns:1fr}}
+
+/* ---------- passo 2: barra, schede con pulsanti, vista "Da completare", editor ---------- */
+.rf-tabs{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.rf-side{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.rf-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--card);border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;color:var(--text);cursor:pointer}
+.rf-btn:hover{border-color:var(--accent);color:var(--accent)}.rf-btn.danger{color:var(--urg-late-fg)}.rf-btn .ico{width:15px;height:15px}
+.rf-card.arch{opacity:.7;border-style:dashed}
+.rf-chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2);margin:0 14px 6px 0;cursor:pointer}.rf-chk input{width:auto;flex:none}.rf-chk em{font-style:normal;font-size:11px;color:var(--text-3)}
+.rf-lista{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.rf-riga{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 18px}
+.rf-riga-t{flex:1;min-width:260px}.rf-tit.sm{font-size:16px;margin:2px 0 6px}
+.rf-tag.warn{border-color:var(--urg-week);color:var(--urg-week-fg);background:var(--urg-week-bg)}
+.rf-motivo{font-size:13px;color:var(--text-2);margin-top:8px}
+/* editor a pannello */
+.rf-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:flex;justify-content:flex-end}
+.rf-dlg{background:var(--bg);width:min(960px,100%);height:100%;display:flex;flex-direction:column;box-shadow:var(--shadow-pop)}
+.rf-dh{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 24px;border-bottom:1px solid var(--border);background:var(--card)}.rf-dh h2{margin:0}
+.rf-x{border:0;background:none;cursor:pointer;padding:6px;color:var(--text-2)}.rf-x .ico{width:22px;height:22px}
+.rf-db{flex:1;overflow:auto;padding:18px 24px 30px}
+.rf-df{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 24px;border-top:1px solid var(--border);background:var(--card)}
+.rf-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}.rf-df .rf-row{margin:0}
+.rf-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}.rf-f{min-width:0}.rf-f.full{grid-column:1/-1}
+.rf-f label{display:block;font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}.rf-f label.rf-chk{text-transform:none;font-size:14px;letter-spacing:0;color:var(--text)}
+.rf-f input,.rf-f select,.rf-f textarea{width:100%}.rf-f input[type=checkbox]{width:auto}
+.rf-sh{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin:24px 0 10px}
+.rf-tagbox{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;min-height:26px}
+.rf-etic{display:inline-flex;align-items:center;gap:4px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:2px 4px 2px 9px;font-size:13px}
+.rf-etic button{border:0;background:none;cursor:pointer;color:var(--text-3);font-size:16px;line-height:1;padding:0 4px}.rf-etic button:hover{color:var(--urg-late-fg)}
+.rf-sezione{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:10px}
+.rf-s-h{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}.rf-s-t{flex:1;min-width:200px;font-weight:600}
+.rf-s-tipo{display:inline-flex;background:var(--bg);border-radius:8px;padding:2px}.rf-s-tipo button{border:0;background:none;padding:4px 10px;border-radius:6px;font:inherit;font-size:12px;cursor:pointer;color:var(--text-2)}.rf-s-tipo .on{background:var(--card);color:var(--accent);font-weight:600}
+.rf-ib{border:1px solid var(--border);background:var(--card);border-radius:8px;width:30px;height:30px;cursor:pointer}.rf-ib:disabled{opacity:.4;cursor:default}
+.rf-sezione textarea{width:100%}
+.rf-chks{display:flex;flex-wrap:wrap}.rf-chk.auto{color:var(--text-3)}
+.rf-tab{width:100%;border-collapse:collapse;font-size:13px}.rf-tab th,.rf-tab td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}.rf-prima{max-width:420px;word-break:break-word}
+@media(max-width:760px){.rf-grid{grid-template-columns:1fr}}

@@ -135,3 +135,105 @@ console.log(JSON.stringify(out));
     assert o["forecast"] == ["A", "B", "B2", "C", "D"]
     assert o["maiuscole_accenti"] == ["B", "B2"] and o["chatbot"] == ["X"] and o["genai"] == ["Y"]
     assert o["and_parole"] == ["Y"] and o["mercato"] == [] and o["conteggi"] == [1, 1, 0]
+
+
+# ---------------------------------------------------------------- passo 2: creazione, modifica, archiviazione, storico, completezza
+
+@pytest.fixture()
+def rc(ref):
+    c, tmp, p = ref
+    assert c.post("/api/referenze/carica", json={}).status_code == 200
+    return c, tmp
+
+
+NUOVA = {"cliente": "Delta Trasporti", "titolo": "Ottimizzazione dei turni", "ambito": "AI", "mercato": "Trasporti & Infrastrutture",
+         "tipologie": ["Ottimizzazione & Simulazione"], "pitch": "Abbiamo ottimizzato i turni.", "tecnologie": ["Python"], "anno": "2025"}
+
+
+def test_crea_referenza_con_id_libero_campi_mancanti_e_materiale_automatici(rc):
+    c, tmp = rc
+    r = c.post("/api/referenze", json=NUOVA)
+    assert r.status_code == 200
+    n = r.get_json()
+    assert n["id"] == "REF-004" and n["origine"] == "Inserita a mano" and n["archiviata"] is False and n["contatore"] is None
+    # nessun esteso, nessuna fonte, nessun referente: le regole li segnalano da sole; anno e tecnologie sono presenti
+    assert n["campi_mancanti"] == ["descrizione dettagliata", "risultati/benefici", "referente interno", "materiale di presentazione (slide/Word)"]
+    assert n["materiale"] == "scarso"
+    assert c.get("/api/referenze/REF-004/storico").get_json()[0]["campo"] == "_creata"
+    assert c.get("/api/referenze").get_json()["totale"] == 4
+    for dati, msg in (({**NUOVA, "cliente": ""}, "Cliente"), ({**NUOVA, "mercato": "Marte"}, "Mercato"), ({**NUOVA, "ambito": "Boh"}, "Ambito"), ({**NUOVA, "titolo": " "}, "Titolo"),
+                      ({**NUOVA, "tipologie": ["Data Platform & Lakehouse"]}, "Tipologia"), ({**NUOVA, "anno": "20"}, "anno")):
+        x = c.post("/api/referenze", json=dati)
+        assert x.status_code == 400 and msg in x.get_json()["error"], dati
+    assert c.get("/api/referenze").get_json()["totale"] == 4                       # nessuna scheda creata dagli errori
+
+
+def test_modifica_salva_storico_e_ricalcola_i_campi_mancanti_mantenendo_quelli_a_mano(rc):
+    c, tmp = rc
+    r2 = [x for x in c.get("/api/referenze").get_json()["referenze"] if x["id"] == "REF-002"][0]
+    assert "anno" in r2["campi_mancanti"] and "referente interno" in r2["campi_mancanti"]       # importati dal JSON
+    # l'utente inserisce una voce a mano ("tecnologie") e compila anno e un referente
+    cambi = {"anno": "2022", "referente_aidata": "Anna Verdi", "campi_mancanti": r2["campi_mancanti"] + ["mercato"], "pitch": "Pitch nuovo"}
+    x = c.put("/api/referenze/REF-002", json=cambi).get_json()
+    assert "anno" not in x["campi_mancanti"] and "referente interno" not in x["campi_mancanti"]      # sistemati: spariscono
+    assert "mercato" in x["campi_mancanti"]                                                          # a mano: resta
+    assert x["modificata_il"] >= r2["modificata_il"] and x["pitch"] == "Pitch nuovo"
+    log = c.get("/api/referenze/REF-002/storico").get_json()
+    campi = {e["campo"]: e["valore_precedente"] for e in log}
+    assert campi["anno"] == "" and campi["pitch"].startswith("Per Beta Ospedali") and "campi_mancanti" in campi
+    assert c.put("/api/referenze/REF-002", json={"pitch": "Pitch nuovo"}).status_code == 200
+    assert len(c.get("/api/referenze/REF-002/storico").get_json()) == len(log)                       # nessuna modifica: nessuna riga di storico
+    assert c.put("/api/referenze/REF-002", json={"mercato": "Marte"}).status_code == 400
+    assert c.put("/api/referenze/REF-999", json={"pitch": "x"}).status_code == 400
+    # il valore del materiale lo decide l'utente
+    assert c.put("/api/referenze/REF-002", json={"materiale": "ricco"}).get_json()["materiale"] == "ricco"
+
+
+def test_calcola_per_la_scheda_di_modifica(rc):
+    c, tmp = rc
+    r = c.post("/api/referenze/calcola", json={"dati": {**NUOVA, "anno": "", "esteso": [{"sezione": s, "testo": "x"} for s in ("Il contesto e la sfida", "Il valore per il cliente", "La soluzione nel dettaglio", "Dati e tecnologie")], "fonti": ["Deck"], "referente_progetto": "Mario"}}).get_json()
+    assert r["campi_mancanti"] == ["anno"] and r["materiale_proposto"] == "medio"
+    six = [{"sezione": f"S{i}", "testo": "x"} for i in range(6)]
+    assert c.post("/api/referenze/calcola", json={"dati": {**NUOVA, "esteso": six, "fonti": ["Deck"]}}).get_json()["materiale_proposto"] == "ricco"
+    assert c.post("/api/referenze/calcola", json={"dati": {**NUOVA, "esteso": six}}).get_json()["materiale_proposto"] == "medio"        # senza fonti non è ricco
+
+
+def test_archivia_verifica_elimina_e_non_compare_piu(rc):
+    c, tmp = rc
+    assert c.post("/api/referenze/REF-001/archivia", json={"archiviata": True}).get_json()["archiviata"] is True
+    assert [x["id"] for x in c.get("/api/referenze").get_json()["referenze"]] == ["REF-002", "REF-003"]
+    assert len(c.get("/api/referenze", query_string={"archiviate": 1}).get_json()["referenze"]) == 3
+    assert c.get("/api/referenze/cliente", query_string={"nome": "Acme Energia"}).get_json()["n"] == 0          # le archiviate non contano
+    assert c.post("/api/referenze/REF-001/archivia", json={"archiviata": False}).get_json()["archiviata"] is False
+    v = c.post("/api/referenze/REF-002/verifica").get_json()
+    assert v["da_verificare"] is False
+    assert any(e["campo"] == "da_verificare" and e["valore_precedente"] is True for e in c.get("/api/referenze/REF-002/storico").get_json())
+    assert c.delete("/api/referenze/REF-003").status_code == 200
+    assert [x["id"] for x in c.get("/api/referenze").get_json()["referenze"]] == ["REF-001", "REF-002"]
+    el = c.get("/api/referenze/REF-003/storico").get_json()[0]
+    assert el["campo"] == "_eliminata" and el["valore_precedente"]["cliente"] == "Gamma Telecom"                # la scheda intera resta recuperabile
+    assert c.post("/api/referenze", json=NUOVA).get_json()["id"] == "REF-003"                                  # il primo numero libero
+
+
+def test_vista_da_completare_ordinata_e_filtrata(rc):
+    c, tmp = rc
+    d = c.get("/api/referenze/da-completare").get_json()
+    assert [r["id"] for r in d["referenze"]][0] == "REF-003"                          # la meno completa (materiale scarso) per prima
+    assert d["facce"]["da_verificare"] == 1 and d["facce"]["materiale"] == {"ricco": 1, "medio": 1, "scarso": 1} and d["facce"]["mancanti"]["anno"] == 1
+    assert [r["id"] for r in c.get("/api/referenze/da-completare", query_string={"da_verificare": 1}).get_json()["referenze"]] == ["REF-002"]
+    assert [r["id"] for r in c.get("/api/referenze/da-completare", query_string={"mancante": "anno"}).get_json()["referenze"]] == ["REF-002"]
+    assert [r["id"] for r in c.get("/api/referenze/da-completare", query_string={"materiale": "scarso"}).get_json()["referenze"]] == ["REF-003"]
+    assert all("punti" in r for r in d["referenze"])
+
+
+def test_le_modifiche_restano_dopo_il_riavvio(rc):
+    import importlib
+    c, tmp = rc
+    c.put("/api/referenze/REF-001", json={"titolo": "Titolo cambiato", "segmento": "Elettrico"})
+    import app as appmod
+    importlib.reload(appmod)                                                           # come riavviare l'app
+    appmod.app.testing = True
+    c2 = appmod.app.test_client()
+    r1 = [x for x in c2.get("/api/referenze").get_json()["referenze"] if x["id"] == "REF-001"][0]
+    assert r1["titolo"] == "Titolo cambiato" and r1["segmento"] == "Elettrico"
+    assert {e["campo"] for e in c2.get("/api/referenze/REF-001/storico").get_json()} == {"titolo", "segmento", "campi_mancanti"}      # i campi mancanti si ricalcolano da soli (qui: manca "risultati/benefici")

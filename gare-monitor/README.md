@@ -76,3 +76,8 @@ Vista "Referenze" nel menu: ricerca per argomento (con sinonimi), cliente, ambit
 - Domini (ambiti, tipologie, mercati…) e **sinonimi di ricerca** stanno in un solo file: `core/referenze_cfg.py`.
 - Il codice della vista (`static/referenze.js`, `referenze.css`) si carica solo alla prima apertura della vista.
 - **Dati riservati**: `referenze.db`, `backup_referenze/`, `referenze*.json`, `Referenze*.xlsx`, `Prototipo_Referenze*.html` sono in `.gitignore`; nel repository solo dati finti (`tests/fixtures/referenze_finte.json`).
+
+### Referenze: creazione, modifica e completezza (passo 2)
+"Nuova referenza" e "Modifica" aprono una scheda a pannello (racconto esteso a sezioni riordinabili, etichette per temi/tecnologie/fonti, azioni Archivia, Elimina, "Segna come verificata", Storico). Ogni modifica salvata scrive in `referenze_log` il valore precedente di ogni campo cambiato.
+**Campi mancanti** (regole in `core/referenze.py`, `mancanti_automatici`): anno vuoto, nessuna tecnologia, nessun referente, racconto senza "Il valore per il cliente", senza "La soluzione nel dettaglio" né descrizione, mercato vuoto, nessuna fonte/documento. Al salvataggio si ricalcolano; le voci inserite a mano (o importate e non calcolabili) restano.
+**Materiale proposto**: ricco = almeno 6 sezioni e una fonte; medio = almeno 4 sezioni (3 con fonte); scarso = altrimenti. Lo si può cambiare a mano.
