@@ -33,12 +33,14 @@
       + (contiene(r.descrizione_excel, g) ? 2 : 0) + (contiene((r.tipologie || []).join(" "), g) ? 1 : 0), 0);
   }
   const corrispondeCliente = (r, c) => { const x = normTxt(c).trim(); return !x || normTxt(r.cliente).includes(x); };
+  // f.ids (opzionale): elenco esatto di referenze, usato dal collegamento della scheda Cliente (il nome si abbina senza maiuscole, punteggiatura e S.p.A.)
+  const corrispondeCl = (r, f) => f.ids ? f.ids.has(r.id) : corrispondeCliente(r, f.cliente);
   const corrispondeAmbito = (r, f) => (!f.ambito || r.ambito === f.ambito) && (!f.tipologia || (r.tipologie || []).includes(f.tipologia));
 
   // f = {q, cliente, ambito, tipologia, mercato}
   function cerca(dati, f, SIN) {
     const gruppi = gruppiDiRicerca(f.q, SIN);
-    const ris = dati.filter(r => corrispondeArgomento(r, gruppi) && corrispondeCliente(r, f.cliente) && (!f.mercato || r.mercato === f.mercato) && corrispondeAmbito(r, f));
+    const ris = dati.filter(r => corrispondeArgomento(r, gruppi) && corrispondeCl(r, f) && (!f.mercato || r.mercato === f.mercato) && corrispondeAmbito(r, f));
     ris.forEach(r => r._s = punteggio(r, gruppi));
     ris.sort((a, b) => (b._s - a._s) || ((ORDINE_MATERIALE[a.materiale] ?? 3) - (ORDINE_MATERIALE[b.materiale] ?? 3)));
     return ris;
@@ -46,7 +48,7 @@
   // base per i conteggi dei filtri: argomento + cliente (+ mercato/ambito se richiesti)
   function conteggi(dati, f, SIN) {
     const gruppi = gruppiDiRicerca(f.q, SIN);
-    const baseTC = dati.filter(r => corrispondeArgomento(r, gruppi) && corrispondeCliente(r, f.cliente));
+    const baseTC = dati.filter(r => corrispondeArgomento(r, gruppi) && corrispondeCl(r, f));
     return {
       gruppi,
       mercato: m => baseTC.filter(r => r.mercato === m && corrispondeAmbito(r, f)).length,
@@ -55,8 +57,16 @@
     };
   }
 
+  // testo semplice per gli appunti: racconto da 30 secondi + racconto esteso (sezioni con titolo, elenchi con "• ")
+  function testoPerCopia(r) {
+    const parti = [`${r.titolo} — ${r.cliente}${r.anno ? " (" + r.anno + ")" : ""}`, "", "IN 30 SECONDI", String(r.pitch || "").trim()];
+    if ((r.esteso || []).length) parti.push("", "RACCONTO ESTESO");
+    (r.esteso || []).forEach(s => { parti.push("", s.sezione, Array.isArray(s.testo) ? s.testo.map(x => "• " + x).join("\n") : String(s.testo || "").trim()); });
+    return parti.join("\n").trim() + "\n";
+  }
+
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = {normTxt, indicizzaSinonimi, gruppiDiRicerca, punteggio, cerca, conteggi};
+    module.exports = {normTxt, indicizzaSinonimi, gruppiDiRicerca, punteggio, cerca, conteggi, testoPerCopia};
     return;
   }
 
@@ -83,11 +93,11 @@
     const referenti = [r.referente_aidata, r.referente_progetto].filter(Boolean);
     return `<article class="rf-card ${r.archiviata ? "arch" : ""}">
       <div class="rf-top"><div>
-        <div class="rf-cli"><a href="#" data-cli="${E(r.cliente)}" title="Mostra tutte le referenze di questo cliente">${E(r.cliente)}</a> · ${E(r.mercato)}${r.anno ? " · " + E(r.anno) : ""} · <span class="rf-id">${E(r.id)}</span></div>
+        <div class="rf-cli"><a href="#" data-cli="${E(r.cliente)}" title="Mostra tutte le referenze di questo cliente">${E(r.cliente)}</a> · ${E(r.mercato)}${r.anno ? " · " + E(r.anno) : ""}<span class="rf-id"> · ${E(r.id)}</span></div>
         <h3 class="rf-tit">${E(r.titolo)}</h3>
         <div class="rf-tags"><span class="rf-tag">${E(ambLab)}</span>${(r.tipologie || []).map(c => `<span class="rf-tag c">${E(c)}</span>`).join("")}${(r.temi || []).map(t => `<span class="rf-tag t">${E(t)}</span>`).join("")}${(r.tecnologie || []).map(t => `<span class="rf-tag">${E(t)}</span>`).join("")}</div>
       </div><div class="rf-side"><div class="rf-badges">${r.archiviata ? `<span class="rf-badge low">Archiviata</span>` : ""}${bl ? `<span class="rf-badge ${bc}">${bl}</span>` : ""}${r.da_verificare ? `<span class="rf-badge warn" title="${E(r.note)}">Da verificare</span>` : ""}${r.origine && r.origine !== "Excel master" ? `<span class="rf-badge new">Nuova</span>` : ""}</div>
-        <button class="rf-btn" data-edit="${E(r.id)}">${icona("pencil")}Modifica</button></div></div>
+        <div class="rf-acts"><button class="rf-btn" data-copia="${E(r.id)}" title="Copia il racconto da 30 secondi e il racconto esteso negli appunti">${icona("copy")}Copia testo</button><button class="rf-btn" data-edit="${E(r.id)}">${icona("pencil")}Modifica</button></div></div></div>
       <div class="rf-pitch"><small>In 30 secondi</small>${E(r.pitch)}</div>
       <details><summary>Racconto esteso</summary><div class="rf-ext">${ext || `<p class="rf-muted">Nessun racconto esteso.</p>`}</div></details>
       <div class="rf-src">${(r.fonti || []).length ? "Fonti: " + E(r.fonti.join(" · ")) : "Fonte: solo Excel master"}${(r.campi_mancanti || []).length ? ` · <b>Manca:</b> ${E(r.campi_mancanti.join(", "))}` : ""}${referenti.length ? " · Referenti: " + E(referenti.join(", ")) : ""}</div></article>`;
@@ -99,12 +109,14 @@
     const n = ST.nCompletare;
     return `<div class="rf-tabs"><div class="rf-seg"><button class="${ST.vista === "ricerca" ? "on" : ""}" data-v="ricerca">Ricerca</button>
       <button class="${ST.vista === "completare" ? "on" : ""}" data-v="completare">Da completare${n == null ? "" : `<span>${n}</span>`}</button></div>
-      <div class="rf-row" style="margin:0"><button class="rf-btn" id="rf-imps">Importa scheda</button><button class="rf-btn" id="rf-impx">Importa da Excel</button>
+      <div class="rf-row rf-admin" style="margin:0"><button class="rf-btn" id="rf-pres" title="Ingrandisce il testo e nasconde fonti, note e pulsanti di modifica: per girare lo schermo verso il cliente">${icona("presentation")}Modalità presentazione</button>
+        <button class="rf-btn" id="rf-imps">Importa scheda</button><button class="rf-btn" id="rf-impx">Importa da Excel</button>
         <button class="rf-btn" id="rf-exp">${icona("download")}Esporta in Excel</button><button class="primary" id="rf-nuova">${icona("plus")}Nuova referenza</button></div></div>`;
   }
   function bindBarra(m) {
     m.querySelectorAll(".rf-tabs [data-v]").forEach(b => b.onclick = () => { ST.vista = b.dataset.v; monta(m); });
     qs("#rf-nuova", m).onclick = () => apriEditor(m, null);
+    qs("#rf-pres", m).onclick = () => impostaPresentazione(true);
     ST.root = m;
     qs("#rf-exp", m).onclick = () => { window.location.href = "/api/referenze/export" + (ST.mostraArch ? "?archiviate=1" : ""); };     // formato del file consolidato; con "Mostra archiviate" attivo include anche le archiviate
     qs("#rf-impx", m).onclick = () => caricaModuloDati().then(M => M.importaExcel(ctxDati())).catch(e => toast(e.message, true));
@@ -124,6 +136,29 @@
   const ctxDati = () => ({api, toast, ricarica: async () => { await caricaDati(); await aggiornaConteggioCompletare(); monta(ST.root); }});
   async function aggiornaConteggioCompletare() {
     try { const d = await api("/api/referenze/da-completare"); ST.nCompletare = d.referenze.length; } catch (e) {}
+  }
+  // ---------------------------------------------------------------- modalità presentazione e copia del testo
+  function impostaPresentazione(on) {
+    document.body.classList.toggle("rf-pres", on);
+    if (on) window.scrollTo(0, 0);
+  }
+  function preparaPresentazione() {
+    if (document.getElementById("rf-pres-exit")) return;
+    const b = document.createElement("button"); b.id = "rf-pres-exit"; b.className = "rf-pres-exit"; b.textContent = "Esci dalla presentazione (Esc)"; b.onclick = () => impostaPresentazione(false);
+    document.body.appendChild(b);
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && document.body.classList.contains("rf-pres") && !qs("#rf-editor")) impostaPresentazione(false); });
+  }
+  async function copiaTesto(r) {
+    const t = testoPerCopia(r);
+    try { await navigator.clipboard.writeText(t); }
+    catch (e) {                                           // appunti non disponibili (es. pagina non sicura): ripiego con una selezione temporanea
+      const ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); } finally { ta.remove(); }
+    }
+    toast(`Testo copiato: ${r.cliente}`);
+  }
+  function bindCopia(m, box) {
+    box.querySelectorAll("[data-copia]").forEach(b => b.onclick = () => { const r = ST.dati.find(x => x.id === b.dataset.copia); if (r) copiaTesto(r); });
   }
   function bindModifica(m, box) {
     box.querySelectorAll("[data-edit]").forEach(b => b.onclick = async () => {
@@ -161,7 +196,10 @@
     qs("#rf-out", m).querySelectorAll("[data-cli]").forEach(a => a.onclick = e => {
       e.preventDefault(); ST.f = {q: "", cliente: a.dataset.cli, ambito: "", tipologia: "", mercato: ""}; qs("#rf-q", m).value = ""; qs("#rf-cl", m).value = a.dataset.cli; disegna(m); window.scrollTo(0, 0);
     });
-    bindModifica(m, qs("#rf-out", m));
+    bindModifica(m, qs("#rf-out", m)); bindCopia(m, qs("#rf-out", m));
+    // filtro per elenco esatto (dalla scheda Cliente): etichetta con X per toglierlo
+    const chip = qs("#rf-idchip", m);
+    if (chip) { chip.hidden = !f.ids; if (f.ids) { chip.innerHTML = `Cliente: <b>${E(f.cliente)}</b> · ${f.ids.size} ${f.ids.size === 1 ? "referenza" : "referenze"} <button type="button" aria-label="Togli il filtro">×</button>`; qs("button", chip).onclick = () => { f.ids = null; f.cliente = ""; qs("#rf-cl", m).value = ""; disegna(m); }; } }
   }
 
   function montaRicerca(m) {
@@ -169,13 +207,14 @@
     m.innerHTML = `<div class="rf-wrap">${barraHtml()}
       <div class="rf-bar"><div><label for="rf-q">Argomento o tecnologia</label><input id="rf-q" placeholder="es. forecast, chatbot, Databricks…" autocomplete="off" value="${E(ST.f.q)}"></div>
         <div><label for="rf-cl">Cliente</label><input id="rf-cl" list="rf-clienti" placeholder="es. Enel, Poste…" autocomplete="off" value="${E(ST.f.cliente)}"><datalist id="rf-clienti">${clienti.map(c => `<option value="${E(c)}">`).join("")}</datalist></div></div>
+      <div class="rf-idchip" id="rf-idchip" hidden></div>
       <div class="rf-seg" id="rf-amb"></div><div class="rf-chips" id="rf-cat"></div>
       <div class="rf-lbl">Mercato</div><div class="rf-chips" id="rf-mk"></div>
       <label class="rf-chk"><input type="checkbox" id="rf-arch" ${ST.mostraArch ? "checked" : ""}> Mostra archiviate</label>
       <div class="rf-hint" id="rf-hint"></div><div class="rf-result" id="rf-rh"></div><div id="rf-out"></div></div>`;
     bindBarra(m);
     qs("#rf-q", m).oninput = e => { ST.f.q = e.target.value; disegna(m); };
-    qs("#rf-cl", m).oninput = e => { ST.f.cliente = e.target.value; disegna(m); };
+    qs("#rf-cl", m).oninput = e => { ST.f.cliente = e.target.value; ST.f.ids = null; disegna(m); };
     qs("#rf-arch", m).onchange = async e => { ST.mostraArch = e.target.checked; await caricaDati(); disegna(m); };
     disegna(m);
   }
@@ -196,7 +235,7 @@
       <div class="rf-lbl">Materiale</div><div class="rf-chips">${chip(!c.materiale, 'data-mat=""', "Tutti", "")}${ST.cfg.materiale.map(v => chip(c.materiale === v, `data-mat="${v}"`, (BADGE[v] || [v])[0], F.materiale[v] || 0)).join("")}
         ${chip(c.daVerificare, 'data-dv="1"', "Solo da verificare", F.da_verificare)}</div>
       <div class="rf-result"><span>${d.referenze.length}</span> ${d.referenze.length === 1 ? "scheda" : "schede"} da completare o verificare</div>
-      <div class="rf-lista">${lista.map(r => `<div class="rf-riga"><div class="rf-riga-t"><div class="rf-cli">${E(r.cliente)} · ${E(r.mercato)} · <span class="rf-id">${E(r.id)}</span></div><div class="rf-tit sm">${E(r.titolo)}</div>
+      <div class="rf-lista">${lista.map(r => `<div class="rf-riga"><div class="rf-riga-t"><div class="rf-cli">${E(r.cliente)} · ${E(r.mercato)}<span class="rf-id"> · ${E(r.id)}</span></div><div class="rf-tit sm">${E(r.titolo)}</div>
         <div class="rf-tags">${(r.campi_mancanti || []).map(v => `<span class="rf-tag warn">${E(v)}</span>`).join("") || `<span class="rf-muted">Nessun campo mancante</span>`}</div>
         ${r.da_verificare ? `<div class="rf-motivo"><b>Da verificare:</b> ${E(r.note || "motivo non indicato")}</div>` : ""}</div>
         <div class="rf-side"><div class="rf-badges"><span class="rf-badge ${(BADGE[r.materiale] || [, ""])[1]}">${(BADGE[r.materiale] || [r.materiale])[0]}</span></div><button class="rf-btn" data-edit="${E(r.id)}">${icona("pencil")}Modifica</button></div></div>`).join("") || `<div class="rf-empty">Niente da completare con questi filtri.</div>`}</div>
@@ -401,11 +440,12 @@
       if (S.view !== "referenze") return;
       if (d.stato !== "ok") { schermataVuota(m, d); return; }
       ST.SIN = indicizzaSinonimi(ST.cfg.sinonimi);
+      preparaPresentazione();
       aggiornaConteggioCompletare().then(() => { const b = qs(".rf-tabs [data-v=completare]", m); if (b && ST.nCompletare != null) b.innerHTML = `Da completare<span>${ST.nCompletare}</span>`; });
       monta(m);
     },
     // chiamata dall'esterno (scheda Cliente): apre la ricerca già filtrata per cliente
-    filtraPerCliente(nome) { ST.vista = "ricerca"; ST.f = {q: "", cliente: nome || "", ambito: "", tipologia: "", mercato: ""}; },
+    filtraPerCliente(nome, ids) { ST.vista = "ricerca"; ST.f = {q: "", cliente: nome || "", ambito: "", tipologia: "", mercato: "", ids: ids && ids.length ? new Set(ids) : null}; },
   };
   window.Referenze = R;
 })();

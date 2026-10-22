@@ -77,10 +77,10 @@ def test_backup_tiene_le_ultime_20(ref):
 def test_cliente_abbinato_senza_maiuscole_punteggiatura_e_spa(ref):
     from core.referenze import cliente_key
     c, tmp, p = ref
-    assert c.get("/api/referenze/cliente", query_string={"nome": "ACME ENERGIA"}).get_json() == {"n": 0, "attivo": False}      # nessun database ancora
+    assert c.get("/api/referenze/cliente", query_string={"nome": "ACME ENERGIA"}).get_json() == {"n": 0, "ids": [], "attivo": False}      # nessun database ancora
     c.post("/api/referenze/carica", json={})
     for nome in ("ACME ENERGIA", "Acme Energia S.p.A.", "acme energia spa", "AcmeEnergia"):
-        assert c.get("/api/referenze/cliente", query_string={"nome": nome}).get_json()["n"] == 1
+        assert c.get("/api/referenze/cliente", query_string={"nome": nome}).get_json()["ids"] == ["REF-001"]
     assert c.get("/api/referenze/cliente", query_string={"nome": "Altro"}).get_json()["n"] == 0
     assert cliente_key("AliaAmbiente") == cliente_key("Alia Ambiente") == "aliaambiente" and cliente_key("ENEL") == cliente_key("Enel S.p.A.")
 
@@ -382,3 +382,27 @@ def test_importa_scheda_candidati_unione_e_nuova(rc):
     tutte = {x["id"]: x for x in c.get("/api/referenze").get_json()["referenze"]}
     assert tutte["REF-001"]["tecnologie"] == ["Python", "Azure ML", "Databricks"] and tutte["REF-004"]["origine"] == "Import scheda" and len(tutte) == 4
     assert {e["campo"] for e in c.get("/api/referenze/REF-001/storico").get_json()} >= {"tecnologie", "fonti"}
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="serve node")
+def test_testo_da_copiare_e_filtro_per_elenco_di_id():
+    js = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "referenze.js")
+    prog = r'''
+const R = require(process.argv[1]);
+const r = {id: "R1", cliente: "Acme", titolo: "Forecast domanda", anno: "2024", pitch: " Per Acme un modello. ", mercato: "Energy & Utilities", ambito: "AI",
+  esteso: [{sezione: "Il contesto e la sfida", testo: "Troppi picchi."}, {sezione: "Spunti per la conversazione", testo: ["Quali dati?", "Che orizzonte?"]}]};
+const base = {cliente: "", titolo: "", titolo_excel: "", segmento: "", pitch: "", tipologie: [], temi: [], tecnologie: [], descrizione_excel: "", ambito: "AI", mercato: "Sanità", materiale: "medio"};
+const D = [{...base, id: "A", cliente: "Alia Ambiente"}, {...base, id: "B", cliente: "AliaAmbiente (Gruppo Plures)"}, {...base, id: "C", cliente: "Altro"}];
+const f = o => ({q: "", cliente: "", ambito: "", tipologia: "", mercato: "", ...o});
+console.log(JSON.stringify({
+  testo: R.testoPerCopia(r), vuoto: R.testoPerCopia({...r, esteso: []}),
+  testo_cliente: R.cerca(D, f({cliente: "alia ambiente"}), {}).map(x => x.id),                       // per testo: "Alia Ambiente" non trova "AliaAmbiente"
+  per_ids: R.cerca(D, f({cliente: "Alia Ambiente", ids: new Set(["A", "B"])}), {}).map(x => x.id),   // per elenco di ID (calcolato dal server con la chiave del nome): li trova entrambi
+  conteggi: (() => { const c = R.conteggi(D, f({ids: new Set(["B"])}), {}); return [c.ambito(""), c.mercato("Sanità")]; })(),
+}));
+'''
+    o = json.loads(subprocess.run(["node", "-e", prog, js], capture_output=True, text=True, check=True).stdout)
+    assert o["testo"] == ("Forecast domanda — Acme (2024)\n\nIN 30 SECONDI\nPer Acme un modello.\n\nRACCONTO ESTESO\n\nIl contesto e la sfida\nTroppi picchi.\n\n"
+                          "Spunti per la conversazione\n• Quali dati?\n• Che orizzonte?\n")
+    assert o["vuoto"] == "Forecast domanda — Acme (2024)\n\nIN 30 SECONDI\nPer Acme un modello.\n"
+    assert o["testo_cliente"] == ["A"] and o["per_ids"] == ["A", "B"] and o["conteggi"] == [1, 1]

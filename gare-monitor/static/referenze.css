@@ -83,3 +83,28 @@
 .rf-sch-h{margin-bottom:8px}.rf-opz{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:8px}.rf-opz label{display:inline-flex;gap:6px;align-items:center;font-size:14px;cursor:pointer}.rf-opz input{width:auto}
 .rf-un{display:grid;gap:8px;margin:8px 0}.rf-cerca{display:flex;flex-wrap:wrap;gap:6px}
 .rf-merge select{min-width:170px}
+
+/* ---------- passo 4: copia, modalità presentazione, filtro per cliente ---------- */
+.rf-acts{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.rf-idchip{display:inline-flex;align-items:center;gap:8px;background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:4px 6px 4px 14px;font-size:13px;margin:4px 0 10px}
+.rf-idchip[hidden]{display:none}.rf-idchip button{border:0;background:var(--accent);color:#fff;border-radius:50%;width:20px;height:20px;cursor:pointer;line-height:1}
+.rf-pres-exit{display:none}
+/* presentazione: testo grande, niente di interno (barra laterale, intestazione, badge, fonti, note, pulsanti) */
+body.rf-pres .side,body.rf-pres .top,body.rf-pres .rf-tabs,body.rf-pres .rf-badges,body.rf-pres .rf-src,body.rf-pres .rf-acts,body.rf-pres .rf-id,
+body.rf-pres .rf-chk,body.rf-pres #rf-hint{display:none!important}
+body.rf-pres .content{margin-left:0}
+body.rf-pres .rf-wrap{max-width:1500px;margin:0 auto;font-size:19px;padding-top:18px}
+body.rf-pres .rf-bar input{font-size:22px;padding:16px 20px}
+body.rf-pres .rf-card{padding:28px 34px}
+body.rf-pres .rf-tit{font-size:30px}
+body.rf-pres .rf-cli{font-size:15px}
+body.rf-pres .rf-tag{font-size:14px;padding:3px 10px}
+body.rf-pres .rf-pitch{font-size:26px;line-height:1.45;padding:18px 24px}
+body.rf-pres .rf-card summary{font-size:19px}
+body.rf-pres .rf-ext p,body.rf-pres .rf-ext li{font-size:21px;line-height:1.55;max-width:none}
+body.rf-pres .rf-ext h4{font-size:15px}
+body.rf-pres .rf-result{font-size:21px}
+body.rf-pres .rf-pres-exit{display:block;position:fixed;top:14px;right:18px;z-index:250;border:1px solid var(--border);background:var(--card);color:var(--text-3);border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;opacity:.55}
+body.rf-pres .rf-pres-exit:hover{opacity:1;color:var(--text)}
+body.rf-pres .rf-seg button,body.rf-pres .rf-chip{font-size:16px}
+body.rf-pres #rf-cat .rf-hint{display:none}

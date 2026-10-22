@@ -166,6 +166,7 @@ function render() {
   $("#page-title").textContent = TITLES[S.view][0]; $("#page-sub").textContent = TITLES[S.view][1];
   const m = $("#main");
   if (S.view !== "table") setHash("");
+  if (S.view !== "referenze") document.body.classList.remove("rf-pres");        // la modalità presentazione vale solo nella vista Referenze
   $(".actions").hidden = S.view === "referenze";          // i pulsanti Excel riguardano solo le offerte
   ({referenze: renderReferenze, dash: renderDash, table: renderTable, wip: renderWip, cliente: renderCliente, tempi: renderTempi, clean: renderClean})[S.view](m);
 }
@@ -182,9 +183,11 @@ function loadReferenze() {
     document.head.appendChild(s);
   });
 }
+// dalla scheda Cliente: apre la ricerca già filtrata sulle referenze di quel cliente (elenco esatto di ID: ignora maiuscole, punteggiatura e S.p.A.)
+function goReferenze(cliente, ids) { S.refFiltro = {cliente, ids}; S.view = "referenze"; render(); }
 function renderReferenze(m) {
   m.innerHTML = `<p class="muted pad">Caricamento…</p>`;
-  loadReferenze().then(R => S.view === "referenze" && R.render(m)).catch(e => { m.innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div></div>`; });
+  loadReferenze().then(R => { if (S.view !== "referenze") return; if (S.refFiltro) { R.filtraPerCliente(S.refFiltro.cliente, S.refFiltro.ids); S.refFiltro = null; } R.render(m); }).catch(e => { m.innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div></div>`; });
 }
 
 // ------------------------------------------------------------ cruscotto
@@ -955,6 +958,7 @@ function drawCliente(body) {
   <div class="card chead"><div class="chead-t"><h2 class="cname">${esc(full.nome)}</h2>
       <div class="cmeta">${full.vertical ? `<span class="tchip">${esc(full.vertical)}</span>` : ""}${full.market ? `<span class="tchip">${esc(full.market)}</span>` : ""}
       <span class="cind"><b>${full.aperte}</b> ${full.aperte === 1 ? "aperta" : "aperte"}${full.ultima ? ` · ultima offerta ${giorniFa(full.ultima.giorni_fa)}` : ""}</span>${full.prima ? `<span class="muted">· cliente dal ${fmt(full.prima)}</span>` : ""}</div></div>
+    <div id="cl-refbox" class="refbox" hidden></div>
     ${full.cartella.stato !== "nessuna" && S.state.local !== false ? `<button id="cl-folder" class="btn-sec" title="${full.cartella.nome ? esc(full.cartella.nome) : "Scegli la cartella di questo cliente"}">${ico("folder-open")}${full.cartella.stato === "ok" ? "Apri cartella" : "Apri cartella…"}</button>` : ""}</div>
 
   <div class="sect-h"><h3 class="sect">${anno ? `Anno ${esc(anno)}` : "Tutti gli anni"}</h3>
@@ -1007,6 +1011,17 @@ function drawCliente(body) {
   body.querySelectorAll("#cl-tipi .fchip").forEach(b => b.onclick = () => { S.clTipo = b.dataset.tipo; funnel(); });
   drawCliTable(c, opz);
   const f = $("#cl-folder"); if (f) f.onclick = () => apriCartella(full);
+  caricaRiquadroReferenze(full.nome);
+}
+// riquadro "Referenze" della scheda cliente: quante ne ha il cliente e il collegamento alla ricerca filtrata (compare solo se l'archivio delle referenze esiste)
+async function caricaRiquadroReferenze(nome) {
+  try {
+    const r = await api("/api/referenze/cliente?nome=" + encodeURIComponent(nome)), box = $("#cl-refbox");
+    if (!box || !r.attivo || S.cliente === null) return;
+    box.hidden = false;
+    box.innerHTML = r.n ? `<span class="refbox-t">Referenze</span><b>${r.n}</b><button class="linkbtn" id="cl-refgo">Vedi le referenze →</button>` : `<span class="refbox-t">Referenze</span><span class="muted">nessuna</span>`;
+    const go = $("#cl-refgo"); if (go) go.onclick = () => goReferenze(nome, r.ids);
+  } catch (e) {}
 }
 
 // tabella delle offerte del cliente: chip di stato con conteggio, colonne facoltative, offerte "figlie" sotto la gara padre
