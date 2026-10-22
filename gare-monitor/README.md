@@ -63,7 +63,7 @@ Colonne facoltative lette se presenti nell'Excel (intestazioni): Valore stimato 
 
 ## Aggiornare l'app con un clic (repository privato)
 
-A ogni modifica GitHub Actions costruisce l'app e la pubblica come Release `latest` (zip `GareOfferte-<n>.zip`, `n` = numero di build, scritto anche in `version.txt` accanto all'exe).
+A ogni push GitHub Actions costruisce l'app; **solo dai push su `main`** la pubblica come Release `latest` (zip `GareOfferte-<n>.zip`, `n` = numero di build, scritto anche in `version.txt` accanto all'exe).
 **Token (una volta sola):** github.com > foto profilo > Settings > Developer settings > Personal access tokens > Fine-grained tokens > Generate new token. Nome a piacere, scadenza (es. 1 anno), "Only select repositories" > TestPowerbi, Repository permissions > **Contents: Read-only** (Metadata si aggiunge da solo). Copia il token (inizia con `github_pat_`) e incollalo in Impostazioni > Aggiornamenti dell'app.
 Poi: "Controlla aggiornamenti" > "Aggiorna ora". L'app scarica lo zip, si chiude, `Aggiorna.ps1` sostituisce i file (restano `config.json`, `monitoraggio.db`, `backup`) e riavvia l'app; la pagina si ricarica da sola. Se l'app non parte, `Aggiorna.bat` (nella cartella) fa lo stesso da solo. Esito e errori: `aggiornamento.log`.
 Il token resta nel tuo `config.json` (non esce dal PC e non viene mai mostrato nell'interfaccia): tienilo di sola lettura.

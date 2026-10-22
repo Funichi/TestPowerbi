@@ -5,6 +5,10 @@ on:
     paths: ["gare-monitor/**", ".github/workflows/build-gare-monitor.yml"]
 permissions:
   contents: write
+# una build alla volta per branch; su main non si interrompe mai una build in corso (potrebbe lasciare la Release "latest" a metà)
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   build:
     runs-on: windows-latest
@@ -30,8 +34,10 @@ jobs:
         with:
           name: GareOfferte-windows
           path: gare-monitor/dist/GareOfferte/
-      # Release "latest" (privata come il repository): l'app la legge con un token di sola lettura per aggiornarsi
-      - shell: bash
+      # Release "latest" (privata come il repository): l'app la legge con un token di sola lettura per aggiornarsi.
+      # Si pubblica SOLO da main: sugli altri branch la build resta un artefatto da scaricare a mano per provarla.
+      - if: github.ref == 'refs/heads/main'
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
