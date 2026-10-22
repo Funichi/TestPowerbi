@@ -415,3 +415,16 @@ console.log(JSON.stringify({
                           "Spunti per la conversazione\n• Quali dati?\n• Che orizzonte?\n")
     assert o["vuoto"] == "Forecast domanda — Acme (2024)\n\nIN 30 SECONDI\nPer Acme un modello.\n"
     assert o["testo_cliente"] == ["A"] and o["per_ids"] == ["A", "B"] and o["conteggi"] == [1, 1]
+
+
+def test_interfaccia_referenze_pezzi_collegati():
+    """La testata delle Referenze vive nella barra dell'app (#rf-actions) e le icone usate dal modulo esistono."""
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
+    html = open(os.path.join(base, "index.html"), encoding="utf-8").read()
+    assert 'id="rf-actions"' in html
+    icone = open(os.path.join(base, "icons.js"), encoding="utf-8").read()
+    for n in ("ellipsis", "list", "rows-3", "building-2", "search", "pencil", "copy", "presentation", "plus", "download", "x", "file-spreadsheet"):
+        assert f'"{n}":' in icone, n
+    if shutil.which("node"):
+        for f in ("referenze.js", "referenze_dati.js", "app.js", "icons.js"):
+            subprocess.run(["node", "--check", os.path.join(base, f)], check=True, capture_output=True)

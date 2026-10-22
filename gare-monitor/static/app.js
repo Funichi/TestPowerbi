@@ -166,8 +166,9 @@ function render() {
   $("#page-title").textContent = TITLES[S.view][0]; $("#page-sub").textContent = TITLES[S.view][1];
   const m = $("#main");
   if (S.view !== "table") setHash("");
-  if (S.view !== "referenze") document.body.classList.remove("rf-pres");        // la modalità presentazione vale solo nella vista Referenze
-  $(".actions").hidden = S.view === "referenze";          // i pulsanti Excel riguardano solo le offerte
+  if (S.view !== "referenze" && window.Referenze) window.Referenze.esci();        // la modalità presentazione e il menu valgono solo nella vista Referenze
+  $(".actions:not(#rf-actions)").hidden = S.view === "referenze";          // i pulsanti Excel riguardano solo le offerte
+  $("#rf-actions").hidden = S.view !== "referenze";                         // la testata delle Referenze la disegna il modulo
   ({referenze: renderReferenze, dash: renderDash, table: renderTable, wip: renderWip, cliente: renderCliente, tempi: renderTempi, clean: renderClean})[S.view](m);
 }
 
