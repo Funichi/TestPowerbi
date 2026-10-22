@@ -73,10 +73,15 @@
   // ------------------------------------------------------------ interfaccia
   const qs = (s, el = document) => el.querySelector(s);
   const E = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-  const BADGE = {ricco: ["Pronta da raccontare", "ok"], medio: ["Da arricchire", "mid"], scarso: ["Da completare", "low"]};
+  const icona = n => (typeof ico === "function" ? ico(n) : "");       // icone dell'app (definite in app.js)
+  const BADGE = {ricco: ["Pronta", "ok", "Materiale ricco: pronta da raccontare"], medio: ["Da arricchire", "mid", "Racconto presente ma con poco materiale di dettaglio"],
+    scarso: ["Da completare", "low", "Poco materiale: serve completarla"]};
+  const SUGGERIMENTI = ["forecast", "chatbot", "rag", "data platform", "dwh", "governance"];
+  const nomeCliente = c => String(c == null ? "" : c).replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim() || String(c || "");     // "ACEA (UTILITY OPERATOR)" -> "ACEA"
+  const salvata = (k, def) => { try { return localStorage.getItem(k) || def; } catch (e) { return def; } };
 
-  const ST = {cfg: null, SIN: null, dati: [], vista: "ricerca", mostraArch: false, root: null, nCompletare: null,
-    f: {q: "", cliente: "", ambito: "", tipologia: "", mercato: ""}, comp: {mancante: "", daVerificare: false, materiale: "", mostra: 50}};
+  const ST = {cfg: null, SIN: null, dati: [], tab: "cerca", vista: salvata("rf_vista", "cards"), mostraArch: false, root: null, sel: null, io: null, pres: null,
+    f: {q: "", cliente: "", ambito: "", tipologia: "", mercato: ""}};
 
   async function caricaDati() {
     const d = await api("/api/referenze" + (ST.mostraArch ? "?archiviate=1" : ""));
@@ -84,43 +89,57 @@
     ST.dati = d.referenze; ST.dati.forEach(r => delete r._h);
     return d;
   }
+  // le schede Da completare / Da verificare sono sottoinsiemi dell'archivio: i filtri, i conteggi e l'ordinamento lavorano su quello
+  const perTab = () => ST.tab === "comp" ? ST.dati.filter(r => r.materiale === "scarso") : ST.tab === "ver" ? ST.dati.filter(r => r.da_verificare) : ST.dati;
+  const viva = r => !r.archiviata;
 
-  function schedaHtml(r) {
-    const ambLab = (ST.cfg.ambito_etichetta || {})[r.ambito] || r.ambito;
-    const ext = (r.esteso || []).map(s => `<h4>${E(s.sezione)}</h4>` + (Array.isArray(s.testo)
-      ? `<ul class="${/^Spunti/.test(s.sezione) ? "talk" : ""}">${s.testo.map(i => `<li>${E(i)}</li>`).join("")}</ul>` : `<p>${E(s.testo)}</p>`)).join("");
-    const [bl, bc] = BADGE[r.materiale] || ["", ""];
-    const referenti = [r.referente_aidata, r.referente_progetto].filter(Boolean);
-    return `<article class="rf-card ${r.archiviata ? "arch" : ""}">
-      <div class="rf-top"><div>
-        <div class="rf-cli"><a href="#" data-cli="${E(r.cliente)}" title="Mostra tutte le referenze di questo cliente">${E(r.cliente)}</a> · ${E(r.mercato)}${r.anno ? " · " + E(r.anno) : ""}<span class="rf-id"> · ${E(r.id)}</span></div>
-        <h3 class="rf-tit">${E(r.titolo)}</h3>
-        <div class="rf-tags"><span class="rf-tag">${E(ambLab)}</span>${(r.tipologie || []).map(c => `<span class="rf-tag c">${E(c)}</span>`).join("")}${(r.temi || []).map(t => `<span class="rf-tag t">${E(t)}</span>`).join("")}${(r.tecnologie || []).map(t => `<span class="rf-tag">${E(t)}</span>`).join("")}</div>
-      </div><div class="rf-side"><div class="rf-badges">${r.archiviata ? `<span class="rf-badge low">Archiviata</span>` : ""}${bl ? `<span class="rf-badge ${bc}">${bl}</span>` : ""}${r.da_verificare ? `<span class="rf-badge warn" title="${E(r.note)}">Da verificare</span>` : ""}${r.origine && r.origine !== "Excel master" ? `<span class="rf-badge new">Nuova</span>` : ""}</div>
-        <div class="rf-acts"><button class="rf-btn" data-copia="${E(r.id)}" title="Copia il racconto da 30 secondi e il racconto esteso negli appunti">${icona("copy")}Copia testo</button><button class="rf-btn" data-edit="${E(r.id)}">${icona("pencil")}Modifica</button></div></div></div>
-      <div class="rf-pitch"><small>In 30 secondi</small>${E(r.pitch)}</div>
-      <details><summary>Racconto esteso</summary><div class="rf-ext">${ext || `<p class="rf-muted">Nessun racconto esteso.</p>`}</div></details>
-      <div class="rf-src">${(r.fonti || []).length ? "Fonti: " + E(r.fonti.join(" · ")) : "Fonte: solo Excel master"}${(r.campi_mancanti || []).length ? ` · <b>Manca:</b> ${E(r.campi_mancanti.join(", "))}` : ""}${referenti.length ? " · Referenti: " + E(referenti.join(", ")) : ""}</div></article>`;
+  // ---------------------------------------------------------------- scheda
+  const estesoHtml = (r, soloRacconto) => (r.esteso || []).filter(s => !(soloRacconto && /^Spunti/i.test(s.sezione))).map(s => `<h4>${E(s.sezione)}</h4>` + (Array.isArray(s.testo)
+    ? `<ul class="${/^Spunti/i.test(s.sezione) ? "talk" : ""}">${s.testo.map(i => `<li>${E(i)}</li>`).join("")}</ul>` : `<p>${E(s.testo)}</p>`)).join("");
+  function badgesHtml(r) {
+    const [bl, bc, bt] = BADGE[r.materiale] || ["", "", ""];
+    return (r.archiviata ? `<span class="rf-badge low">Archiviata</span>` : "") + (bl ? `<span class="rf-badge ${bc}" title="${E(bt)}">${bl}</span>` : "")
+      + (r.da_verificare ? `<span class="rf-badge warn" title="${E(r.note || "Da verificare")}">Da verificare</span>` : "")
+      + (r.origine && r.origine !== "Excel master" ? `<span class="rf-badge new" title="Non proviene dall'Excel master">Nuova</span>` : "");
   }
-  const icona = n => (typeof ico === "function" ? ico(n) : "");       // icone dell'app (definite in app.js)
+  function schedaHtml(r, aperta) {
+    const tec = (r.tecnologie || []), tech = tec.slice(0, 6).join(" · ") + (tec.length > 6 ? ` · +${tec.length - 6}` : "");
+    const referenti = [r.referente_aidata, r.referente_progetto].filter(Boolean), nome = nomeCliente(r.cliente);
+    return `<article class="rf-card ${r.archiviata ? "arch" : ""}" data-id="${E(r.id)}">
+      <div class="rf-meta"><div class="rf-who"><a href="#" class="rf-cliname" data-cli="${E(nome)}" title="Tutte le referenze di ${E(nome)}">${E(nome)}</a>
+        <span class="rf-dot">·</span>${E(r.mercato)}${r.anno ? `<span class="rf-dot">·</span>${E(r.anno)}` : ""}<span class="rf-dot">·</span><span>${E(r.id)}</span></div>
+        <div class="rf-right">${badgesHtml(r)}<button class="rf-ib" data-copia="${E(r.id)}" title="Copia testo" aria-label="Copia testo">${icona("copy")}</button><button class="rf-ib" data-edit="${E(r.id)}" title="Modifica" aria-label="Modifica">${icona("pencil")}</button></div></div>
+      <h3 class="rf-tit">${E(r.titolo)}</h3>
+      ${ST.tab === "ver" && r.da_verificare ? `<div class="rf-motivo"><b>Da verificare:</b> ${E(r.note || "motivo non indicato")}</div>` : ""}
+      <div class="rf-pitch"><span class="rf-lblp">In 30 secondi</span>${E(r.pitch)}</div>
+      <div class="rf-facts">${(r.tipologie || []).map(c => `<span class="rf-tag">${E(c)}</span>`).join("")}${tech ? `<span class="rf-tech">${E(tech)}</span>` : ""}</div>
+      <details ${aperta ? "open" : ""}><summary>Racconto esteso</summary><div class="rf-ext">${estesoHtml(r) || `<p class="rf-muted">Nessun racconto esteso.</p>`}</div>
+        <div class="rf-src">${(r.fonti || []).length ? "<b>Fonti</b> " + E(r.fonti.join(" · ")) : "<b>Fonte</b> solo Excel master"}${(r.campi_mancanti || []).length ? ` · <b>Manca</b> ${E(r.campi_mancanti.join(", "))}` : ""}${referenti.length ? ` · <b>Referenti</b> ${E(referenti.join(", "))}` : ""}</div></details></article>`;
+  }
 
-  // ---------------------------------------------------------------- barra comune: Ricerca | Da completare | Nuova referenza
-  function barraHtml() {
-    const n = ST.nCompletare;
-    return `<div class="rf-tabs"><div class="rf-seg"><button class="${ST.vista === "ricerca" ? "on" : ""}" data-v="ricerca">Ricerca</button>
-      <button class="${ST.vista === "completare" ? "on" : ""}" data-v="completare">Da completare${n == null ? "" : `<span>${n}</span>`}</button></div>
-      <div class="rf-row rf-admin" style="margin:0"><button class="rf-btn" id="rf-pres" title="Ingrandisce il testo e nasconde fonti, note e pulsanti di modifica: per girare lo schermo verso il cliente">${icona("presentation")}Modalità presentazione</button>
-        <button class="rf-btn" id="rf-imps">Importa scheda</button><button class="rf-btn" id="rf-impx">Importa da Excel</button>
-        <button class="rf-btn" id="rf-exp">${icona("download")}Esporta in Excel</button><button class="primary" id="rf-nuova">${icona("plus")}Nuova referenza</button></div></div>`;
-  }
-  function bindBarra(m) {
-    m.querySelectorAll(".rf-tabs [data-v]").forEach(b => b.onclick = () => { ST.vista = b.dataset.v; monta(m); });
-    qs("#rf-nuova", m).onclick = () => apriEditor(m, null);
-    qs("#rf-pres", m).onclick = () => impostaPresentazione(true);
-    ST.root = m;
-    qs("#rf-exp", m).onclick = () => { window.location.href = "/api/referenze/export" + (ST.mostraArch ? "?archiviate=1" : ""); };     // formato del file consolidato; con "Mostra archiviate" attivo include anche le archiviate
-    qs("#rf-impx", m).onclick = () => caricaModuloDati().then(M => M.importaExcel(ctxDati())).catch(e => toast(e.message, true));
-    qs("#rf-imps", m).onclick = () => caricaModuloDati().then(M => M.importaScheda(ctxDati())).catch(e => toast(e.message, true));
+  // ---------------------------------------------------------------- testata (nella barra dell'app) e menu "⋯"
+  function disegnaTestata() {
+    const box = document.getElementById("rf-actions"); if (!box) return;
+    box.innerHTML = `<button class="rf-btn" id="rf-pres" title="Schermo intero, testo grande e solo il racconto: per girare lo schermo verso il cliente">${icona("presentation")}<span class="lab">Modalità presentazione</span></button>
+      <button class="primary" id="rf-nuova">${icona("plus")}<span class="lab">Nuova referenza</span></button>
+      <button class="rf-btn rf-ico" id="rf-more" aria-label="Altre azioni" aria-haspopup="true" aria-expanded="false">${icona("ellipsis")}</button>
+      <div class="rf-menu" id="rf-menu" role="menu" hidden>
+        <button id="rf-imps" role="menuitem">${icona("file-spreadsheet")}Importa scheda</button><button id="rf-impx" role="menuitem">${icona("file-spreadsheet")}Importa da Excel</button>
+        <button id="rf-exp" role="menuitem">${icona("download")}Esporta in Excel</button><hr>
+        <label class="rf-chk"><input type="checkbox" id="rf-arch" ${ST.mostraArch ? "checked" : ""}> Mostra archiviate</label></div>`;
+    const menu = qs("#rf-menu", box), apri = on => { menu.hidden = !on; qs("#rf-more", box).setAttribute("aria-expanded", on ? "true" : "false"); };
+    qs("#rf-more", box).onclick = e => { e.stopPropagation(); apri(menu.hidden); };
+    box.onclick = e => { if (e.target.closest("#rf-menu button")) apri(false); };
+    qs("#rf-nuova", box).onclick = () => apriEditor(ST.root, null);
+    qs("#rf-pres", box).onclick = () => apriPresentazione();
+    qs("#rf-exp", box).onclick = () => { window.location.href = "/api/referenze/export" + (ST.mostraArch ? "?archiviate=1" : ""); };     // formato del file consolidato; con "Mostra archiviate" attivo include anche le archiviate
+    qs("#rf-impx", box).onclick = () => caricaModuloDati().then(M => M.importaExcel(ctxDati())).catch(e => toast(e.message, true));
+    qs("#rf-imps", box).onclick = () => caricaModuloDati().then(M => M.importaScheda(ctxDati())).catch(e => toast(e.message, true));
+    qs("#rf-arch", box).onchange = async e => { ST.mostraArch = e.target.checked; await caricaDati(); aggiorna(); };
+    if (!ST.chiusuraMenu) {
+      ST.chiusuraMenu = true;
+      document.addEventListener("click", e => { const mn = document.getElementById("rf-menu"); if (mn && !mn.hidden && !e.target.closest("#rf-actions")) mn.hidden = true; });
+    }
   }
   // importazione da Excel / JSON: modulo separato, caricato solo al primo clic su "Importa…"
   let _modDati = null;
@@ -133,21 +152,8 @@
       document.head.appendChild(sc);
     });
   }
-  const ctxDati = () => ({api, toast, ricarica: async () => { await caricaDati(); await aggiornaConteggioCompletare(); monta(ST.root); }});
-  async function aggiornaConteggioCompletare() {
-    try { const d = await api("/api/referenze/da-completare"); ST.nCompletare = d.referenze.length; } catch (e) {}
-  }
-  // ---------------------------------------------------------------- modalità presentazione e copia del testo
-  function impostaPresentazione(on) {
-    document.body.classList.toggle("rf-pres", on);
-    if (on) window.scrollTo(0, 0);
-  }
-  function preparaPresentazione() {
-    if (document.getElementById("rf-pres-exit")) return;
-    const b = document.createElement("button"); b.id = "rf-pres-exit"; b.className = "rf-pres-exit"; b.textContent = "Esci dalla presentazione (Esc)"; b.onclick = () => impostaPresentazione(false);
-    document.body.appendChild(b);
-    document.addEventListener("keydown", e => { if (e.key === "Escape" && document.body.classList.contains("rf-pres") && !qs("#rf-editor")) impostaPresentazione(false); });
-  }
+  const ctxDati = () => ({api, toast, ricarica: async () => { await caricaDati(); monta(ST.root); }});
+
   async function copiaTesto(r) {
     const t = testoPerCopia(r);
     try { await navigator.clipboard.writeText(t); }
@@ -167,85 +173,154 @@
     });
   }
 
-  // ---------------------------------------------------------------- vista Ricerca
-  function disegna(m) {
-    const f = ST.f, C = conteggi(ST.dati, f, ST.SIN), tipologie = ST.cfg.tipologie;
-    qs("#rf-amb", m).innerHTML = [["", "Tutto"], ...ST.cfg.ambiti.map(a => [a, ST.cfg.ambito_etichetta[a] || a])]
-      .map(([k, l]) => `<button class="${f.ambito === k ? "on" : ""}" data-a="${E(k)}">${E(l)}<span>${C.ambito(k)}</span></button>`).join("");
-    qs("#rf-amb", m).querySelectorAll("button").forEach(b => b.onclick = () => { f.ambito = b.dataset.a; f.tipologia = ""; disegna(m); });
-    const box = qs("#rf-cat", m);
-    if (!f.ambito) box.innerHTML = `<span class="rf-hint">Scegli “Progetti AI” o “Data Management & Reporting” per filtrare per tipologia (chatbot, forecast, RAG, data platform…)</span>`;
+  // ---------------------------------------------------------------- modalità presentazione: schermo intero sopra l'app, solo testi del racconto
+  function apriPresentazione() {
+    esciPresentazione();
+    const el = document.createElement("div"); el.id = "rf-presov"; el.className = "rf-presov"; el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true");
+    el.innerHTML = `<div class="rf-pbar"><div class="rf-field">${icona("search")}<input id="rf-pq" placeholder="Cosa vi interessa? es. forecast, chatbot…" autocomplete="off" value="${E(ST.f.q)}"></div>
+      <button class="rf-btn" id="rf-pclose">Esci <kbd>Esc</kbd></button></div><div class="rf-pbody" id="rf-pbody"></div>`;
+    document.body.appendChild(el);
+    ST.pres = {el, lista: [], i: -1};
+    qs("#rf-pclose", el).onclick = esciPresentazione;
+    qs("#rf-pq", el).oninput = () => { ST.pres.i = -1; disegnaPresentazione(); };
+    if (!ST.tastiPres) {
+      ST.tastiPres = true;
+      document.addEventListener("keydown", e => {
+        const P = ST.pres; if (!P) return;
+        if (e.key === "Escape") { if (P.i >= 0) { P.i = -1; disegnaPresentazione(); } else esciPresentazione(); }
+        else if (P.i >= 0 && e.target.id !== "rf-pq") {
+          if (e.key === "ArrowRight" && P.i < P.lista.length - 1) { P.i++; disegnaPresentazione(); }
+          else if (e.key === "ArrowLeft" && P.i > 0) { P.i--; disegnaPresentazione(); }
+        }
+      });
+    }
+    disegnaPresentazione();
+    setTimeout(() => { const i = qs("#rf-pq", el); if (i) i.focus(); }, 50);
+  }
+  function esciPresentazione() { if (ST.pres) { ST.pres.el.remove(); ST.pres = null; } }
+  function disegnaPresentazione() {
+    const P = ST.pres, b = qs("#rf-pbody", P.el);
+    if (P.i < 0) {
+      const q = qs("#rf-pq", P.el).value, vive = ST.dati.filter(viva);
+      const ris = cerca(vive, {q, cliente: "", ambito: "", tipologia: "", mercato: ""}, ST.SIN);
+      P.lista = q.trim() ? ris.slice(0, 24) : ris.filter(r => r.materiale === "ricco").slice(0, 24);
+      b.innerHTML = `<div class="rf-pinfo">${q.trim() ? `${ris.length} ${ris.length === 1 ? "referenza" : "referenze"} · mostrate le più pertinenti` : "Scrivi un argomento, oppure scegli una referenza"}</div>
+        <div class="rf-pgrid">${P.lista.map((r, i) => `<button class="rf-ptile" data-pi="${i}"><div class="c">${E(nomeCliente(r.cliente))} · ${E(r.mercato)}</div><div class="t">${E(r.titolo)}</div></button>`).join("")}</div>`;
+      b.querySelectorAll("[data-pi]").forEach(x => x.onclick = () => { P.i = +x.dataset.pi; disegnaPresentazione(); });
+      return;
+    }
+    const r = P.lista[P.i];
+    b.innerHTML = `<div class="rf-pview"><div class="c"><b>${E(nomeCliente(r.cliente))}</b> · ${E(r.mercato)}${r.anno ? " · " + E(r.anno) : ""}</div><h2>${E(r.titolo)}</h2>
+      <div class="rf-pitch">${E(r.pitch)}</div><div class="rf-ext">${estesoHtml(r, true)}</div>
+      <div class="rf-pnav"><button class="rf-btn" id="rf-pback">← Tutti i risultati</button><span><kbd>←</kbd> <kbd>→</kbd> ${P.i + 1} di ${P.lista.length}</span></div></div>`;
+    qs("#rf-pback", b).onclick = () => { P.i = -1; disegnaPresentazione(); };
+    b.scrollTop = 0;
+  }
+
+  // ---------------------------------------------------------------- vista unica (Ricerca / Da completare / Da verificare)
+  const filtriAttivi = () => !!(ST.f.q.trim() || ST.f.cliente.trim() || ST.f.ids || ST.f.ambito || ST.f.tipologia || ST.f.mercato);
+  const azzera = () => { ST.f = {q: "", cliente: "", ambito: "", tipologia: "", mercato: ""}; qs("#rf-q").value = ""; qs("#rf-cl").value = ""; };
+
+  function disegnaFiltri() {
+    const f = ST.f, base = perTab(), C = conteggi(base, f, ST.SIN), tipologie = ST.cfg.tipologie, etic = ST.cfg.ambito_etichetta || {};
+    const nA = C.ambito("");
+    qs("#rf-amb").innerHTML = `<option value="">Ambito: tutti (${nA})</option>` + ST.cfg.ambiti.map(a => `<option value="${E(a)}" ${f.ambito === a ? "selected" : ""}>${E(etic[a] || a)} (${C.ambito(a)})</option>`).join("");
+    const sTip = qs("#rf-tip");
+    sTip.disabled = !f.ambito;
+    if (!f.ambito) sTip.innerHTML = `<option>Tipologia: prima scegli l'ambito</option>`;
     else {
       const note = [...new Set(ST.dati.filter(r => r.ambito === f.ambito).flatMap(r => r.tipologie || []))].filter(t => !(tipologie[f.ambito] || []).includes(t)).sort((a, b) => a.localeCompare(b, "it"));
-      box.innerHTML = `<button class="rf-chip k ${f.tipologia ? "" : "on"}" data-c="">Tutte le tipologie</button>` + [...(tipologie[f.ambito] || []), ...note]
-        .map(t => `<button class="rf-chip k ${f.tipologia === t ? "on" : ""}" data-c="${E(t)}">${E(t)}<span>${C.tipologia(t)}</span></button>`).join("");
-      box.querySelectorAll(".rf-chip").forEach(b => b.onclick = () => { f.tipologia = b.dataset.c; disegna(m); });
+      sTip.innerHTML = `<option value="">Tipologia: tutte</option>` + [...(tipologie[f.ambito] || []), ...note].map(t => { const n = C.tipologia(t);
+        return n || f.tipologia === t ? `<option value="${E(t)}" ${f.tipologia === t ? "selected" : ""}>${E(t)} (${n})</option>` : ""; }).join("");
     }
-    qs("#rf-mk", m).innerHTML = `<button class="rf-chip ${f.mercato ? "" : "on"}" data-m="">Tutti i mercati</button>` + ST.cfg.mercati.map(x => {
-      const tot = ST.dati.filter(r => r.mercato === x).length;
-      return `<button class="rf-chip ${f.mercato === x ? "on" : ""}" data-m="${E(x)}" ${tot ? "" : 'disabled title="Nessuna referenza in archivio"'}>${E(x)}<span>${C.mercato(x)}</span></button>`;
-    }).join("");
-    qs("#rf-mk", m).querySelectorAll(".rf-chip").forEach(b => b.onclick = () => { if (b.disabled) return; f.mercato = b.dataset.m; disegna(m); });
-    const ris = cerca(ST.dati, f, ST.SIN), pronte = ris.filter(r => r.materiale === "ricco").length;
-    const cosa = [f.q.trim() ? `“${E(f.q.trim())}”` : "", f.cliente.trim() ? `cliente <b>${E(f.cliente.trim())}</b>` : "", f.mercato ? `mercato <b>${E(f.mercato)}</b>` : "",
-      f.ambito ? `<b>${E(ST.cfg.ambito_etichetta[f.ambito] || f.ambito)}</b>` : "", f.tipologia ? `tipologia <b>${E(f.tipologia)}</b>` : ""].filter(Boolean).join(" · ");
-    const sin = ST.SIN[normTxt(f.q).trim()];
-    qs("#rf-hint", m).innerHTML = sin ? `Cerco anche: ${sin.map(s => `<b>${E(s)}</b>`).join(" · ")}` : "";
-    qs("#rf-rh", m).innerHTML = ris.length ? `Abbiamo <span>${ris.length}</span> referenz${ris.length === 1 ? "a" : "e"}${cosa ? " per " + cosa : ""}${pronte ? ` · <span>${pronte}</span> pronte da raccontare` : ""}` : "";
-    qs("#rf-out", m).innerHTML = ris.length ? ris.map(schedaHtml).join("") : `<div class="rf-empty">Nessuna referenza trovata. Prova un sinonimo o togli un filtro.</div>`;
-    qs("#rf-out", m).querySelectorAll("[data-cli]").forEach(a => a.onclick = e => {
-      e.preventDefault(); ST.f = {q: "", cliente: a.dataset.cli, ambito: "", tipologia: "", mercato: ""}; qs("#rf-q", m).value = ""; qs("#rf-cl", m).value = a.dataset.cli; disegna(m); window.scrollTo(0, 0);
+    qs("#rf-mk").innerHTML = `<option value="">Mercato: tutti</option>` + ST.cfg.mercati.map(x => { const n = C.mercato(x);
+      return n || f.mercato === x ? `<option value="${E(x)}" ${f.mercato === x ? "selected" : ""}>${E(x)} (${n})</option>` : ""; }).join("");
+    [["#rf-ambw", f.ambito], ["#rf-tipw", f.tipologia], ["#rf-mkw", f.mercato]].forEach(([s, v]) => qs(s).classList.toggle("active", !!v));
+    qs("#rf-view").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === ST.vista));
+  }
+  function disegnaChip() {
+    const f = ST.f, c = [];
+    if (f.q.trim()) c.push(["q", `“${f.q.trim()}”`]);
+    if (f.ids) c.push(["cl", `Cliente: ${nomeCliente(f.cliente)} (${f.ids.size})`]); else if (f.cliente.trim()) c.push(["cl", "Cliente: " + f.cliente.trim()]);
+    if (f.ambito) c.push(["amb", (ST.cfg.ambito_etichetta || {})[f.ambito] || f.ambito]);
+    if (f.tipologia) c.push(["tip", f.tipologia]);
+    if (f.mercato) c.push(["mk", f.mercato]);
+    const sin = (ST.SIN[normTxt(f.q).trim()] || []).filter(s => s !== normTxt(f.q).trim());
+    const box = qs("#rf-chips");
+    box.innerHTML = c.map(([k, l]) => `<span class="rf-fchip">${E(l)}<button type="button" data-k="${k}" aria-label="Rimuovi filtro">${icona("x")}</button></span>`).join("")
+      + (c.length > 1 ? `<button type="button" class="rf-link" id="rf-reset">Azzera filtri</button>` : "") + (sin.length ? `<small class="rf-syn">cerco anche: ${E(sin.join(", "))}</small>` : "");
+    box.hidden = !c.length;
+    box.querySelectorAll("[data-k]").forEach(b => b.onclick = () => {
+      const k = b.dataset.k;
+      if (k === "q") { f.q = ""; qs("#rf-q").value = ""; } else if (k === "cl") { f.cliente = ""; f.ids = null; qs("#rf-cl").value = ""; }
+      else if (k === "amb") { f.ambito = ""; f.tipologia = ""; } else if (k === "tip") f.tipologia = ""; else f.mercato = "";
+      aggiorna();
     });
-    bindModifica(m, qs("#rf-out", m)); bindCopia(m, qs("#rf-out", m));
-    // filtro per elenco esatto (dalla scheda Cliente): etichetta con X per toglierlo
-    const chip = qs("#rf-idchip", m);
-    if (chip) { chip.hidden = !f.ids; if (f.ids) { chip.innerHTML = `Cliente: <b>${E(f.cliente)}</b> · ${f.ids.size} ${f.ids.size === 1 ? "referenza" : "referenze"} <button type="button" aria-label="Togli il filtro">×</button>`; qs("button", chip).onclick = () => { f.ids = null; f.cliente = ""; qs("#rf-cl", m).value = ""; disegna(m); }; } }
+    const r = qs("#rf-reset", box); if (r) r.onclick = () => { azzera(); aggiorna(); };
+  }
+  function disegnaRisultati() {
+    const m = ST.root, f = ST.f, ris = cerca(perTab(), f, ST.SIN), pronte = ris.filter(r => r.materiale === "ricco").length, n = ris.length;
+    const plur = `referenz${n === 1 ? "a" : "e"}`;
+    const testa = ST.tab === "comp" ? `<h2><b>${n}</b> ${plur} da completare</h2><small>Poco materiale nel master: aggiungi dettagli per renderle raccontabili</small>`
+      : ST.tab === "ver" ? `<h2><b>${n}</b> ${plur} da verificare</h2><small>Abbinamenti incerti, doppioni o dati incoerenti: il motivo è sotto il titolo</small>`
+      : `<h2>${filtriAttivi() ? "Abbiamo " : ""}<b>${n}</b> ${plur}${filtriAttivi() ? "" : " in libreria"}</h2><small>${pronte} pronte da raccontare</small>`;
+    let corpo;
+    if (!n) corpo = `<div class="rf-empty">Nessuna referenza trovata. Prova un sinonimo o togli un filtro.<div class="rf-try">${SUGGERIMENTI.map(t => `<button data-try="${E(t)}">${E(t)}</button>`).join("")}</div></div>`;
+    else if (ST.vista === "list") {
+      if (!ST.sel || !ris.some(r => r.id === ST.sel)) ST.sel = ris[0].id;
+      const sel = ris.find(r => r.id === ST.sel), pallino = {ricco: "var(--st-won)", medio: "var(--text-3)", scarso: "var(--border)"};
+      corpo = `<div class="rf-split"><div class="rf-list" role="listbox">${ris.map(r => `<button class="rf-li ${r.id === ST.sel ? "on" : ""}" data-sel="${E(r.id)}" role="option" aria-selected="${r.id === ST.sel}">
+        <div class="t">${E(r.titolo)}</div><div class="m"><i style="background:${pallino[r.materiale] || "var(--border)"}" title="${E((BADGE[r.materiale] || [""])[0])}"></i>${E(nomeCliente(r.cliente))}${(r.tipologie || [])[0] ? " · " + E(r.tipologie[0]) : ""}</div></button>`).join("")}</div>
+        <div class="rf-detail">${schedaHtml(sel, true)}</div></div>`;
+    } else corpo = `<div class="rf-results">${ris.map(r => schedaHtml(r, false)).join("")}</div>`;
+    const out = qs("#rf-out", m), scorri = (qs(".rf-list", out) || {}).scrollTop || 0;
+    out.innerHTML = `<div class="${ST.vista === "list" ? "" : "rf-results"}"><div class="rf-rh">${testa}</div></div>` + corpo;
+    const lista = qs(".rf-list", out); if (lista) lista.scrollTop = scorri;
+    out.querySelectorAll("[data-cli]").forEach(a => a.onclick = e => {
+      e.preventDefault(); azzera(); ST.f.cliente = a.dataset.cli; qs("#rf-cl").value = a.dataset.cli; aggiorna(); window.scrollTo({top: 0, behavior: "smooth"});
+    });
+    out.querySelectorAll("[data-try]").forEach(b => b.onclick = () => { azzera(); ST.f.q = b.dataset.try; qs("#rf-q").value = b.dataset.try; aggiorna(); });
+    out.querySelectorAll("[data-sel]").forEach(b => b.onclick = () => { ST.sel = b.dataset.sel; disegnaRisultati(); });
+    bindModifica(m, out); bindCopia(m, out);
+  }
+  function aggiorna() {
+    const m = ST.root; if (!m || !qs("#rf-out", m)) return;
+    disegnaFiltri(); disegnaChip(); disegnaRisultati();
+    const n = {comp: ST.dati.filter(r => viva(r) && r.materiale === "scarso").length, ver: ST.dati.filter(r => viva(r) && r.da_verificare).length};
+    qs("#rf-ncomp", m).textContent = n.comp; qs("#rf-nver", m).textContent = n.ver;
+    m.querySelectorAll(".rf-navtab").forEach(b => b.classList.toggle("on", b.dataset.tab === ST.tab));
+    qs(".rf-wrap", m).style.setProperty("--rf-fh", qs("#rf-filters", m).offsetHeight + "px");       // la lista della vista Elenco si aggancia sotto la barra
   }
 
-  function montaRicerca(m) {
-    const clienti = [...new Set(ST.dati.map(r => r.cliente))].sort((a, b) => a.localeCompare(b, "it"));
-    m.innerHTML = `<div class="rf-wrap">${barraHtml()}
-      <div class="rf-bar"><div><label for="rf-q">Argomento o tecnologia</label><input id="rf-q" placeholder="es. forecast, chatbot, Databricks…" autocomplete="off" value="${E(ST.f.q)}"></div>
-        <div><label for="rf-cl">Cliente</label><input id="rf-cl" list="rf-clienti" placeholder="es. Enel, Poste…" autocomplete="off" value="${E(ST.f.cliente)}"><datalist id="rf-clienti">${clienti.map(c => `<option value="${E(c)}">`).join("")}</datalist></div></div>
-      <div class="rf-idchip" id="rf-idchip" hidden></div>
-      <div class="rf-seg" id="rf-amb"></div><div class="rf-chips" id="rf-cat"></div>
-      <div class="rf-lbl">Mercato</div><div class="rf-chips" id="rf-mk"></div>
-      <label class="rf-chk"><input type="checkbox" id="rf-arch" ${ST.mostraArch ? "checked" : ""}> Mostra archiviate</label>
-      <div class="rf-hint" id="rf-hint"></div><div class="rf-result" id="rf-rh"></div><div id="rf-out"></div></div>`;
-    bindBarra(m);
-    qs("#rf-q", m).oninput = e => { ST.f.q = e.target.value; disegna(m); };
-    qs("#rf-cl", m).oninput = e => { ST.f.cliente = e.target.value; ST.f.ids = null; disegna(m); };
-    qs("#rf-arch", m).onchange = async e => { ST.mostraArch = e.target.checked; await caricaDati(); disegna(m); };
-    disegna(m);
-  }
-
-  // ---------------------------------------------------------------- vista "Da completare"
-  async function montaCompletare(m) {
-    m.innerHTML = `<div class="rf-wrap">${barraHtml()}<p class="muted pad">Caricamento…</p></div>`; bindBarra(m);
-    const c = ST.comp, qp = new URLSearchParams();
-    if (c.mancante) qp.set("mancante", c.mancante); if (c.daVerificare) qp.set("da_verificare", "1"); if (c.materiale) qp.set("materiale", c.materiale);
-    let d; try { d = await api("/api/referenze/da-completare?" + qp); } catch (e) { m.innerHTML = `<div class="card"><div class="err">${E(e.message)}</div></div>`; return; }
-    if (ST.vista !== "completare") return;
-    const base = await api("/api/referenze/da-completare"); ST.nCompletare = base.referenze.length;
-    const F = base.facce, chip = (attivo, attr, txt, n) => `<button class="rf-chip ${attivo ? "on" : ""}" ${attr}>${E(txt)}<span>${n}</span></button>`;
-    const lista = d.referenze.slice(0, c.mostra);
-    m.innerHTML = `<div class="rf-wrap">${barraHtml()}
-      <p class="rf-hint" style="margin-top:12px">Le schede meno complete per prime. Un campo mancante si toglie compilandolo nella scheda; “Da verificare” si toglie dalla scheda con “Segna come verificata”.</p>
-      <div class="rf-lbl">Campo mancante</div><div class="rf-chips">${chip(!c.mancante, 'data-m=""', "Tutti", base.referenze.length)}${ST.cfg.campi_mancanti.map(v => chip(c.mancante === v, `data-m="${E(v)}"`, v, F.mancanti[v] || 0)).join("")}</div>
-      <div class="rf-lbl">Materiale</div><div class="rf-chips">${chip(!c.materiale, 'data-mat=""', "Tutti", "")}${ST.cfg.materiale.map(v => chip(c.materiale === v, `data-mat="${v}"`, (BADGE[v] || [v])[0], F.materiale[v] || 0)).join("")}
-        ${chip(c.daVerificare, 'data-dv="1"', "Solo da verificare", F.da_verificare)}</div>
-      <div class="rf-result"><span>${d.referenze.length}</span> ${d.referenze.length === 1 ? "scheda" : "schede"} da completare o verificare</div>
-      <div class="rf-lista">${lista.map(r => `<div class="rf-riga"><div class="rf-riga-t"><div class="rf-cli">${E(r.cliente)} · ${E(r.mercato)}<span class="rf-id"> · ${E(r.id)}</span></div><div class="rf-tit sm">${E(r.titolo)}</div>
-        <div class="rf-tags">${(r.campi_mancanti || []).map(v => `<span class="rf-tag warn">${E(v)}</span>`).join("") || `<span class="rf-muted">Nessun campo mancante</span>`}</div>
-        ${r.da_verificare ? `<div class="rf-motivo"><b>Da verificare:</b> ${E(r.note || "motivo non indicato")}</div>` : ""}</div>
-        <div class="rf-side"><div class="rf-badges"><span class="rf-badge ${(BADGE[r.materiale] || [, ""])[1]}">${(BADGE[r.materiale] || [r.materiale])[0]}</span></div><button class="rf-btn" data-edit="${E(r.id)}">${icona("pencil")}Modifica</button></div></div>`).join("") || `<div class="rf-empty">Niente da completare con questi filtri.</div>`}</div>
-      ${d.referenze.length > lista.length ? `<button class="rf-btn" id="rf-altre">Mostra altre (${d.referenze.length - lista.length})</button>` : ""}</div>`;
-    bindBarra(m);
-    m.querySelectorAll("[data-m]").forEach(b => b.onclick = () => { c.mancante = b.dataset.m; c.mostra = 50; montaCompletare(m); });
-    m.querySelectorAll("[data-mat]").forEach(b => b.onclick = () => { c.materiale = b.dataset.mat; c.mostra = 50; montaCompletare(m); });
-    m.querySelectorAll("[data-dv]").forEach(b => b.onclick = () => { c.daVerificare = !c.daVerificare; c.mostra = 50; montaCompletare(m); });
-    const al = qs("#rf-altre", m); if (al) al.onclick = () => { c.mostra += 50; montaCompletare(m); };
-    bindModifica(m, m);
+  function monta(m) {
+    ST.root = m;
+    if (ST.io) { ST.io.disconnect(); ST.io = null; }
+    const clienti = [...new Set(ST.dati.map(r => nomeCliente(r.cliente)))].sort((a, b) => a.localeCompare(b, "it"));
+    m.innerHTML = `<div class="rf-wrap">
+      <div class="rf-navtabs" role="tablist"><button class="rf-navtab" data-tab="cerca" role="tab">Ricerca</button>
+        <button class="rf-navtab" data-tab="comp" role="tab">Da completare<span class="rf-n" id="rf-ncomp"></span></button>
+        <button class="rf-navtab" data-tab="ver" role="tab">Da verificare<span class="rf-n" id="rf-nver"></span></button></div>
+      <div class="rf-filters" id="rf-filters">
+        <div class="rf-frow"><div class="rf-field">${icona("search")}<input id="rf-q" placeholder="Cerca argomento o tecnologia: forecast, chatbot, Databricks…" autocomplete="off" value="${E(ST.f.q)}"></div>
+          <div class="rf-field">${icona("building-2")}<input id="rf-cl" list="rf-clienti" placeholder="Cliente" autocomplete="off" value="${E(ST.f.cliente)}"><datalist id="rf-clienti">${clienti.map(c => `<option value="${E(c)}">`).join("")}</datalist></div></div>
+        <div class="rf-frow2"><div class="rf-sel" id="rf-ambw"><select id="rf-amb" aria-label="Ambito"></select></div><div class="rf-sel" id="rf-tipw"><select id="rf-tip" aria-label="Tipologia"></select></div>
+          <div class="rf-sel" id="rf-mkw"><select id="rf-mk" aria-label="Mercato"></select></div><div class="rf-spacer"></div>
+          <div class="rf-segv" id="rf-view" role="group" aria-label="Vista"><button data-v="cards">${icona("rows-3")}Schede</button><button data-v="list">${icona("list")}Elenco</button></div></div>
+        <div class="rf-chipsrow" id="rf-chips" hidden></div></div>
+      <div id="rf-out"></div></div>`;
+    disegnaTestata();
+    m.querySelectorAll(".rf-navtab").forEach(b => b.onclick = () => { ST.tab = b.dataset.tab; ST.sel = null; aggiorna(); });
+    qs("#rf-q", m).oninput = e => { ST.f.q = e.target.value; aggiorna(); };
+    qs("#rf-cl", m).oninput = e => { ST.f.cliente = e.target.value; ST.f.ids = null; aggiorna(); };
+    qs("#rf-amb", m).onchange = e => { ST.f.ambito = e.target.value; ST.f.tipologia = ""; aggiorna(); };
+    qs("#rf-tip", m).onchange = e => { ST.f.tipologia = e.target.value; aggiorna(); };
+    qs("#rf-mk", m).onchange = e => { ST.f.mercato = e.target.value; aggiorna(); };
+    m.querySelectorAll("#rf-view button").forEach(b => b.onclick = () => { ST.vista = b.dataset.v; try { localStorage.setItem("rf_vista", ST.vista); } catch (e) {} aggiorna(); });
+    if (window.IntersectionObserver) {                       // linea sottile sotto la barra quando si stacca dall'alto
+      ST.io = new IntersectionObserver(([e]) => e.target.classList.toggle("stuck", e.intersectionRatio < 1), {threshold: [1], rootMargin: "-1px 0px 0px 0px"});
+      ST.io.observe(qs("#rf-filters", m));
+    }
+    aggiorna();
   }
 
   // ---------------------------------------------------------------- scheda di modifica / creazione
@@ -384,7 +459,7 @@
     const esc = e => { if (e.key === "Escape") chiudi(false); };
     document.addEventListener("keydown", esc);
     $e("#rf-x").onclick = $e("#rf-ann").onclick = () => chiudi(false);
-    const ricarica = async msg => { await caricaDati(); await aggiornaConteggioCompletare(); chiudi(true); toast(msg); monta(m); };
+    const ricarica = async msg => { await caricaDati(); chiudi(true); toast(msg); monta(m); };
     const errore = e => { $e("#rf-err").textContent = e.message; $e("#rf-err").scrollIntoView({block: "nearest"}); };
     $e("#rf-salva").onclick = async () => {
       $e("#rf-err").textContent = "";
@@ -414,6 +489,7 @@
 
   // ---------------------------------------------------------------- schermata del primo caricamento
   function schermataVuota(m, info) {
+    const ta = document.getElementById("rf-actions"); if (ta) ta.innerHTML = "";
     m.innerHTML = `<div class="rf-wrap"><div class="rf-empty-card"><h2>Archivio delle referenze non ancora caricato</h2>
       <p>Il primo caricamento legge un file <b>referenze.json</b> e crea il database delle referenze (separato da quello delle offerte). Si fa una volta sola: da quel momento il database è l'unica fonte.</p>
       <p class="rf-muted">File atteso: <code>${E(info.percorso_json)}</code> ${info.file_esiste ? "" : "— <b>non trovato</b>"}</p>
@@ -429,8 +505,6 @@
     };
   }
 
-  function monta(m) { ST.vista === "completare" ? montaCompletare(m) : montaRicerca(m); }
-
   const R = {
     async render(m) {
       m.innerHTML = `<p class="muted pad">Caricamento…</p>`;
@@ -440,12 +514,11 @@
       if (S.view !== "referenze") return;
       if (d.stato !== "ok") { schermataVuota(m, d); return; }
       ST.SIN = indicizzaSinonimi(ST.cfg.sinonimi);
-      preparaPresentazione();
-      aggiornaConteggioCompletare().then(() => { const b = qs(".rf-tabs [data-v=completare]", m); if (b && ST.nCompletare != null) b.innerHTML = `Da completare<span>${ST.nCompletare}</span>`; });
       monta(m);
     },
     // chiamata dall'esterno (scheda Cliente): apre la ricerca già filtrata per cliente
-    filtraPerCliente(nome, ids) { ST.vista = "ricerca"; ST.f = {q: "", cliente: nome || "", ambito: "", tipologia: "", mercato: "", ids: ids && ids.length ? new Set(ids) : null}; },
+    filtraPerCliente(nome, ids) { ST.tab = "cerca"; ST.f = {q: "", cliente: nome || "", ambito: "", tipologia: "", mercato: "", ids: ids && ids.length ? new Set(ids) : null}; },
   };
+  R.esci = () => { esciPresentazione(); const mn = document.getElementById("rf-menu"); if (mn) mn.hidden = true; };      // chiamata da app.js quando si lascia la vista
   window.Referenze = R;
 })();
