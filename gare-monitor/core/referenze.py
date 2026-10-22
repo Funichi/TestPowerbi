@@ -325,11 +325,11 @@ class RefStoreMod(RefStore):
         return {"campi_mancanti": risolvi_mancanti(prec, r, bozza.get("campi_mancanti")), "materiale_proposto": materiale_proposto(r),
                 "automatici": mancanti_automatici(r)}
 
-    def crea(self, dati, ora=None):
+    def crea(self, dati, ora=None, origine=None):
         ora = ora or _ora()
         self.init()
         r = normalizza({k: v for k, v in dati.items() if k in MODIFICABILI}, ora)
-        r.update(origine=cfg.ORIGINE_MANUALE, contatore=None, archiviata=False, creata_il=ora, modificata_il=ora)
+        r.update(origine=origine or cfg.ORIGINE_MANUALE, contatore=None, archiviata=False, creata_il=ora, modificata_il=ora)
         if not r["materiale"]:
             r["materiale"] = materiale_proposto(r)
         r["campi_mancanti"] = risolvi_mancanti(None, r, dati.get("campi_mancanti"))

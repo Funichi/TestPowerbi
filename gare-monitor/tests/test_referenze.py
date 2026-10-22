@@ -237,3 +237,148 @@ def test_le_modifiche_restano_dopo_il_riavvio(rc):
     r1 = [x for x in c2.get("/api/referenze").get_json()["referenze"] if x["id"] == "REF-001"][0]
     assert r1["titolo"] == "Titolo cambiato" and r1["segmento"] == "Elettrico"
     assert {e["campo"] for e in c2.get("/api/referenze/REF-001/storico").get_json()} == {"titolo", "segmento", "campi_mancanti"}      # i campi mancanti si ricalcolano da soli (qui: manca "risultati/benefici")
+
+
+# ---------------------------------------------------------------- passo 3: export/import Excel e importa scheda
+
+import io  # noqa: E402
+
+import openpyxl  # noqa: E402
+
+
+def _scarica(c):
+    r = c.get("/api/referenze/export")
+    assert r.status_code == 200 and "spreadsheetml" in r.mimetype and "Referenze_" in r.headers["Content-Disposition"]
+    return r.data
+
+
+def _carica_file(c, dati, nome="r.xlsx"):
+    return c.post("/api/referenze/import/anteprima", data={"file": (io.BytesIO(dati), nome)}, content_type="multipart/form-data")
+
+
+def _modifica(dati, fn):
+    wb = openpyxl.load_workbook(io.BytesIO(dati))
+    fn(wb["Referenze"])
+    buf = io.BytesIO(); wb.save(buf)
+    return buf.getvalue()
+
+
+def _col(ws, nome):
+    return [c.value for c in ws[1]].index(nome) + 1
+
+
+INTESTAZIONI_FILE_CONSOLIDATO = ["ID", "Origine", "Contatore Excel", "Cliente", "Titolo", "Ambito", "Tipologie", "Mercato", "Segmento", "Anno", "Temi", "Tecnologie", "Pitch 30 secondi",
+                                 "Racconto esteso", "Fonti", "Confidenza abbinamento", "Materiale", "Campi mancanti", "Da verificare", "Note di verifica", "Titolo originale Excel",
+                                 "Descrizione originale Excel", "Referente AI&Data", "Referente Mercato", "Referente di progetto", "Owner"]
+
+
+def test_export_formato_colonne_liste_e_racconto_esteso(rc):
+    c, tmp = rc
+    wb = openpyxl.load_workbook(io.BytesIO(_scarica(c)))
+    assert wb.sheetnames == ["Referenze", "Domini", "Leggimi"]
+    ws = wb["Referenze"]
+    intest = [x.value for x in ws[1]]
+    assert intest == INTESTAZIONI_FILE_CONSOLIDATO                              # stesse colonne e stesso ordine di Referenze_Consolidate.xlsx
+    assert ws["A1"].fill.start_color.rgb == "FFFFF2CC" and ws["B1"].fill.start_color.rgb == "FFC2187A" and ws.freeze_panes == "E2"
+    assert [x.value for x in wb["Domini"][1]] == ["Ambito", "Tipologie AI", "Tipologie Data", "Mercato", "Campi mancanti", "Confidenza", "Materiale"]
+    riga = {intest[i]: ws.cell(2, i + 1).value for i in range(len(intest))}
+    assert riga["ID"] == "REF-001" and riga["Cliente"] == "Acme Energia S.p.A." and riga["Da verificare"] == "No"
+    assert riga["Tecnologie"] == "Python ; Azure ML" and riga["Temi"] == "Forecast ; Serie storiche"
+    assert riga["Racconto esteso"] == ("## Il contesto e la sfida\nAcme doveva anticipare i picchi di consumo.\n\n"
+                                       "## Spunti per la conversazione\n• Quali dati storici avete?\n• Che orizzonte di previsione serve?")
+    assert ws.cell(3, intest.index("Da verificare") + 1).value == "Sì"                                  # REF-002
+    dm = wb["Domini"]
+    assert dm["A2"].value == "AI" and dm["B2"].value == "Chatbot & Assistenti virtuali" and dm["C2"].value == "Data Platform & Lakehouse" and "Sanità" in [x.value for x in dm["D"]]
+    assert any("Celle gialle" in str(x.value) for x in wb["Leggimi"]["A"])
+
+
+def test_export_poi_import_dello_stesso_file_non_cambia_niente(rc):
+    c, tmp = rc
+    # dati "difficili": paragrafi su più righe, testo che inizia con "=", anno numerico, accenti, scheda archiviata
+    c.post("/api/referenze", json={**NUOVA, "pitch": "= non è una formula", "note": "riga 1\nriga 2", "esteso": [
+        {"sezione": "Il contesto e la sfida", "testo": "Primo paragrafo.\n\nSecondo paragrafo, più lungo: perché sì."}, {"sezione": "Dati e tecnologie", "testo": ["Python", "Azure ML — è già qui"]}]})
+    c.post("/api/referenze/REF-003/archivia", json={"archiviata": True})
+    r = _carica_file(c, _scarica(c))                                                        # senza archiviate: 3 referenze, nessuna colonna "Archiviata"
+    a = r.get_json()
+    assert r.status_code == 200 and (len(a["nuove"]), len(a["aggiornate"]), len(a["errori"]), a["invariate"]) == (0, 0, 0, 3) and a["avvisi"] == []
+    con = c.get("/api/referenze/export", query_string={"archiviate": 1}).data                # con archiviate: 4 righe e colonna "Archiviata" (Sì per REF-003)
+    ws = openpyxl.load_workbook(io.BytesIO(con))["Referenze"]
+    assert ws.max_row == 5 and [x.value for x in ws[1]][-1] == "Archiviata" and [ws.cell(r, 27).value for r in range(2, 6)] == ["No", "No", "Sì", "No"]
+    b = _carica_file(c, con).get_json()
+    assert (len(b["nuove"]), len(b["aggiornate"]), len(b["errori"]), b["invariate"]) == (0, 0, 0, 4)
+
+
+def test_import_anteprima_e_applicazione_con_errori_nuove_e_aggiornate(rc):
+    c, tmp = rc
+    base = _scarica(c)
+
+    def edit(ws):
+        pitch, esteso, mercato, cliente = (_col(ws, x) for x in ("Pitch 30 secondi", "Racconto esteso", "Mercato", "Cliente"))
+        ws.cell(2, pitch).value = "Pitch aggiornato da Excel"                                        # REF-001: cambia il pitch
+        ws.cell(2, esteso).value = ws.cell(2, esteso).value + "\n\n## Il valore per il cliente\n• -12% di errore"      # e aggiunge una sezione
+        ws.append([None] * len(ws[1]))
+        n = ws.max_row
+        for nome, v in (("Cliente", "Omega Retail"), ("Titolo", "Previsione vendite"), ("Ambito", "AI"), ("Mercato", "Retail & GDO"), ("Tipologie", "Forecasting & Modelli predittivi ; Computer Vision"), ("Anno", 2024)):
+            ws.cell(n, _col(ws, nome)).value = v                                                     # nuova (senza ID); tipologia Computer Vision è valida per AI
+        ws.append([None] * len(ws[1])); n += 1
+        for nome, v in (("ID", "REF-999"), ("Cliente", "X"), ("Titolo", "Y"), ("Ambito", "AI"), ("Mercato", "Sanità")):
+            ws.cell(n, _col(ws, nome)).value = v                                                     # ID inesistente
+        ws.append([None] * len(ws[1])); n += 1
+        for nome, v in (("Cliente", "Senza mercato"), ("Titolo", "T"), ("Ambito", "AI")):
+            ws.cell(n, _col(ws, nome)).value = v                                                     # manca il mercato
+        ws.append([None] * len(ws[1])); n += 1
+        for nome, v in (("Cliente", "Mercato sbagliato"), ("Titolo", "T"), ("Ambito", "AI"), ("Mercato", "Marte")):
+            ws.cell(n, _col(ws, nome)).value = v
+        ws.cell(1, ws.max_column + 1).value = "Colonna inventata"
+    a = _carica_file(c, _modifica(base, edit)).get_json()
+    assert [x["cliente"] for x in a["nuove"]] == ["Omega Retail"] and [x["id"] for x in a["aggiornate"]] == ["REF-001"] and a["invariate"] == 2
+    assert {e["n"] for e in a["errori"]} == {6, 7, 8} and any("REF-999" in e["errore"] for e in a["errori"]) and any("Marte" in e["errore"] for e in a["errori"])
+    assert any("Mercato è obbligatorio" in e["errore"] for e in a["errori"]) and a["avvisi"] == ["Colonna ignorata: «Colonna inventata»"]
+    campi = {x["campo"]: x for x in a["aggiornate"][0]["campi"]}
+    assert set(campi) == {"pitch", "esteso"} and campi["pitch"]["prima"].startswith("Per Acme") and campi["pitch"]["dopo"] == "Pitch aggiornato da Excel"
+    assert campi["esteso"]["dopo"][-1]["sezione"] == "Il valore per il cliente" and campi["esteso"]["dopo"][-1]["testo"] == ["-12% di errore"]
+    # niente è cambiato finché non si applica
+    assert c.get("/api/referenze").get_json()["totale"] == 3
+    r = c.post("/api/referenze/import/applica", json={"token": a["token"]}).get_json()
+    assert (r["creati"], r["aggiornati"], r["errori"]) == (1, 1, [])
+    tutte = {x["id"]: x for x in c.get("/api/referenze").get_json()["referenze"]}
+    assert tutte["REF-001"]["pitch"] == "Pitch aggiornato da Excel" and "risultati/benefici" not in tutte["REF-001"]["campi_mancanti"]      # ricalcolato: ora c'è "Il valore per il cliente"
+    nuova = tutte["REF-004"]
+    assert nuova["cliente"] == "Omega Retail" and nuova["origine"] == "Import Excel" and nuova["anno"] == "2024" and nuova["tipologie"] == ["Forecasting & Modelli predittivi", "Computer Vision"]
+    assert {e["campo"] for e in c.get("/api/referenze/REF-001/storico").get_json()} >= {"pitch", "esteso"}
+    assert os.listdir(tmp / "backup_referenze")                                                       # backup prima di applicare
+    assert c.post("/api/referenze/import/applica", json={"token": a["token"]}).status_code == 400    # l'anteprima si usa una volta sola
+    # ri-esportando e reimportando di nuovo: ancora nessuna differenza
+    b = _carica_file(c, _scarica(c)).get_json()
+    assert (len(b["nuove"]), len(b["aggiornate"]), len(b["errori"])) == (0, 0, 0)
+
+
+def test_import_riconosce_intestazioni_alternative_e_colonne_mancanti(rc):
+    c, tmp = rc
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Foglio1"
+    ws.append(["id referenza", "CLIENTE", "In 30 secondi", "Anno"]); ws.append(["REF-002", "Beta Ospedali", "Nuovo pitch breve", 2021])
+    buf = io.BytesIO(); wb.save(buf)
+    a = _carica_file(c, buf.getvalue()).get_json()                       # solo 4 colonne: le altre non si toccano
+    assert [x["id"] for x in a["aggiornate"]] == ["REF-002"] and {f["campo"] for f in a["aggiornate"][0]["campi"]} == {"pitch", "anno"} and a["errori"] == []
+    assert _carica_file(c, b"non e' un excel").status_code == 400
+
+
+def test_importa_scheda_candidati_unione_e_nuova(rc):
+    c, tmp = rc
+    schede = [{"cliente": "ACME ENERGIA SPA", "titolo": "Forecast della domanda elettrica per la rete di distribuzione", "ambito": "AI", "mercato": "Energy & Utilities",
+               "pitch": "Pitch dal nuovo documento", "tecnologie": ["Databricks"], "fonti": ["Word nuovo"]},
+              {"cliente": "Nuovo Cliente", "titolo": "Qualcosa di nuovo", "ambito": "AI", "mercato": "Servizi & IT"},
+              {"cliente": "Rotta", "titolo": "Senza mercato", "ambito": "AI"}]
+    a = c.post("/api/referenze/scheda/anteprima", json={"referenze": schede}).get_json()["schede"]
+    assert a[0]["suggerimento"] == "REF-001" and a[0]["candidati"][0]["id"] == "REF-001" and a[0]["errori"] == []
+    assert a[1]["suggerimento"] == "nuova" and a[2]["errori"] == ["Mercato è obbligatorio"]
+    assert c.post("/api/referenze/scheda/anteprima", json={"x": 1}).status_code == 200                       # una singola scheda (oggetto)
+    assert c.post("/api/referenze/scheda/anteprima", json=[]).status_code == 400
+    r = c.post("/api/referenze/scheda/applica", json={"azioni": [
+        {"tipo": "unisci", "id": "REF-001", "campi": {"tecnologie": ["Python", "Azure ML", "Databricks"], "fonti": ["Deck demo slide 1", "Word nuovo"]}},
+        {"tipo": "nuova", "scheda": a[1]["scheda"]}, {"tipo": "salta", "scheda": a[2]["scheda"]},
+        {"tipo": "nuova", "scheda": a[2]["scheda"]}]}).get_json()
+    assert (r["creati"], r["uniti"], r["saltati"]) == (1, 1, 1) and len(r["errori"]) == 1 and "Mercato" in r["errori"][0]["errore"]
+    tutte = {x["id"]: x for x in c.get("/api/referenze").get_json()["referenze"]}
+    assert tutte["REF-001"]["tecnologie"] == ["Python", "Azure ML", "Databricks"] and tutte["REF-004"]["origine"] == "Import scheda" and len(tutte) == 4
+    assert {e["campo"] for e in c.get("/api/referenze/REF-001/storico").get_json()} >= {"tecnologie", "fonti"}

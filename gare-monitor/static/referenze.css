@@ -74,3 +74,12 @@
 .rf-chks{display:flex;flex-wrap:wrap}.rf-chk.auto{color:var(--text-3)}
 .rf-tab{width:100%;border-collapse:collapse;font-size:13px}.rf-tab th,.rf-tab td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}.rf-prima{max-width:420px;word-break:break-word}
 @media(max-width:760px){.rf-grid{grid-template-columns:1fr}}
+
+/* ---------- passo 3: importazione ed esportazione ---------- */
+.rf-sum{margin:6px 0 10px;align-items:center}
+.rf-dd{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:8px}.rf-dd summary{font-weight:400;color:var(--text)}
+.rf-val{max-width:340px;white-space:pre-wrap;word-break:break-word;font-size:12.5px}
+.rf-sch{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:12px}
+.rf-sch-h{margin-bottom:8px}.rf-opz{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:8px}.rf-opz label{display:inline-flex;gap:6px;align-items:center;font-size:14px;cursor:pointer}.rf-opz input{width:auto}
+.rf-un{display:grid;gap:8px;margin:8px 0}.rf-cerca{display:flex;flex-wrap:wrap;gap:6px}
+.rf-merge select{min-width:170px}
