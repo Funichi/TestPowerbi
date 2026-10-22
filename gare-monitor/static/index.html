@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gare e Offerte</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side" aria-label="Navigazione">
+    <div class="brand" title="Gare &amp; Offerte">
+      <i data-ico="trending-up"></i>
+      <span class="lbl brand-t">Gare <em>&amp;</em> Offerte</span>
+    </div>
+    <nav id="nav">
+      <button data-view="dash" class="active" title="Cruscotto"><i data-ico="layout-dashboard"></i><span class="lbl">Cruscotto</span></button>
+      <button data-view="table" title="Tabella"><i data-ico="table-2"></i><span class="lbl">Tabella</span></button>
+      <button data-view="wip" title="Consegne WIP"><i data-ico="calendar-clock"></i><span class="lbl">Consegne WIP</span></button>
+      <button data-view="cliente" title="Clienti"><i data-ico="building-2"></i><span class="lbl">Clienti</span></button>
+      <button data-view="referenze" title="Referenze"><i data-ico="library"></i><span class="lbl">Referenze</span></button>
+      <button data-view="tempi" title="Tempi di consegna"><i data-ico="timer"></i><span class="lbl">Tempi di consegna</span></button>
+      <button data-view="clean" title="Pulizia dati"><i data-ico="sparkles"></i><span class="lbl">Pulizia dati</span></button>
+    </nav>
+    <div class="side-foot">
+      <div class="file-box" id="file-box" title="">
+        <span class="file-dot"><i data-ico="file-spreadsheet"></i><b class="dot" id="file-dot"></b></span>
+        <span class="lbl file-info"><strong>File Excel</strong><span id="status">…</span></span>
+      </div>
+      <button id="btn-settings" class="side-btn" title="Impostazioni"><i data-ico="settings"></i><span class="lbl">Impostazioni</span></button>
+      <button id="btn-pin" class="side-btn" title="Fissa la barra aperta" aria-pressed="false"><i data-ico="pin"></i><span class="lbl">Fissa barra</span></button>
+    </div>
+  </aside>
+  <div class="content">
+    <header class="top">
+      <div class="top-t"><h1 id="page-title">Cruscotto</h1><div id="page-sub" class="sub0"></div></div>
+      <div class="actions">
+        <button id="btn-reload" class="btn-sec" title="Svuota il database locale e lo ricarica dal file Excel"><i data-ico="refresh-cw"></i>Aggiorna dall'Excel</button>
+        <button id="btn-export" class="btn-sec" title="Scrive nel file Excel le righe nuove e le modifiche fatte qui"><i data-ico="upload"></i>Esporta in Excel<span class="cnt-badge" id="exp-n" hidden></span></button>
+        <button id="btn-new" class="primary"><i data-ico="plus"></i>Nuova offerta</button>
+      </div>
+    </header>
+    <main id="main"><p class="muted pad">Caricamento…</p></main>
+  </div>
+</div>
+<div id="modal-root"></div>
+<div id="toast" class="toast" hidden></div>
+<div id="busy" class="busy" hidden><div id="busy-t">Un momento…</div></div>
+<script src="/static/icons.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

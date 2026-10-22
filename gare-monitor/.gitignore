@@ -1,0 +1,21 @@
+config.json
+backup/
+*.xlsx
+__pycache__/
+build/
+dist/
+*.spec
+
+# Referenze: dati riservati, mai nel repository (solo codice)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+backup_referenze/
+referenze*.json
+!tests/fixtures/referenze_finte.json
+Referenze*.xlsx
+Prototipo_Referenze*.html
+update/
+aggiornamento.log
+version.txt

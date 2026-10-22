@@ -1,0 +1,45 @@
+name: Build Gare Monitor (exe Windows)
+on:
+  workflow_dispatch:
+  push:
+    paths: ["gare-monitor/**", ".github/workflows/build-gare-monitor.yml"]
+permissions:
+  contents: write
+# una build alla volta per branch; su main non si interrompe mai una build in corso (potrebbe lasciare la Release "latest" a metà)
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: gare-monitor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest
+      # il bootloader precompilato di PyInstaller è noto a Defender (falsi positivi): lo compiliamo noi dal sorgente
+      - shell: bash
+        run: pip install --no-binary pyinstaller pyinstaller || pip install pyinstaller
+      - run: python -m pytest -q tests
+      # cartella (non --onefile): gli exe "autoestraenti" sono molto più spesso scambiati per virus
+      - run: pyinstaller --onedir --noupx --name GareOfferte --add-data "static;static" --hidden-import win32timezone --hidden-import pythoncom --hidden-import win32com.client app.py
+      - run: copy Avvio-automatico.bat, Disattiva-avvio-automatico.bat, Aggiorna.bat, Aggiorna.ps1 dist\GareOfferte\
+      - run: Set-Content -Path dist\GareOfferte\version.txt -Value "${{ github.run_number }}" -NoNewline
+      - run: Compress-Archive -Path dist\GareOfferte\* -DestinationPath GareOfferte-${{ github.run_number }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GareOfferte-windows
+          path: gare-monitor/dist/GareOfferte/
+      # Release "latest" (privata come il repository): l'app la legge con un token di sola lettura per aggiornarsi.
+      # Si pubblica SOLO da main: sugli altri branch la build resta un artefatto da scaricare a mano per provarla.
+      - if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest "GareOfferte-${{ github.run_number }}.zip" --title "build ${{ github.run_number }}" --notes "Build automatica ${{ github.sha }}" --target "${{ github.sha }}"
