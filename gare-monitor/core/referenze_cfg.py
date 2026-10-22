@@ -26,6 +26,11 @@ MATERIALE = ["ricco", "medio", "scarso"]
 SEZIONI_STANDARD = ["Il contesto e la sfida", "Il nostro approccio", "La soluzione nel dettaglio", "Dati e tecnologie",
                     "Il valore per il cliente", "Perché è replicabile", "Spunti per la conversazione"]
 
+CONFIDENZE = ["alta", "media", "nessuno"]
+ORIGINE_MANUALE = "Inserita a mano"
+# Il materiale proposto dall'app (modificabile a mano): ricco = racconto esteso completo e almeno una fonte; medio = racconto esteso parziale; scarso = poco più della riga dell'Excel
+SOGLIE_MATERIALE = {"ricco_sezioni": 6, "medio_sezioni": 4, "medio_sezioni_con_fonti": 3}
+
 # Sinonimi di ricerca: chi cerca la parola a sinistra trova anche i termini a destra (senza accenti e maiuscole; i termini sono "contiene").
 # L'espansione vale in una sola direzione: es. "genai" include "chatbot", ma "chatbot" non include "genai".
 SINONIMI = {
@@ -43,4 +48,4 @@ SINONIMI = {
 
 def config_pubblica():
     return {"ambiti": AMBITI, "ambito_etichetta": AMBITO_ETICHETTA, "tipologie": TIPOLOGIE, "mercati": MERCATI, "campi_mancanti": CAMPI_MANCANTI,
-            "materiale": MATERIALE, "sezioni_standard": SEZIONI_STANDARD, "sinonimi": SINONIMI}
+            "materiale": MATERIALE, "confidenze": CONFIDENZE, "sezioni_standard": SEZIONI_STANDARD, "sinonimi": SINONIMI}

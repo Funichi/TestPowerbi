@@ -14,10 +14,10 @@ import webbrowser
 import secrets
 import time
 
-from flask import Flask, jsonify, redirect, request, send_from_directory, session
+from flask import Flask, jsonify, redirect, request, send_file, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from core import clienti, logic, metrics, referenze, referenze_cfg, updater
+from core import clienti, logic, metrics, referenze, referenze_cfg, referenze_xlsx, updater
 from core.db import Store
 from core.reader import ATT_LABELS, DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
 from core.writer import NoExcelError, OpenpyxlWriter, WriteError, excel_available, get_writer
@@ -77,7 +77,7 @@ _refstore = {"obj": None}
 def refstore():
     p = referenze_db_path()
     if _refstore["obj"] is None or _refstore["obj"].path != p:
-        _refstore["obj"] = referenze.RefStore(p)
+        _refstore["obj"] = referenze.RefStoreMod(p)
     return _refstore["obj"]
 
 
@@ -251,6 +251,92 @@ def referenze_cliente():
     rs = refstore()
     n = len(rs.per_cliente(request.args.get("nome", ""))) if rs.exists() else 0
     return jsonify({"n": n, "attivo": rs.exists()})
+
+
+def _ref_ok():
+    rs = refstore()
+    if not (rs.exists() and rs.count()):
+        raise referenze.RefError("L'archivio delle referenze non è ancora stato caricato")
+    return rs
+
+
+@app.errorhandler(referenze.RefError)
+def _ref_error(e):
+    return jsonify({"error": str(e)}), 400
+
+
+@app.post("/api/referenze")
+def referenze_crea():
+    return jsonify(_ref_ok().crea(request.get_json(silent=True) or {}))
+
+
+@app.post("/api/referenze/calcola")
+def referenze_calcola():
+    b = request.get_json(silent=True) or {}
+    return jsonify(_ref_ok().calcola(b.get("dati") or {}, b.get("id")))
+
+
+@app.get("/api/referenze/da-completare")
+def referenze_da_completare():
+    a = request.args
+    return jsonify(_ref_ok().da_completare(a.get("mancante") or None, bool(a.get("da_verificare")), a.get("materiale") or None))
+
+
+@app.put("/api/referenze/<rid>")
+def referenze_aggiorna(rid):
+    return jsonify(_ref_ok().aggiorna(rid, request.get_json(silent=True) or {}))
+
+
+@app.post("/api/referenze/<rid>/archivia")
+def referenze_archivia(rid):
+    return jsonify(_ref_ok().archivia(rid, (request.get_json(silent=True) or {}).get("archiviata", True)))
+
+
+@app.post("/api/referenze/<rid>/verifica")
+def referenze_verifica(rid):
+    return jsonify(_ref_ok().verifica(rid))
+
+
+@app.delete("/api/referenze/<rid>")
+def referenze_elimina(rid):
+    _ref_ok().elimina(rid)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/referenze/<rid>/storico")
+def referenze_storico(rid):
+    return jsonify(_ref_ok().storico(rid))
+
+
+@app.get("/api/referenze/export")
+def referenze_export():
+    """Le referenze in un file Excel nel formato di Referenze_Consolidate.xlsx (anche il modello per i caricamenti massivi); ?archiviate=1 aggiunge le archiviate."""
+    buf = referenze_xlsx.esporta(_ref_ok(), bool(request.args.get("archiviate")))
+    return send_file(buf, as_attachment=True, download_name=f"Referenze_{dt.date.today():%Y%m%d}.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.post("/api/referenze/import/anteprima")
+def referenze_import_anteprima():
+    f = request.files.get("file")
+    if not f:
+        raise referenze.RefError("Nessun file ricevuto")
+    return jsonify(referenze_xlsx.anteprima_excel(_ref_ok(), f.stream))
+
+
+@app.post("/api/referenze/import/applica")
+def referenze_import_applica():
+    return jsonify(referenze_xlsx.applica_excel(_ref_ok(), (request.get_json(silent=True) or {}).get("token")))
+
+
+@app.post("/api/referenze/scheda/anteprima")
+def referenze_scheda_anteprima():
+    return jsonify(referenze_xlsx.anteprima_schede(_ref_ok(), request.get_json(silent=True)))
+
+
+@app.post("/api/referenze/scheda/applica")
+def referenze_scheda_applica():
+    return jsonify(referenze_xlsx.applica_schede(_ref_ok(), (request.get_json(silent=True) or {}).get("azioni")))
 
 
 @app.post("/api/referenze/carica")
