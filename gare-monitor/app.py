@@ -249,8 +249,8 @@ def referenze_elenco():
 def referenze_cliente():
     """Quante referenze ha un cliente (nome confrontato senza maiuscole, punteggiatura e S.p.A.): serve alla scheda Cliente."""
     rs = refstore()
-    n = len(rs.per_cliente(request.args.get("nome", ""))) if rs.exists() else 0
-    return jsonify({"n": n, "attivo": rs.exists()})
+    ids = [r["id"] for r in rs.per_cliente(request.args.get("nome", ""))] if rs.exists() else []
+    return jsonify({"n": len(ids), "ids": ids, "attivo": rs.exists()})
 
 
 def _ref_ok():

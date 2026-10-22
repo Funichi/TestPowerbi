@@ -511,3 +511,7 @@ tr.row-old td{color:var(--text-3);background:var(--bg)}
 .dcard{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;font-size:13px}
 .dcard .dt-t{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-3);margin-bottom:4px}.dcard .dt-l{color:var(--text-2);line-height:1.45}.dcard b{color:var(--text)}
 .card+.card,.card+.dcards,.dcards+.card{margin-top:var(--gap)}
+
+/* riquadro Referenze nella scheda cliente */
+.refbox{display:inline-flex;align-items:baseline;gap:10px;border:1px solid var(--border);border-radius:12px;padding:8px 14px;background:var(--bg);font-size:14px}
+.refbox[hidden]{display:none}.refbox-t{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:600}.refbox b{font-size:18px}

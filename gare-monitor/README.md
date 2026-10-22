@@ -87,3 +87,8 @@ Vista "Referenze" nel menu: ricerca per argomento (con sinonimi), cliente, ambit
 - **Importa da Excel**: riga con ID esistente = aggiorna, senza ID = nuova. Anteprima prima di scrivere (nuove, aggiornate con i campi che cambiano, errori); si leggono solo le colonne presenti; copia di backup prima di applicare. Un file esportato e reimportato senza modifiche dà 0 nuove e 0 cambiamenti.
 - **Importa scheda**: JSON nel formato di `referenze.json` (una scheda, un elenco o `{"referenze": [...]}`). Per ogni scheda: crea come nuova, unisci a una esistente (campo per campo: tieni l'esistente, usa la nuova, unisci le voci/sezioni) o salta.
 - Il codice di importazione (`static/referenze_dati.js`) si carica solo al primo clic su «Importa…».
+
+### Referenze: presentazione, copia e collegamento (passo 4)
+- **Modalità presentazione** (pulsante nella barra della vista; si esce con Esc o con il pulsante in alto a destra): testo molto più grande e niente di interno: barra laterale, intestazione, schede «Ricerca / Da completare», badge, ID, fonti, campi mancanti, referenti, pulsanti «Copia testo» e «Modifica».
+- **Copia testo**: copia negli appunti titolo e cliente, racconto da 30 secondi e racconto esteso in testo semplice (sezioni con titolo, elenchi con «• »).
+- **Scheda Cliente**: riquadro «Referenze» con il numero di referenze del cliente (nome abbinato senza maiuscole, punteggiatura e S.p.A.) e il link «Vedi le referenze →» alla ricerca già filtrata. Compare solo se l'archivio delle referenze esiste.
