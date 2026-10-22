@@ -1,0 +1,21 @@
+[
+  {"id": "REF-001", "origine": "Excel master", "contatore": 1, "cliente": "Acme Energia S.p.A.", "titolo": "Forecast della domanda elettrica per la rete di distribuzione",
+   "titolo_excel": "Load forecasting", "ambito": "AI", "tipologie": ["Forecasting & Modelli predittivi"], "mercato": "Energy & Utilities", "segmento": "Energia", "anno": "2023",
+   "temi": ["Forecast", "Serie storiche"], "tecnologie": ["Python", "Azure ML"], "pitch": "Per Acme Energia abbiamo costruito un modello di previsione della domanda elettrica.",
+   "esteso": [{"sezione": "Il contesto e la sfida", "testo": "Acme doveva anticipare i picchi di consumo."},
+              {"sezione": "Spunti per la conversazione", "testo": ["Quali dati storici avete?", "Che orizzonte di previsione serve?"]}],
+   "fonti": ["Deck demo slide 1"], "documenti": ["DEMO-1"], "confidenza": "alta", "materiale": "ricco", "campi_mancanti": [], "note": "", "da_verificare": false,
+   "descrizione_excel": "Modello di forecast sui carichi.", "tecnologie_excel": "Python, Azure ML", "referente_aidata": "Mario Rossi", "referente_mercato": "", "referente_progetto": "", "owner": ""},
+  {"id": "REF-002", "origine": "Excel master", "contatore": 2, "cliente": "Beta Ospedali", "titolo": "Assistente virtuale per la prenotazione delle visite",
+   "titolo_excel": "Virtual assistant sanità", "ambito": "AI", "tipologie": ["Chatbot & Assistenti virtuali", "RAG & Knowledge Base"], "mercato": "Sanità", "segmento": "Sanità", "anno": "",
+   "temi": ["Chatbot GenAI"], "tecnologie": ["OpenAI"], "pitch": "Per Beta Ospedali un assistente virtuale che risponde ai pazienti; include anche previsioni dei tempi di attesa.",
+   "esteso": [{"sezione": "Il contesto e la sfida", "testo": "Troppe chiamate al centralino."}],
+   "fonti": [], "documenti": [], "confidenza": "media", "materiale": "medio", "campi_mancanti": ["anno", "referente interno"], "note": "Cliente anonimo nella slide: abbinamento incerto.",
+   "da_verificare": true, "descrizione_excel": "Chatbot per prenotazioni.", "tecnologie_excel": "OpenAI", "referente_aidata": "", "referente_mercato": "", "referente_progetto": "", "owner": ""},
+  {"origine": "Nuova da Word", "contatore": null, "cliente": "Gamma Telecom", "titolo": "Data platform per il customer analytics",
+   "titolo_excel": "", "ambito": "Data Management & Reporting", "tipologie": ["Data Platform & Lakehouse"], "mercato": "Telco & Media", "segmento": "Telco", "anno": "2024",
+   "temi": ["Lakehouse"], "tecnologie": ["Databricks"], "pitch": "Per Gamma Telecom una data platform su Databricks.",
+   "esteso": [{"sezione": "Dati e tecnologie", "testo": ["Databricks", "Delta Lake"]}],
+   "fonti": ["Word progetto"], "documenti": [], "confidenza": "alta", "materiale": "scarso", "campi_mancanti": ["risultati/benefici"], "note": "", "da_verificare": false,
+   "descrizione_excel": "", "tecnologie_excel": "", "referente_aidata": "", "referente_mercato": "", "referente_progetto": "Luca Bianchi", "owner": ""}
+]
