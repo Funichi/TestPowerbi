@@ -67,3 +67,12 @@ A ogni push GitHub Actions costruisce l'app; **solo dai push su `main`** la pubb
 **Token (una volta sola):** github.com > foto profilo > Settings > Developer settings > Personal access tokens > Fine-grained tokens > Generate new token. Nome a piacere, scadenza (es. 1 anno), "Only select repositories" > TestPowerbi, Repository permissions > **Contents: Read-only** (Metadata si aggiunge da solo). Copia il token (inizia con `github_pat_`) e incollalo in Impostazioni > Aggiornamenti dell'app.
 Poi: "Controlla aggiornamenti" > "Aggiorna ora". L'app scarica lo zip, si chiude, `Aggiorna.ps1` sostituisce i file (restano `config.json`, `monitoraggio.db`, `backup`) e riavvia l'app; la pagina si ricarica da sola. Se l'app non parte, `Aggiorna.bat` (nella cartella) fa lo stesso da solo. Esito e errori: `aggiornamento.log`.
 Il token resta nel tuo `config.json` (non esce dal PC e non viene mai mostrato nell'interfaccia): tienilo di sola lettura.
+
+## Referenze (libreria delle referenze AI & Data)
+
+Vista "Referenze" nel menu: ricerca per argomento (con sinonimi), cliente, ambito, tipologia e mercato; schede con racconto da 30 secondi e racconto esteso.
+- **Database separato** `referenze.db` (SQLite) nella stessa cartella di `monitoraggio.db` (modificabile con `referenze_db` in `config.json`); non tocca mai `monitoraggio.db`. Backup a ogni avvio in `backup_referenze/` (ultime 20).
+- **Primo caricamento** da `referenze.json` (percorso nelle Impostazioni, default `C:\Script\Referenze\referenze.json`): crea il database; da lì in poi il database è l'unica fonte.
+- Domini (ambiti, tipologie, mercati…) e **sinonimi di ricerca** stanno in un solo file: `core/referenze_cfg.py`.
+- Il codice della vista (`static/referenze.js`, `referenze.css`) si carica solo alla prima apertura della vista.
+- **Dati riservati**: `referenze.db`, `backup_referenze/`, `referenze*.json`, `Referenze*.xlsx`, `Prototipo_Referenze*.html` sono in `.gitignore`; nel repository solo dati finti (`tests/fixtures/referenze_finte.json`).

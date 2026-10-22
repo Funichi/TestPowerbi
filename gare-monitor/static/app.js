@@ -27,6 +27,7 @@ const TITLES = {
   table: ["Tabella", "Tutte le offerte: filtra, ordina, clicca una riga per modificarla"],
   wip: ["Consegne WIP", "Scadenze delle offerte in corso e preparazione della riunione"],
   cliente: ["Clienti", "Il cruscotto di un singolo cliente: storico, esiti e tempi"],
+  referenze: ["Referenze", "Libreria delle referenze AI & Data da raccontare ai clienti"],
   tempi: ["Tempi di consegna", "Quanto passa in media tra Data ins. e Data consegna"],
   clean: ["Pulizia dati", "Uniforma gli stati e correggi i dati nel file Excel"],
 };
@@ -165,7 +166,25 @@ function render() {
   $("#page-title").textContent = TITLES[S.view][0]; $("#page-sub").textContent = TITLES[S.view][1];
   const m = $("#main");
   if (S.view !== "table") setHash("");
-  ({dash: renderDash, table: renderTable, wip: renderWip, cliente: renderCliente, tempi: renderTempi, clean: renderClean})[S.view](m);
+  $(".actions").hidden = S.view === "referenze";          // i pulsanti Excel riguardano solo le offerte
+  ({referenze: renderReferenze, dash: renderDash, table: renderTable, wip: renderWip, cliente: renderCliente, tempi: renderTempi, clean: renderClean})[S.view](m);
+}
+
+// ------------------------------------------------------------ referenze (modulo caricato solo alla prima apertura della vista)
+let _refModulo = null;
+function loadReferenze() {
+  if (_refModulo) return _refModulo;
+  const v = encodeURIComponent((S.state && S.state.version) || "0");
+  const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "/static/referenze.css?v=" + v; document.head.appendChild(css);
+  return _refModulo = new Promise((ok, ko) => {
+    const s = document.createElement("script"); s.src = "/static/referenze.js?v=" + v;
+    s.onload = () => ok(window.Referenze); s.onerror = () => { _refModulo = null; ko(new Error("Non riesco a caricare il modulo Referenze")); };
+    document.head.appendChild(s);
+  });
+}
+function renderReferenze(m) {
+  m.innerHTML = `<p class="muted pad">Caricamento…</p>`;
+  loadReferenze().then(R => S.view === "referenze" && R.render(m)).catch(e => { m.innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div></div>`; });
 }
 
 // ------------------------------------------------------------ cruscotto
@@ -1136,6 +1155,7 @@ function openSettings(first, msg) {
     <label for="s-path">File Excel (copia sincronizzata di SharePoint)</label><div class="row"><input id="s-path" style="flex:1" value="${esc(st.path || "")}" placeholder="C:\\Users\\…\\HISTORY.xlsx"><button id="s-browse">Sfoglia…</button></div>
     <label for="s-db" style="margin-top:12px">Database locale (si crea da solo se non esiste; tienilo fuori da OneDrive)</label><input id="s-db" value="${esc(st.db_path || "")}">
     <label for="s-cli" style="margin-top:12px">Cartella dei clienti (opzionale: per il pulsante “Apri cartella” nella scheda cliente)</label><input id="s-cli" value="${esc(st.clienti_dir || "")}" placeholder="C:\\Users\\…\\Solution - Documenti\\Clienti">
+    <label for="s-ref" style="margin-top:12px">File referenze.json (solo per il primo caricamento delle Referenze)</label><input id="s-ref" value="${esc(st.referenze_json || "")}" placeholder="C:\\Script\\Referenze\\referenze.json">
     <h3 class="mh" style="margin-top:18px">Accesso da altre reti o da internet</h3>
     <p class="hint" style="margin-top:0">Dal PC l'app si apre sempre senza password. Per aprirla da un altro dispositivo (rete di casa o internet tramite un tunnel come Tailscale Funnel) serve una password: senza, l'accesso esterno resta chiuso. Vedi il README.</p>
     <label for="s-pw">${st.password_set ? "Password impostata — scrivine una nuova per cambiarla" : "Password (almeno 8 caratteri)"}</label><div class="row"><input id="s-pw" type="password" style="flex:1" autocomplete="new-password"><button id="s-pw-save">Salva password</button>${st.password_set ? '<button id="s-pw-off">Togli password</button>' : ""}</div>
@@ -1175,7 +1195,7 @@ function openSettings(first, msg) {
       const n = st.pending ? st.pending.new + st.pending.mod : 0;
       if (n && !confirm(`Ci sono ${n} modifiche non esportate: importando verranno eliminate. Continuare?`)) return;
       await withBusy(async () => {
-        await api("/api/config", {method: "POST", body: {excel_path: $("#s-path", el).value, db_path: $("#s-db", el).value, clienti_dir: $("#s-cli", el).value}});
+        await api("/api/config", {method: "POST", body: {excel_path: $("#s-path", el).value, db_path: $("#s-db", el).value, clienti_dir: $("#s-cli", el).value, referenze_json: $("#s-ref", el).value}});
         await api("/api/import", {method: "POST", body: {force: true}});
       }, "Importo il file Excel…");
       closeModal(); await loadAll(true); toast("Dati importati dall'Excel");

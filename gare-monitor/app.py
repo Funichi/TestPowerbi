@@ -17,7 +17,7 @@ import time
 from flask import Flask, jsonify, redirect, request, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from core import clienti, logic, metrics, updater
+from core import clienti, logic, metrics, referenze, referenze_cfg, updater
 from core.db import Store
 from core.reader import ATT_LABELS, DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
 from core.writer import NoExcelError, OpenpyxlWriter, WriteError, excel_available, get_writer
@@ -29,6 +29,7 @@ CONFIG_PATH = os.environ.get("GARE_CONFIG", os.path.join(BASE_DIR, "config.json"
 BACKUP_DIR = os.path.join(os.path.dirname(CONFIG_PATH), "backup")
 DEFAULT_DB = os.path.join(os.path.dirname(CONFIG_PATH), "monitoraggio.db")
 DEFAULT_CLIENTI_DIR = r"C:\Users\ngrando\OneDrive - Engineering Ingegneria Informatica S.p.A\Solution - Documenti\Clienti"
+DEFAULT_REFERENZE_JSON = r"C:\Script\Referenze\referenze.json"
 DEFAULT_EXCEL_PATH = r"C:\Users\ngrando\OneDrive - Engineering Ingegneria Informatica S.p.A\Solution - Documenti\Clienti\01 Amministrazione\HISTORY.xlsx"
 
 app = Flask(__name__, static_folder=os.path.join(RES_DIR, "static"), static_url_path="/static")
@@ -59,6 +60,25 @@ def excel_path():
 def clienti_dir():
     d = load_config().get("clienti_dir", DEFAULT_CLIENTI_DIR)
     return d if d and os.path.isdir(d) else None
+
+
+def referenze_db_path():
+    """referenze.db sta accanto a monitoraggio.db (cartella indicata nelle Impostazioni) ma è un database indipendente."""
+    return load_config().get("referenze_db") or os.path.join(os.path.dirname(os.path.abspath(db_path())), "referenze.db")
+
+
+def referenze_json_path():
+    return load_config().get("referenze_json") or DEFAULT_REFERENZE_JSON
+
+
+_refstore = {"obj": None}
+
+
+def refstore():
+    p = referenze_db_path()
+    if _refstore["obj"] is None or _refstore["obj"].path != p:
+        _refstore["obj"] = referenze.RefStore(p)
+    return _refstore["obj"]
 
 
 def db_path():
@@ -114,7 +134,7 @@ def on_error(e):
 # Dal PC stesso (127.0.0.1, senza intermediari) l'app si apre senza password. Qualunque altra richiesta (rete locale, tunnel internet)
 # richiede la password impostata dal PC; senza password l'accesso esterno è rifiutato.
 
-LOCAL_ONLY = {"set_config", "browse", "cliente_cartella", "set_password", "update_check", "update_apply"}       # operazioni sul PC che ospita l'app
+LOCAL_ONLY = {"set_config", "browse", "cliente_cartella", "set_password", "update_check", "update_apply", "referenze_carica"}       # operazioni sul PC che ospita l'app
 _fails = {}                                                                       # ip -> (tentativi, blocco fino a)
 
 
@@ -207,6 +227,47 @@ def set_password():
         cfg["listen_all"] = bool(b["listen_all"])
     save_config(cfg)
     return jsonify({"ok": True})
+
+
+# ------------------------------------------------------------------ referenze (database separato: referenze.db)
+
+@app.get("/api/referenze/config")
+def referenze_config():
+    return jsonify(referenze_cfg.config_pubblica())
+
+
+@app.get("/api/referenze")
+def referenze_elenco():
+    rs = refstore()
+    if not (rs.exists() and rs.count()):
+        pj = referenze_json_path()
+        return jsonify({"stato": "da_caricare", "percorso_json": pj, "file_esiste": os.path.isfile(pj)})
+    return jsonify({"stato": "ok", "referenze": rs.elenco(archiviate=bool(request.args.get("archiviate"))), "totale": rs.count(archiviate=False)})
+
+
+@app.get("/api/referenze/cliente")
+def referenze_cliente():
+    """Quante referenze ha un cliente (nome confrontato senza maiuscole, punteggiatura e S.p.A.): serve alla scheda Cliente."""
+    rs = refstore()
+    n = len(rs.per_cliente(request.args.get("nome", ""))) if rs.exists() else 0
+    return jsonify({"n": n, "attivo": rs.exists()})
+
+
+@app.post("/api/referenze/carica")
+def referenze_carica():
+    """Primo caricamento: crea referenze.db e importa il JSON (percorso opzionale, ricordato in config.json)."""
+    b = request.json or {}
+    p = (b.get("path") or "").strip().strip('"') or referenze_json_path()
+    if not os.path.isfile(p):
+        raise FileNotFoundError(f"File non trovato: {p}")
+    try:
+        n = refstore().carica_json(p)
+    except referenze.RefError as e:
+        return jsonify({"error": str(e)}), 400
+    cfg = load_config()
+    cfg["referenze_json"] = p
+    save_config(cfg)
+    return jsonify({"ok": True, "caricate": n})
 
 
 # ------------------------------------------------------------------ aggiornamento dell'app da GitHub (Release privata)
@@ -313,7 +374,7 @@ def state():
             pass
     return jsonify({"local": is_local(), "password_set": bool(cfg.get("password_hash")), "listen_all": bool(cfg.get("listen_all")),
                     "excel_newer": newer, "auto_imported": auto, "version": updater.current_version(BASE_DIR), "update_token_set": bool(cfg.get("github_token")), "excel_com": excel_available() and cfg.get("writer", "auto") != "openpyxl",
-                    "github_repo": cfg.get("github_repo") or updater.DEFAULT_REPO, "can_update": FROZEN and os.name == "nt","path": cfg.get("excel_path") or DEFAULT_EXCEL_PATH, "excel_ok": bool(excel_path()), "db_path": st.path,
+                    "github_repo": cfg.get("github_repo") or updater.DEFAULT_REPO, "referenze_json": referenze_json_path(), "can_update": FROZEN and os.name == "nt","path": cfg.get("excel_path") or DEFAULT_EXCEL_PATH, "excel_ok": bool(excel_path()), "db_path": st.path,
                     "exists": bool(excel_path()) or st.has_data(), "imported": st.has_data(), "imported_at": st.meta("imported_at"),
                     "pending": st.counts(), "oggi": dt.date.today().isoformat(), "clienti_dir": clienti_dir()})
 
@@ -332,6 +393,8 @@ def set_config():
         if not os.path.isdir(os.path.dirname(os.path.abspath(d))):
             raise FileNotFoundError(f"La cartella del database non esiste: {os.path.dirname(d)}")
         cfg["db_path"] = d
+    if "referenze_json" in b:
+        cfg["referenze_json"] = (b["referenze_json"] or "").strip().strip('"')
     for k in ("github_repo", "github_token"):
         if k in b and (b[k] or "").strip():                   # il token non si vede mai nell'interfaccia: un campo vuoto lo lascia com'è
             cfg[k] = b[k].strip()
@@ -353,7 +416,11 @@ def browse():
         root = tkinter.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
-        path = filedialog.askopenfilename(title="Scegli il file Excel", filetypes=[("Excel", "*.xlsx *.xlsm")])
+        tipo = (request.get_json(silent=True) or {}).get("tipo")
+        if tipo == "json":
+            path = filedialog.askopenfilename(title="Scegli il file delle referenze (JSON)", filetypes=[("JSON", "*.json")])
+        else:
+            path = filedialog.askopenfilename(title="Scegli il file Excel", filetypes=[("Excel", "*.xlsx *.xlsm")])
         root.destroy()
         return jsonify({"path": path})
     except Exception as e:
@@ -636,6 +703,12 @@ def main():
     if not os.environ.get("GARE_NO_BROWSER"):
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     from werkzeug.serving import run_simple
+    try:
+        rs = refstore()
+        if rs.exists():
+            rs.backup()                                    # copia di sicurezza di referenze.db a ogni avvio (ultime 20)
+    except Exception as e:
+        print(f" Backup delle referenze non riuscito: {e}")
     lan = bool(load_config().get("listen_all"))
     if lan:
         print(" Accesso dalla rete locale attivo (serve la password impostata nelle Impostazioni).")

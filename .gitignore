@@ -40,3 +40,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Referenze (app Gare & Offerte): dati riservati, mai nel repository
+*.db
+backup_referenze/
+referenze*.json
+Referenze*.xlsx
+Prototipo_Referenze*.html

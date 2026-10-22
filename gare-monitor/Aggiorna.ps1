@@ -45,7 +45,7 @@ try {
     Expand-Archive -LiteralPath $Zip -DestinationPath $stage -Force
     if (-not (Test-Path (Join-Path $stage "GareOfferte.exe"))) { throw "Lo zip non contiene GareOfferte.exe." }
     Log "Zip estratto."
-    & robocopy $stage $AppDir /E /R:3 /W:2 /XF config.json monitoraggio.db "*.db-wal" "*.db-shm" aggiornamento.log /XD backup update /NFL /NDL /NJH /NJS /NP | Out-Null
+    & robocopy $stage $AppDir /E /R:3 /W:2 /XF config.json monitoraggio.db referenze.db "*.db" "*.db-wal" "*.db-shm" aggiornamento.log /XD backup backup_referenze update /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Copia dei file non riuscita (robocopy $LASTEXITCODE)." }
     Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item $Zip -Force -ErrorAction SilentlyContinue
