@@ -104,11 +104,20 @@ def test_caricamento_solo_dal_pc_locale_e_modulo_non_nelle_altre_viste(ref):
     assert "sinonimi" not in appjs.lower() and "punteggio(" not in appjs and "loadReferenze" in appjs
 
 
+def _node(prog, *args):
+    """Esegue un programma node scritto su file UTF-8 (su Windows gli argomenti di -e perdono i caratteri non ASCII)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        f = os.path.join(d, "prog.js")
+        with open(f, "w", encoding="utf-8") as fh:
+            fh.write(prog)
+        return subprocess.run(["node", f, *args], capture_output=True, check=True, encoding="utf-8")
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="serve node")
 def test_ricerca_sinonimi_e_ordinamento_per_pertinenza():
     js = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "referenze.js")
     prog = r'''
-const R = require(process.argv[1]);
+const R = require(process.argv[2]);
 const SIN = R.indicizzaSinonimi({forecast: ["forecast", "previsione", "previsioni", "serie storic"], chatbot: ["chatbot", "assistente virtuale"], genai: ["genai", "chatbot", "rag"]});
 const base = {cliente: "", titolo: "", titolo_excel: "", segmento: "", pitch: "", tipologie: [], temi: [], tecnologie: [], descrizione_excel: "", ambito: "AI", mercato: "Sanità", materiale: "medio"};
 const D = [
@@ -130,7 +139,7 @@ const out = {
 };
 console.log(JSON.stringify(out));
 '''
-    r = subprocess.run(["node", "-e", prog, js], capture_output=True, text=True, check=True)
+    r = _node(prog, js)
     o = json.loads(r.stdout)
     assert o["forecast"] == ["A", "B", "B2", "C", "D"]
     assert o["maiuscole_accenti"] == ["B", "B2"] and o["chatbot"] == ["X"] and o["genai"] == ["Y"]
@@ -388,7 +397,7 @@ def test_importa_scheda_candidati_unione_e_nuova(rc):
 def test_testo_da_copiare_e_filtro_per_elenco_di_id():
     js = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "referenze.js")
     prog = r'''
-const R = require(process.argv[1]);
+const R = require(process.argv[2]);
 const r = {id: "R1", cliente: "Acme", titolo: "Forecast domanda", anno: "2024", pitch: " Per Acme un modello. ", mercato: "Energy & Utilities", ambito: "AI",
   esteso: [{sezione: "Il contesto e la sfida", testo: "Troppi picchi."}, {sezione: "Spunti per la conversazione", testo: ["Quali dati?", "Che orizzonte?"]}]};
 const base = {cliente: "", titolo: "", titolo_excel: "", segmento: "", pitch: "", tipologie: [], temi: [], tecnologie: [], descrizione_excel: "", ambito: "AI", mercato: "Sanità", materiale: "medio"};
@@ -401,7 +410,7 @@ console.log(JSON.stringify({
   conteggi: (() => { const c = R.conteggi(D, f({ids: new Set(["B"])}), {}); return [c.ambito(""), c.mercato("Sanità")]; })(),
 }));
 '''
-    o = json.loads(subprocess.run(["node", "-e", prog, js], capture_output=True, text=True, check=True).stdout)
+    o = json.loads(_node(prog, js).stdout)
     assert o["testo"] == ("Forecast domanda — Acme (2024)\n\nIN 30 SECONDI\nPer Acme un modello.\n\nRACCONTO ESTESO\n\nIl contesto e la sfida\nTroppi picchi.\n\n"
                           "Spunti per la conversazione\n• Quali dati?\n• Che orizzonte?\n")
     assert o["vuoto"] == "Forecast domanda — Acme (2024)\n\nIN 30 SECONDI\nPer Acme un modello.\n"
