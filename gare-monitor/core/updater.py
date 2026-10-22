@@ -1,6 +1,8 @@
 """Aggiornamento dell'app dall'ultima Release pubblicata su GitHub (repository privato: serve un token di sola lettura)."""
 import json
 import os
+import subprocess
+import time
 import urllib.error
 import urllib.request
 
@@ -73,3 +75,47 @@ def download(asset_url, token, dest):
     if os.path.getsize(dest) < 1000:
         raise UpdateError("Il file scaricato è incompleto.")
     return dest
+
+
+# ---------------------------------------------------------------- avvio dello script di sostituzione
+
+def strategie_di_lancio(base_dir, zip_path, pid, script_ps1):
+    """Modi per far partire lo script di aggiornamento, dal più affidabile: Windows non dice in anticipo quale funziona (job del processo, console, criteri del PC).
+    Ogni voce è (nome, funzione che lancia)."""
+    ps = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script_ps1, "-AppDir", base_dir, "-Zip", zip_path, "-WaitPid", str(pid)]
+    out = os.path.join(base_dir, "update", "powershell.txt")
+
+    def con_file(cmd, flags):
+        with open(out, "a", encoding="utf-8", errors="replace") as o:
+            subprocess.Popen(cmd, creationflags=flags, close_fds=True, stdout=o, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+
+    def con_shell():
+        # come un doppio clic su Aggiorna.bat in Esplora risorse (ShellExecute): il processo è del tutto indipendente dall'app, non muore con lei
+        os.startfile(os.path.join(base_dir, "Aggiorna.bat"), arguments=f'"{zip_path}" {pid}', cwd=base_dir, show_cmd=0)
+    return [("shell", con_shell),
+            ("start", lambda: con_file(["cmd", "/c", "start", "", "/min"] + ps, 0x08000000)),                       # CREATE_NO_WINDOW
+            ("distaccato", lambda: con_file(ps, 0x00000008 | 0x00000200 | 0x01000000)),                              # DETACHED | NEW_PROCESS_GROUP | BREAKAWAY_FROM_JOB
+            ("distaccato2", lambda: con_file(ps, 0x00000008 | 0x00000200))]
+
+
+def lancia(flag, strategie, attesa=8.0, log=None):
+    """Prova le strategie in ordine finché lo script non crea il file-segnale `flag`. Ritorna il nome di quella riuscita, o None."""
+    for nome, avvia in strategie:
+        if os.path.exists(flag):
+            os.remove(flag)
+        try:
+            avvia()
+        except (OSError, TypeError, AttributeError) as e:
+            if log:
+                log(f"Lancio '{nome}' non riuscito: {e}")
+            continue
+        fine = time.time() + attesa
+        while time.time() < fine:
+            if os.path.exists(flag):
+                if log:
+                    log(f"Script di aggiornamento partito con il metodo '{nome}'.")
+                return nome
+            time.sleep(0.2)
+        if log:
+            log(f"Il metodo '{nome}' non ha fatto partire lo script entro {attesa:.0f} secondi.")
+    return None

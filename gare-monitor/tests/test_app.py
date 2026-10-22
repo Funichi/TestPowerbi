@@ -522,3 +522,26 @@ def test_senza_excel_l_export_ripiega_sulla_scrittura_diretta(client, monkeypatc
     assert r.status_code == 200 and r.get_json()["metodo"] == "openpyxl" and r.get_json()["nuove"] == 1
     assert any(row[7].value == "Nuova" for row in sheet(x).iter_rows(min_row=2))
     assert sheet(x).tables["Tabella4"].autoFilter is None or sheet(x).tables["Tabella4"].autoFilter.ref == sheet(x).tables["Tabella4"].ref
+
+
+def test_lancio_dello_script_di_aggiornamento_prova_i_metodi_in_ordine(tmp_path):
+    from core import updater
+    flag = str(tmp_path / "started.flag")
+    visti = []
+
+    def non_parte():
+        visti.append("a")
+
+    def errore():
+        visti.append("b"); raise OSError("accesso negato")
+
+    def parte():
+        visti.append("c"); open(flag, "w").write("ok")
+    log = []
+    # il primo non fa partire niente, il secondo va in errore, il terzo funziona: i successivi non vengono provati
+    assert updater.lancia(flag, [("a", non_parte), ("b", errore), ("c", parte), ("d", lambda: visti.append("d"))], attesa=0.3, log=log.append) == "c"
+    assert visti == ["a", "b", "c"] and any("'b' non riuscito" in x for x in log) and any("'c'" in x and "partito" in x for x in log)
+    os.remove(flag)
+    assert updater.lancia(flag, [("a", non_parte)], attesa=0.2) is None                      # nessuno funziona: l'app NON si chiude
+    st = updater.strategie_di_lancio(str(tmp_path), str(tmp_path / "app.zip"), 123, str(tmp_path / "x.ps1"))
+    assert [n for n, _ in st][0] == "shell" and len(st) == 4
