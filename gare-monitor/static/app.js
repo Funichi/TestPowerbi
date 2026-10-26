@@ -1176,6 +1176,12 @@ function openSettings(first, msg) {
     <p class="hint" style="margin-top:0">Dal PC l'app si apre sempre senza password. Per aprirla da un altro dispositivo (rete di casa o internet tramite un tunnel come Tailscale Funnel) serve una password: senza, l'accesso esterno resta chiuso. Vedi il README.</p>
     <label for="s-pw">${st.password_set ? "Password impostata — scrivine una nuova per cambiarla" : "Password (almeno 8 caratteri)"}</label><div class="row"><input id="s-pw" type="password" style="flex:1" autocomplete="new-password"><button id="s-pw-save">Salva password</button>${st.password_set ? '<button id="s-pw-off">Togli password</button>' : ""}</div>
     <label class="ms-i" style="margin-top:8px"><input type="checkbox" id="s-lan" ${st.listen_all ? "checked" : ""}> Consenti connessioni dalla rete locale (si applica al prossimo avvio dell'app)</label>
+    <label for="s-sess" style="margin-top:8px">Durata della sessione aperta da fuori (giorni, da 1 a 90)</label><div class="row"><input id="s-sess" type="number" min="1" max="90" style="width:90px" value="${st.sessione_giorni || 7}"><button id="s-sess-save">Salva</button></div>
+    <h3 class="mh" style="margin-top:18px">Verifica in due passaggi (codice dal telefono)</h3>
+    <p class="hint" style="margin-top:0">Oltre alla password, da fuori serve un codice a 6 cifre che cambia ogni 30 secondi, generato da un'app come Google Authenticator o Microsoft Authenticator. Chi scopre la password non può entrare senza il tuo telefono. Dal PC resta tutto senza codice.</p>
+    <div id="s-2fa">${st.totp_on ? `<div>✔ <b>Attiva</b> · codici di recupero rimasti: ${st.recuperi_rimasti ?? 0}</div><div class="row" style="margin-top:8px"><button id="s-2fa-off">Disattiva</button></div>`
+      : st.password_set ? `<div class="row"><button id="s-2fa-on">Attiva la verifica in due passaggi…</button></div>` : `<div class="muted">Imposta prima una password.</div>`}</div>
+    <details id="s-log" style="margin-top:12px"><summary>Ultimi accessi da fuori</summary><div id="s-log-b" class="hint">Caricamento…</div></details>
     <h3 class="mh" style="margin-top:18px">Aggiornamenti dell'app</h3>
     <p class="hint" style="margin-top:0">Versione installata: <b>${st.version ? "build " + st.version : "non indicata (avvio da sorgente)"}</b>. L'app si aggiorna dall'ultima versione pubblicata su GitHub; il repository è privato, quindi serve un <b>token di sola lettura</b> (vedi README).</p>
     <label for="s-repo">Repository GitHub (utente/nome)</label><input id="s-repo" value="${esc(st.github_repo || "")}">
@@ -1204,6 +1210,31 @@ function openSettings(first, msg) {
   };
   // la casella "rete locale" si salva subito, senza dover premere altro
   $("#s-lan", el).onchange = async e => { try { await api("/api/password", {method: "POST", body: {listen_all: e.target.checked}}); toast("Salvato: riavvia l'app per applicarlo"); } catch (err) { $("#s-err", el).textContent = err.message; } };
+  $("#s-sess-save", el).onclick = async () => { try { await api("/api/password", {method: "POST", body: {sessione_giorni: +$("#s-sess", el).value}}); S.state = await api("/api/state"); toast("Durata della sessione salvata"); } catch (e) { $("#s-err", el).textContent = e.message; } };
+  const box2fa = $("#s-2fa", el);
+  const on2fa = $("#s-2fa-on", el);
+  if (on2fa) on2fa.onclick = async () => {
+    try {
+      const r = await api("/api/2fa/avvia", {method: "POST"});
+      box2fa.innerHTML = `<ol style="margin:0 0 8px 18px;padding:0"><li>Nell'app di autenticazione scegli “aggiungi account” e inquadra il codice QR${r.qr ? "" : " (qui non disponibile: usa la chiave)"}.</li><li>Se non puoi inquadrarlo, inserisci a mano questa chiave: <b style="user-select:all;letter-spacing:.06em">${esc(r.segreto)}</b></li><li>Scrivi qui il codice a 6 cifre che l'app mostra.</li></ol>
+        ${r.qr ? `<div style="width:190px;background:#fff;padding:4px;border-radius:8px;margin-bottom:8px">${r.qr}</div>` : ""}
+        <div class="row"><input id="s-2fa-code" inputmode="numeric" autocomplete="off" placeholder="123456" style="width:130px"><button id="s-2fa-ok" class="primary">Conferma e attiva</button></div>`;
+      $("#s-2fa-ok", el).onclick = async () => {
+        try {
+          const a = await api("/api/2fa/attiva", {method: "POST", body: {codice: $("#s-2fa-code", el).value}}); S.state = await api("/api/state");
+          box2fa.innerHTML = `<div>✔ <b>Verifica in due passaggi attiva.</b></div><p class="hint"><b>Conserva questi codici di recupero</b> (ognuno vale una volta, se perdi il telefono). Non verranno più mostrati.</p>
+            <pre id="s-2fa-rec" style="user-select:all;background:var(--bg);padding:10px;border-radius:8px;margin:0 0 8px">${a.codici_recupero.map(esc).join("\n")}</pre><div class="row"><button id="s-2fa-copy">Copia i codici</button></div>`;
+          $("#s-2fa-copy", el).onclick = async () => { try { await navigator.clipboard.writeText(a.codici_recupero.join("\n")); toast("Codici copiati"); } catch (e) { toast("Selezionali e copiali a mano"); } };
+        } catch (e) { $("#s-err", el).textContent = e.message; }
+      };
+    } catch (e) { $("#s-err", el).textContent = e.message; }
+  };
+  const off2fa = $("#s-2fa-off", el);
+  if (off2fa) off2fa.onclick = async () => { if (!confirm("Disattivare la verifica in due passaggi? Da fuori basterà la password.")) return; try { await api("/api/2fa/disattiva", {method: "POST"}); S.state = await api("/api/state"); toast("Verifica in due passaggi disattivata"); closeModal(); } catch (e) { $("#s-err", el).textContent = e.message; } };
+  $("#s-log", el).ontoggle = async e => {
+    if (!e.target.open) return;
+    try { const r = await api("/api/accessi"); $("#s-log-b", el).innerHTML = r.accessi.length ? r.accessi.map(x => `<div>${esc(x.t)} · ${esc(x.evento)} · <span class="muted">${esc(x.ip)}</span></div>`).join("") : "Nessun accesso registrato."; } catch (err) { $("#s-log-b", el).textContent = err.message; }
+  };
   $("#s-pw-save", el).onclick = () => savePw(false);
   const off = $("#s-pw-off", el); if (off) off.onclick = () => savePw(true);
   $("#s-save", el).onclick = async () => {
