@@ -47,6 +47,8 @@ Attenzione: "Esporta in Excel" scrive nella copia locale. Quelle righe vanno poi
 
 **Password.** Impostazioni > "Accesso da altre reti o da internet". Dal PC l'app si apre sempre senza password; da qualsiasi altro percorso (rete locale o tunnel) serve la password, altrimenti l'accesso è rifiutato. Da fuori non si possono cambiare le Impostazioni né aprire le cartelle del PC.
 
+**Verifica in due passaggi (consigliata da internet).** Impostazioni > "Verifica in due passaggi": dopo aver impostato la password, "Attiva…" mostra un codice QR da inquadrare con un'app di autenticazione (Google/Microsoft Authenticator o simili); si conferma con il primo codice a 6 cifre e l'app mostra 8 **codici di recupero** monouso, da conservare (non verranno più mostrati). Da quel momento, da fuori serve password **e** codice; dal PC non cambia nulla. Disattivandola o cambiando la password si chiudono tutte le sessioni già aperte.
+**Blocco dei tentativi.** Da 5 errori consecutivi (password o codice) l'accesso da fuori si chiude per 1 minuto, poi 5 minuti (10 errori), 30 minuti (15), 2 ore (20); non dipende dall'indirizzo di chi prova e si azzera con un accesso riuscito. Dal PC si entra comunque. La durata della sessione (predefinita 7 giorni) si regola in Impostazioni; "Ultimi accessi da fuori" mostra il registro (`accessi.log` accanto a `config.json`).
 **Rete locale.** Spunta "Consenti connessioni dalla rete locale", riavvia l'app e apri `http://IP-del-PC:8765` dall'altro dispositivo (Windows chiede di autorizzare l'app sulle reti private).
 
 **Internet (gratuito).** L'app resta su 127.0.0.1; un tunnel la pubblica con un indirizzo https:

@@ -17,7 +17,7 @@ import time
 from flask import Flask, jsonify, redirect, request, send_file, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from core import clienti, logic, metrics, referenze, referenze_cfg, referenze_xlsx, updater
+from core import accesso, clienti, logic, metrics, referenze, referenze_cfg, referenze_xlsx, updater
 from core.db import Store
 from core.reader import ATT_LABELS, DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
 from core.writer import NoExcelError, OpenpyxlWriter, WriteError, excel_available, get_writer
@@ -134,8 +134,22 @@ def on_error(e):
 # Dal PC stesso (127.0.0.1, senza intermediari) l'app si apre senza password. Qualunque altra richiesta (rete locale, tunnel internet)
 # richiede la password impostata dal PC; senza password l'accesso esterno è rifiutato.
 
-LOCAL_ONLY = {"set_config", "browse", "cliente_cartella", "set_password", "update_check", "update_apply", "referenze_carica"}       # operazioni sul PC che ospita l'app
-_fails = {}                                                                       # ip -> (tentativi, blocco fino a)
+LOCAL_ONLY = {"set_config", "browse", "cliente_cartella", "set_password", "update_check", "update_apply", "referenze_carica",
+              "totp_avvia", "totp_attiva", "totp_disattiva", "accessi_elenco"}       # operazioni sul PC che ospita l'app
+_blocco = accesso.Blocco()                                                        # errori consecutivi di accesso, da qualsiasi indirizzo
+SESSIONE_GIORNI = 7                                                               # durata predefinita di una sessione aperta da fuori
+ATTESA_CODICE = 300                                                               # secondi per inserire il codice dopo la password
+
+
+def accessi_log_path():
+    return os.path.join(os.path.dirname(CONFIG_PATH), "accessi.log")
+
+
+def _giorni_sessione(cfg):
+    try:
+        return min(90, max(1, int(cfg.get("sessione_giorni") or SESSIONE_GIORNI)))
+    except (TypeError, ValueError):
+        return SESSIONE_GIORNI
 
 
 def is_local():
@@ -159,9 +173,10 @@ app.secret_key = _secret_key()          # la sessione si apre PRIMA di before_re
 def guard():
     if request.path.startswith("/static/") or request.path == "/favicon.ico" or is_local():
         return None
-    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=dt.timedelta(days=30),
+    cfg = load_config()
+    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=dt.timedelta(days=_giorni_sessione(cfg)),
                       SESSION_COOKIE_SECURE=request.headers.get("X-Forwarded-Proto") == "https")
-    pw = load_config().get("password_hash")
+    pw = cfg.get("password_hash")
     if request.path == "/login":
         return None if pw else (_login_page("L'accesso da altre reti non è attivo: imposta prima una password dalle Impostazioni, sul PC dove gira l'app.", False), 403)
     if not pw:
@@ -175,29 +190,80 @@ def guard():
     return redirect("/login")
 
 
-def _login_page(msg="", form=True):
+def _login_page(msg="", form="pw"):
+    """form: "pw" (password), "codice" (secondo passaggio) o False (nessun modulo)."""
+    if form == "codice":
+        corpo = ('<form method="post" action="/login"><label for="c">Codice a 6 cifre dall\'app di autenticazione (o un codice di recupero)</label>'
+                 '<input id="c" name="codice" inputmode="numeric" autocomplete="one-time-code" autofocus><div class="foot"><button class="primary" type="submit">Conferma</button></div></form>'
+                 '<p class="hint"><a href="/logout">Ricomincia</a></p>')
+    elif form:
+        corpo = ('<form method="post" action="/login"><label for="p">Password</label><input id="p" name="password" type="password" autofocus autocomplete="current-password">'
+                 '<div class="foot"><button class="primary" type="submit">Entra</button></div></form>')
+    else:
+        corpo = ""
+    testo = msg or ("Secondo passaggio di verifica." if form == "codice" else "Inserisci la password.")
     return f"""<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Accesso — Gare e Offerte</title>
 <link rel="stylesheet" href="/static/app.css"></head><body style="display:grid;place-items:center;min-height:100vh;background:var(--bg)">
-<main class="card" style="width:min(380px,92vw)"><h2>Gare &amp; Offerte</h2><p class="muted">{msg or "Inserisci la password."}</p>
-{'<form method="post" action="/login"><label for="p">Password</label><input id="p" name="password" type="password" autofocus autocomplete="current-password"><div class="foot"><button class="primary" type="submit">Entra</button></div></form>' if form else ''}</main></body></html>"""
+<main class="card" style="width:min(380px,92vw)"><h2>Gare &amp; Offerte</h2><p class="muted">{testo}</p>{corpo}</main></body></html>"""
+
+
+def _in_attesa_codice():
+    t = session.get("pw_ok")
+    return bool(t) and 0 <= time.time() - t <= ATTESA_CODICE
+
+
+def _apri_sessione():
+    session.clear()
+    session.permanent = True
+    session["ok"] = True
+    return redirect("/")
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
-    n, until = _fails.get(ip, (0, 0))
+    cfg = load_config()
+    ip = accesso.ip_cliente(request.headers, request.remote_addr)
+    log = accessi_log_path()
+    totp = bool(cfg.get("totp_secret"))
     if request.method == "GET":
-        return _login_page()
-    if until > time.time():
-        return _login_page(f"Troppi tentativi. Riprova tra {int(until - time.time()) + 1} secondi."), 429
-    h = load_config().get("password_hash")
+        return _login_page(form="codice" if totp and _in_attesa_codice() else "pw")
+    resto = _blocco.secondi_residui()
+    if resto:
+        accesso.registra(log, "tentativo durante il blocco", ip)
+        return _login_page(f"Troppi tentativi. Riprova tra {resto} secondi.", False), 429
+    h = cfg.get("password_hash")
+    if "codice" in request.form:                          # secondo passaggio
+        if not (totp and _in_attesa_codice()):
+            session.clear()
+            return _login_page("Sessione di accesso scaduta: ricomincia.", "pw"), 401
+        codice = request.form.get("codice", "")
+        passo = accesso.verifica_totp(cfg["totp_secret"], codice, ultimo=int(cfg.get("totp_ultimo", 0)))
+        recupero = False
+        if passo is None:
+            recupero, resta = accesso.usa_codice_recupero(cfg.get("totp_recupero", []), codice)
+        if passo is not None or recupero:
+            if passo is not None:
+                cfg["totp_ultimo"] = passo
+            else:
+                cfg["totp_recupero"] = resta
+            save_config(cfg)
+            _blocco.riuscito()
+            accesso.registra(log, "accesso con codice di recupero" if recupero else "accesso", ip)
+            return _apri_sessione()
+        _blocco.errore()
+        accesso.registra(log, "codice errato", ip)
+        time.sleep(1)
+        return _login_page("Codice errato.", "codice"), 401
     if h and check_password_hash(h, request.form.get("password", "")):
-        _fails.pop(ip, None)
-        session.permanent = True
-        session["ok"] = True
-        return redirect("/")
-    n += 1
-    _fails[ip] = (n, time.time() + 60 if n >= 5 else 0)
+        if totp:
+            session.clear()
+            session["pw_ok"] = time.time()                 # password giusta, manca il codice: la sessione non è ancora valida
+            return _login_page(form="codice")
+        _blocco.riuscito()
+        accesso.registra(log, "accesso", ip)
+        return _apri_sessione()
+    _blocco.errore()
+    accesso.registra(log, "password errata", ip)
     time.sleep(1)
     return _login_page("Password errata."), 401
 
@@ -225,8 +291,66 @@ def set_password():
         app.secret_key = cfg["secret_key"]
     if "listen_all" in b:
         cfg["listen_all"] = bool(b["listen_all"])
+    if "sessione_giorni" in b:
+        g = int(b["sessione_giorni"])
+        if not 1 <= g <= 90:
+            raise ValueError("La sessione può durare da 1 a 90 giorni")
+        cfg["sessione_giorni"] = g
     save_config(cfg)
     return jsonify({"ok": True})
+
+
+def _chiudi_sessioni(cfg):
+    cfg["secret_key"] = secrets.token_hex(32)
+    app.secret_key = cfg["secret_key"]
+
+
+@app.post("/api/2fa/avvia")
+def totp_avvia():
+    """Prepara l'attivazione: chiave e QR da inserire nell'app di autenticazione. Solo dal PC locale; richiede la password già impostata."""
+    cfg = load_config()
+    if not cfg.get("password_hash"):
+        raise ValueError("Imposta prima la password: il secondo passaggio si aggiunge alla password")
+    segreto = accesso.nuovo_segreto()
+    cfg["totp_in_attivazione"] = segreto
+    save_config(cfg)
+    uri = accesso.uri_otpauth(segreto)
+    return jsonify({"segreto": segreto, "uri": uri, "qr": accesso.qr_svg(uri)})
+
+
+@app.post("/api/2fa/attiva")
+def totp_attiva():
+    """Conferma con un codice dell'app di autenticazione: da quel momento il codice è richiesto a ogni accesso da fuori. Restituisce i codici di recupero (una volta sola)."""
+    cfg = load_config()
+    segreto = cfg.get("totp_in_attivazione")
+    if not segreto:
+        raise ValueError("Avvia prima l'attivazione")
+    passo = accesso.verifica_totp(segreto, (request.get_json(silent=True) or {}).get("codice", ""))
+    if passo is None:
+        raise ValueError("Codice non valido: controlla l'ora del telefono e riprova")
+    codici = accesso.nuovi_codici_recupero()
+    cfg.pop("totp_in_attivazione", None)
+    cfg.update(totp_secret=segreto, totp_ultimo=passo, totp_recupero=accesso.hash_codici(codici))
+    _chiudi_sessioni(cfg)
+    save_config(cfg)
+    accesso.registra(accessi_log_path(), "verifica in due passaggi attivata", "PC locale")
+    return jsonify({"ok": True, "codici_recupero": codici})
+
+
+@app.post("/api/2fa/disattiva")
+def totp_disattiva():
+    cfg = load_config()
+    for k in ("totp_secret", "totp_ultimo", "totp_recupero", "totp_in_attivazione"):
+        cfg.pop(k, None)
+    _chiudi_sessioni(cfg)
+    save_config(cfg)
+    accesso.registra(accessi_log_path(), "verifica in due passaggi disattivata", "PC locale")
+    return jsonify({"ok": True})
+
+
+@app.get("/api/accessi")
+def accessi_elenco():
+    return jsonify({"accessi": accesso.ultimi(accessi_log_path(), 30)})
 
 
 # ------------------------------------------------------------------ referenze (database separato: referenze.db)
@@ -439,7 +563,7 @@ def state():
             auto, newer = True, False
         except Exception:                              # file in copia o bloccato: riprova alla prossima richiesta
             pass
-    return jsonify({"local": is_local(), "password_set": bool(cfg.get("password_hash")), "listen_all": bool(cfg.get("listen_all")),
+    return jsonify({"local": is_local(), "password_set": bool(cfg.get("password_hash")), "totp_on": bool(cfg.get("totp_secret")), "recuperi_rimasti": len(cfg.get("totp_recupero", [])), "sessione_giorni": _giorni_sessione(cfg), "listen_all": bool(cfg.get("listen_all")),
                     "excel_newer": newer, "auto_imported": auto, "version": updater.current_version(BASE_DIR), "update_token_set": bool(cfg.get("github_token")), "excel_com": excel_available() and cfg.get("writer", "auto") != "openpyxl",
                     "github_repo": cfg.get("github_repo") or updater.DEFAULT_REPO, "referenze_json": referenze_json_path(), "can_update": FROZEN and os.name == "nt","path": cfg.get("excel_path") or DEFAULT_EXCEL_PATH, "excel_ok": bool(excel_path()), "db_path": st.path,
                     "exists": bool(excel_path()) or st.has_data(), "imported": st.has_data(), "imported_at": st.meta("imported_at"),
