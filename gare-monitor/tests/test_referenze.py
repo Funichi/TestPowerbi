@@ -423,8 +423,35 @@ def test_interfaccia_referenze_pezzi_collegati():
     html = open(os.path.join(base, "index.html"), encoding="utf-8").read()
     assert 'id="rf-actions"' in html
     icone = open(os.path.join(base, "icons.js"), encoding="utf-8").read()
-    for n in ("ellipsis", "list", "rows-3", "building-2", "search", "pencil", "copy", "presentation", "plus", "download", "x", "file-spreadsheet"):
+    for n in ("ellipsis", "list", "rows-3", "building-2", "search", "pencil", "copy", "presentation", "plus", "download", "x", "file-spreadsheet", "star", "arrow-left", "arrow-right", "chevron-down", "chevron-right"):
         assert f'"{n}":' in icone, n
     if shutil.which("node"):
         for f in ("referenze.js", "referenze_dati.js", "app.js", "icons.js"):
             subprocess.run(["node", "--check", os.path.join(base, f)], check=True, capture_output=True)
+
+
+def test_scalette_del_meeting(rc):
+    c, tmp = rc
+    ids = [r["id"] for r in c.get("/api/referenze").get_json()["referenze"]]
+    assert len(ids) >= 3 and c.get("/api/referenze/scalette").get_json() == {"scalette": []}      # database già esistente: le tabelle si creano da sole
+    a = c.post("/api/referenze/scalette", json={"nome": "  Meeting   Terna ", "ids": [ids[2], ids[0], ids[2], "REF-NON-ESISTE"]}).get_json()
+    assert a["nome"] == "Meeting Terna" and a["ids"] == [ids[2], ids[0]]                           # ordine mantenuto, doppioni e ID sconosciuti scartati
+    assert c.post("/api/referenze/scalette", json={"nome": "meeting terna"}).status_code == 400    # nome già usato (senza badare alle maiuscole)
+    assert c.post("/api/referenze/scalette", json={"nome": "  "}).status_code == 400
+    b = c.post("/api/referenze/scalette", json={"nome": "Altra"}).get_json()
+    # riordino e rinomina
+    x = c.put(f"/api/referenze/scalette/{a['id']}", json={"ids": [ids[0], ids[1], ids[2]], "nome": "Terna 28/10"}).get_json()
+    assert x["ids"] == [ids[0], ids[1], ids[2]] and x["nome"] == "Terna 28/10"
+    assert c.put(f"/api/referenze/scalette/{b['id']}", json={"nome": "terna 28/10"}).status_code == 400
+    assert c.put("/api/referenze/scalette/9999", json={"ids": []}).status_code == 400
+    assert [s["nome"] for s in c.get("/api/referenze/scalette").get_json()["scalette"]][0] == "Terna 28/10"      # l'ultima modificata per prima
+    # archiviata: sparisce dalla scaletta; eliminata: sparisce per sempre; le altre referenze non cambiano
+    c.post(f"/api/referenze/{ids[1]}/archivia", json={"archiviata": True})
+    assert c.get("/api/referenze/scalette").get_json()["scalette"][0]["ids"] == [ids[0], ids[2]]
+    c.delete(f"/api/referenze/{ids[0]}")
+    assert c.get("/api/referenze/scalette").get_json()["scalette"][0]["ids"] == [ids[2]]
+    assert c.put(f"/api/referenze/scalette/{a['id']}", json={"ids": [ids[2]] * 3}).get_json()["ids"] == [ids[2]]
+    assert c.put(f"/api/referenze/scalette/{a['id']}", json={"ids": ["R%d" % i for i in range(101)]}).status_code == 400
+    assert c.delete(f"/api/referenze/scalette/{b['id']}").status_code == 200
+    assert [s["id"] for s in c.get("/api/referenze/scalette").get_json()["scalette"]] == [a["id"]]
+    assert len(c.get("/api/referenze").get_json()["referenze"]) == len(ids) - 2                    # solo una eliminata e una archiviata: nient'altro toccato

@@ -427,6 +427,29 @@ def referenze_elimina(rid):
     return jsonify({"ok": True})
 
 
+@app.get("/api/referenze/scalette")
+def scalette_elenco():
+    return jsonify({"scalette": _ref_ok().scalette()})
+
+
+@app.post("/api/referenze/scalette")
+def scalette_crea():
+    b = request.get_json(silent=True) or {}
+    return jsonify(_ref_ok().crea_scaletta(b.get("nome"), b.get("ids") or []))
+
+
+@app.put("/api/referenze/scalette/<int:sid>")
+def scalette_aggiorna(sid):
+    b = request.get_json(silent=True) or {}
+    return jsonify(_ref_ok().aggiorna_scaletta(sid, b.get("nome"), b.get("ids")))
+
+
+@app.delete("/api/referenze/scalette/<int:sid>")
+def scalette_elimina(sid):
+    _ref_ok().elimina_scaletta(sid)
+    return jsonify({"ok": True})
+
+
 @app.get("/api/referenze/<rid>/storico")
 def referenze_storico(rid):
     return jsonify(_ref_ok().storico(rid))
