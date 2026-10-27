@@ -81,6 +81,7 @@
   const salvata = (k, def) => { try { return localStorage.getItem(k) || def; } catch (e) { return def; } };
 
   const ST = {cfg: null, SIN: null, dati: [], tab: "cerca", vista: salvata("rf_vista", "cards"), mostraArch: false, root: null, sel: null, io: null, pres: null,
+    scalette: [], attiva: salvata("rf_scaletta", ""), barraAperta: salvata("rf_barra", "1") !== "0",
     f: {q: "", cliente: "", ambito: "", tipologia: "", mercato: ""}};
 
   async function caricaDati() {
@@ -102,13 +103,15 @@
       + (r.da_verificare ? `<span class="rf-badge warn" title="${E(r.note || "Da verificare")}">Da verificare</span>` : "")
       + (r.origine && r.origine !== "Excel master" ? `<span class="rf-badge new" title="Non proviene dall'Excel master">Nuova</span>` : "");
   }
+  const inScaletta = rid => { const s = scalAttiva(); return !!s && s.ids.includes(rid); };
+  const stellaHtml = rid => `<button class="rf-ib rf-star ${inScaletta(rid) ? "on" : ""}" data-star="${E(rid)}" aria-pressed="${inScaletta(rid)}" title="${inScaletta(rid) ? "Togli dalla scaletta" : "Aggiungi alla scaletta"}" aria-label="Scaletta del meeting">${icona("star")}</button>`;
   function schedaHtml(r, aperta) {
     const tec = (r.tecnologie || []), tech = tec.slice(0, 6).join(" · ") + (tec.length > 6 ? ` · +${tec.length - 6}` : "");
     const referenti = [r.referente_aidata, r.referente_progetto].filter(Boolean), nome = nomeCliente(r.cliente);
     return `<article class="rf-card ${r.archiviata ? "arch" : ""}" data-id="${E(r.id)}">
       <div class="rf-meta"><div class="rf-who"><a href="#" class="rf-cliname" data-cli="${E(nome)}" title="Tutte le referenze di ${E(nome)}">${E(nome)}</a>
         <span class="rf-dot">·</span>${E(r.mercato)}${r.anno ? `<span class="rf-dot">·</span>${E(r.anno)}` : ""}<span class="rf-dot">·</span><span>${E(r.id)}</span></div>
-        <div class="rf-right">${badgesHtml(r)}<button class="rf-ib" data-copia="${E(r.id)}" title="Copia testo" aria-label="Copia testo">${icona("copy")}</button><button class="rf-ib" data-edit="${E(r.id)}" title="Modifica" aria-label="Modifica">${icona("pencil")}</button></div></div>
+        <div class="rf-right">${badgesHtml(r)}${stellaHtml(r.id)}<button class="rf-ib" data-copia="${E(r.id)}" title="Copia testo" aria-label="Copia testo">${icona("copy")}</button><button class="rf-ib" data-edit="${E(r.id)}" title="Modifica" aria-label="Modifica">${icona("pencil")}</button></div></div>
       <h3 class="rf-tit">${E(r.titolo)}</h3>
       ${ST.tab === "ver" && r.da_verificare ? `<div class="rf-motivo"><b>Da verificare:</b> ${E(r.note || "motivo non indicato")}</div>` : ""}
       <div class="rf-pitch"><span class="rf-lblp">In 30 secondi</span>${E(r.pitch)}</div>
@@ -138,7 +141,10 @@
     qs("#rf-arch", box).onchange = async e => { ST.mostraArch = e.target.checked; await caricaDati(); aggiorna(); };
     if (!ST.chiusuraMenu) {
       ST.chiusuraMenu = true;
-      document.addEventListener("click", e => { const mn = document.getElementById("rf-menu"); if (mn && !mn.hidden && !e.target.closest("#rf-actions")) mn.hidden = true; });
+      document.addEventListener("click", e => {
+        const mn = document.getElementById("rf-menu"); if (mn && !mn.hidden && !e.target.closest("#rf-actions")) mn.hidden = true;
+        const ms = document.getElementById("rf-scal-menu"); if (ms && !ms.hidden && !e.target.closest("#rf-scal-more")) ms.hidden = true;
+      });
     }
   }
   // importazione da Excel / JSON: modulo separato, caricato solo al primo clic su "Importa…"
@@ -152,7 +158,7 @@
       document.head.appendChild(sc);
     });
   }
-  const ctxDati = () => ({api, toast, ricarica: async () => { await caricaDati(); monta(ST.root); }});
+  const ctxDati = () => ({api, toast, ricarica: async () => { await caricaDati(); await caricaScalette(); monta(ST.root); }});
 
   async function copiaTesto(r) {
     const t = testoPerCopia(r);
@@ -173,14 +179,114 @@
     });
   }
 
+
+  // ---------------------------------------------------------------- scalette del meeting: liste con nome di referenze, sempre a portata di mano nella barra in basso
+  const scalAttiva = () => ST.scalette.find(x => String(x.id) === String(ST.attiva)) || null;
+  const refScaletta = () => { const x = scalAttiva(); return x ? x.ids.map(id => ST.dati.find(r => r.id === id)).filter(Boolean) : []; };
+  const imposta = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  async function caricaScalette() {
+    try { ST.scalette = (await api("/api/referenze/scalette")).scalette; } catch (e) { ST.scalette = []; }
+    if (!scalAttiva()) { ST.attiva = ST.scalette.length ? String(ST.scalette[0].id) : ""; imposta("rf_scaletta", ST.attiva); }
+  }
+  const sostituisci = n => { const i = ST.scalette.findIndex(x => x.id === n.id); i < 0 ? ST.scalette.unshift(n) : ST.scalette.splice(i, 1, n); };
+  async function salvaScaletta(cambi) {
+    const x = scalAttiva(); if (!x) return;
+    const prima = {...x};
+    Object.assign(x, cambi.ids ? {ids: cambi.ids} : {}, cambi.nome ? {nome: cambi.nome} : {});             // subito a schermo, poi conferma dal server
+    disegnaBarra(); aggiornaStelle();
+    try { sostituisci(await api(`/api/referenze/scalette/${x.id}`, {method: "PUT", body: cambi})); }
+    catch (e) { Object.assign(x, prima); toast(e.message, true); }
+    disegnaBarra(); aggiornaStelle();
+  }
+  async function creaScaletta(nome, ids = []) {
+    const n = await api("/api/referenze/scalette", {method: "POST", body: {nome, ids}});
+    sostituisci(n); ST.attiva = String(n.id); imposta("rf_scaletta", ST.attiva); return n;
+  }
+  async function aggiungiTogli(rid) {
+    try {
+      if (!scalAttiva()) {                                    // prima stella senza scaletta: ne nasce una con la data di oggi (si rinomina dal menu ⋯)
+        const base = "Scaletta del " + new Date().toLocaleDateString("it-IT"), usati = new Set(ST.scalette.map(x => x.nome.toLowerCase()));
+        let nome = base, k = 1; while (usati.has(nome.toLowerCase())) nome = `${base} (${++k})`;
+        await creaScaletta(nome, [rid]); ST.barraAperta = true; imposta("rf_barra", "1"); toast(`Creata “${nome}”: ci trovi la referenza`); disegnaBarra(); aggiornaStelle(); return;
+      }
+      const x = scalAttiva(), ids = x.ids.includes(rid) ? x.ids.filter(i => i !== rid) : [...x.ids, rid];
+      if (!x.ids.includes(rid)) { ST.barraAperta = true; imposta("rf_barra", "1"); }
+      await salvaScaletta({ids});
+    } catch (e) { toast(e.message, true); }
+  }
+  function bindStelle(box) { box.querySelectorAll("[data-star]").forEach(b => b.onclick = () => aggiungiTogli(b.dataset.star)); }
+  function aggiornaStelle() {
+    document.querySelectorAll("[data-star]").forEach(b => { const on = inScaletta(b.dataset.star); b.classList.toggle("on", on); b.setAttribute("aria-pressed", on);
+      b.title = on ? "Togli dalla scaletta" : "Aggiungi alla scaletta"; });
+  }
+  const testoScaletta = () => refScaletta().map((r, i) => `${i + 1}. ${testoPerCopia(r)}`).join("\n" + "—".repeat(24) + "\n\n");
+  function disegnaBarra() {
+    const m = ST.root; if (!m) return;
+    let el = document.getElementById("rf-scal");
+    if (!el) { el = document.createElement("div"); el.id = "rf-scal"; el.className = "rf-scal"; document.body.appendChild(el); }
+    const x = scalAttiva(), rs = refScaletta(), n = rs.length, ap = ST.barraAperta;
+    const chips = rs.map((r, i) => `<div class="rf-sc" data-i="${i}" draggable="true"><button class="rf-sc-n" data-open="${i}" title="Apri a schermo intero">${i + 1}</button>
+      <button class="rf-sc-t" data-open="${i}" title="${E(nomeCliente(r.cliente) + " — " + r.titolo)}"><b>${E(nomeCliente(r.cliente))}</b> ${E(r.titolo)}</button>
+      <span class="rf-sc-c"><button data-mv="${i},-1" aria-label="Sposta prima" ${i ? "" : "disabled"}>${icona("arrow-left")}</button><button data-mv="${i},1" aria-label="Sposta dopo" ${i < n - 1 ? "" : "disabled"}>${icona("arrow-right")}</button><button data-rm="${i}" aria-label="Togli dalla scaletta">${icona("x")}</button></span></div>`).join("");
+    el.classList.toggle("chiusa", !ap);
+    el.innerHTML = `<div class="rf-scal-h"><button class="rf-scal-t" id="rf-scal-tgl" aria-expanded="${ap}" title="${ap ? "Riduci" : "Mostra"} la scaletta">${icona("star")}Scaletta${icona(ap ? "chevron-down" : "chevron-right")}</button>
+      <div class="rf-sel rf-scal-sel"><select id="rf-scal-sel" aria-label="Scaletta">${ST.scalette.length ? "" : `<option value="">Nessuna scaletta</option>`}${ST.scalette.map(s => `<option value="${s.id}" ${x && s.id === x.id ? "selected" : ""}>${E(s.nome)} (${s.ids.length})</option>`).join("")}<option value="__nuova">＋ Nuova scaletta…</option></select></div>
+      <span class="rf-scal-cnt">${n} ${n === 1 ? "referenza" : "referenze"}</span><span class="rf-spacer"></span>
+      <button class="rf-btn" id="rf-scal-copia" ${n ? "" : "disabled"} title="Copia il testo di tutte le referenze della scaletta">${icona("copy")}<span class="lab">Copia testo</span></button>
+      <button class="primary" id="rf-scal-pres" ${n ? "" : "disabled"} title="Apri la scaletta a schermo intero">${icona("presentation")}<span class="lab">Presenta</span></button>
+      <button class="rf-btn rf-ico" id="rf-scal-more" aria-label="Altre azioni sulla scaletta" aria-haspopup="true" ${x ? "" : "disabled"}>${icona("ellipsis")}</button>
+      <div class="rf-menu rf-scal-menu" id="rf-scal-menu" hidden><button id="rf-sc-ren">Rinomina…</button><button id="rf-sc-vuota" ${n ? "" : "disabled"}>Svuota la scaletta</button><hr><button id="rf-sc-del" class="danger">Elimina la scaletta…</button></div></div>
+      ${ap ? `<div class="rf-scal-b">${n ? chips : `<span class="rf-scal-vuota">${x ? "La scaletta è vuota: premi la ★ su una referenza per aggiungerla." : "Premi la ★ su una referenza per creare la tua prima scaletta, oppure usa “Nuova scaletta”."}</span>`}</div>` : ""}`;
+    document.documentElement.style.setProperty("--rf-barra-h", el.offsetHeight + "px");
+    const $s = s => qs(s, el);
+    $s("#rf-scal-tgl").onclick = () => { ST.barraAperta = !ST.barraAperta; imposta("rf_barra", ST.barraAperta ? "1" : "0"); disegnaBarra(); };
+    $s("#rf-scal-sel").onchange = async e => {
+      if (e.target.value !== "__nuova") { ST.attiva = e.target.value; imposta("rf_scaletta", ST.attiva); disegnaBarra(); aggiornaStelle(); return; }
+      const nome = prompt("Nome della nuova scaletta (es. Meeting Terna 28/10):");
+      if (nome && nome.trim()) { try { await creaScaletta(nome.trim()); } catch (err) { toast(err.message, true); } }
+      disegnaBarra(); aggiornaStelle();
+    };
+    $s("#rf-scal-copia").onclick = async () => {
+      const t = testoScaletta();
+      try { await navigator.clipboard.writeText(t); } catch (e) { const ta = document.createElement("textarea"); ta.value = t; ta.style.cssText = "position:fixed;opacity:0"; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } finally { ta.remove(); } }
+      toast(`Copiate ${n} referenze della scaletta`);
+    };
+    $s("#rf-scal-pres").onclick = () => apriPresentazione({scaletta: true, i: 0});
+    const menu = $s("#rf-scal-menu");
+    $s("#rf-scal-more").onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; };
+    el.onclick = e => { if (e.target.closest("#rf-scal-menu button")) menu.hidden = true; };
+    $s("#rf-sc-ren").onclick = async () => { const nome = prompt("Nuovo nome della scaletta:", x.nome); if (nome && nome.trim() && nome.trim() !== x.nome) await salvaScaletta({nome: nome.trim()}); };
+    $s("#rf-sc-vuota").onclick = async () => { if (confirm(`Togliere tutte le referenze da “${x.nome}”? La scaletta resta, vuota.`)) await salvaScaletta({ids: []}); };
+    $s("#rf-sc-del").onclick = async () => {
+      if (!confirm(`Eliminare la scaletta “${x.nome}”? Le referenze non vengono toccate.`)) return;
+      try { await api(`/api/referenze/scalette/${x.id}`, {method: "DELETE"}); ST.scalette = ST.scalette.filter(s => s.id !== x.id); await caricaScalette(); toast("Scaletta eliminata"); } catch (err) { toast(err.message, true); }
+      disegnaBarra(); aggiornaStelle();
+    };
+    el.querySelectorAll("[data-open]").forEach(b => b.onclick = () => apriPresentazione({scaletta: true, i: +b.dataset.open}));
+    const sposta = (i, j) => { const ids = [...x.ids].filter(id => ST.dati.some(r => r.id === id)); if (j < 0 || j >= ids.length || i === j) return; ids.splice(j, 0, ids.splice(i, 1)[0]); salvaScaletta({ids}); };
+    el.querySelectorAll("[data-mv]").forEach(b => b.onclick = () => { const [i, d] = b.dataset.mv.split(",").map(Number); sposta(i, i + d); });
+    el.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { const r = rs[+b.dataset.rm]; if (r) salvaScaletta({ids: x.ids.filter(id => id !== r.id)}); });
+    let da = null;                                           // trascinamento con il mouse (sul telefono si usano le frecce)
+    el.querySelectorAll(".rf-sc").forEach(c => {
+      c.ondragstart = e => { da = +c.dataset.i; e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", String(da)); } catch (err) {} c.classList.add("trascinata"); };
+      c.ondragend = () => { c.classList.remove("trascinata"); el.querySelectorAll(".sopra").forEach(k => k.classList.remove("sopra")); };
+      c.ondragover = e => { if (da !== null) { e.preventDefault(); c.classList.add("sopra"); } };
+      c.ondragleave = () => c.classList.remove("sopra");
+      c.ondrop = e => { e.preventDefault(); const a = da; da = null; if (a !== null) sposta(a, +c.dataset.i); };
+    });
+  }
+  function rimuoviBarra() { const el = document.getElementById("rf-scal"); if (el) el.remove(); document.documentElement.style.removeProperty("--rf-barra-h"); }
+
   // ---------------------------------------------------------------- modalità presentazione: schermo intero sopra l'app, solo testi del racconto
-  function apriPresentazione() {
+  function apriPresentazione(opz = {}) {
+    if (opz.scaletta && !refScaletta().length) { toast("La scaletta è vuota", true); return; }
     esciPresentazione();
     const el = document.createElement("div"); el.id = "rf-presov"; el.className = "rf-presov"; el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true");
-    el.innerHTML = `<div class="rf-pbar"><div class="rf-field">${icona("search")}<input id="rf-pq" placeholder="Cosa vi interessa? es. forecast, chatbot…" autocomplete="off" value="${E(ST.f.q)}"></div>
+    el.innerHTML = `<div class="rf-pbar"><div class="rf-field">${icona("search")}<input id="rf-pq" placeholder="Cosa vi interessa? es. forecast, chatbot…" autocomplete="off" value="${opz.scaletta ? "" : E(ST.f.q)}"></div>
       <button class="rf-btn" id="rf-pclose">Esci <kbd>Esc</kbd></button></div><div class="rf-pbody" id="rf-pbody"></div>`;
     document.body.appendChild(el);
-    ST.pres = {el, lista: [], i: -1};
+    ST.pres = {el, lista: [], i: -1, sorg: ""};
+    if (opz.scaletta) { ST.pres.lista = refScaletta(); ST.pres.i = Math.min(opz.i || 0, ST.pres.lista.length - 1); ST.pres.sorg = "scaletta"; }
     qs("#rf-pclose", el).onclick = esciPresentazione;
     qs("#rf-pq", el).oninput = () => { ST.pres.i = -1; disegnaPresentazione(); };
     if (!ST.tastiPres) {
@@ -195,24 +301,28 @@
       });
     }
     disegnaPresentazione();
-    setTimeout(() => { const i = qs("#rf-pq", el); if (i) i.focus(); }, 50);
+    setTimeout(() => { const i = qs("#rf-pq", el); if (i && ST.pres && ST.pres.i < 0) i.focus(); }, 50);       // se si parte da una referenza, le frecce devono funzionare subito
   }
   function esciPresentazione() { if (ST.pres) { ST.pres.el.remove(); ST.pres = null; } }
   function disegnaPresentazione() {
     const P = ST.pres, b = qs("#rf-pbody", P.el);
     if (P.i < 0) {
-      const q = qs("#rf-pq", P.el).value, vive = ST.dati.filter(viva);
+      const q = qs("#rf-pq", P.el).value, vive = ST.dati.filter(viva), sc = refScaletta();
       const ris = cerca(vive, {q, cliente: "", ambito: "", tipologia: "", mercato: ""}, ST.SIN);
-      P.lista = q.trim() ? ris.slice(0, 24) : ris.filter(r => r.materiale === "ricco").slice(0, 24);
-      b.innerHTML = `<div class="rf-pinfo">${q.trim() ? `${ris.length} ${ris.length === 1 ? "referenza" : "referenze"} · mostrate le più pertinenti` : "Scrivi un argomento, oppure scegli una referenza"}</div>
-        <div class="rf-pgrid">${P.lista.map((r, i) => `<button class="rf-ptile" data-pi="${i}"><div class="c">${E(nomeCliente(r.cliente))} · ${E(r.mercato)}</div><div class="t">${E(r.titolo)}</div></button>`).join("")}</div>`;
+      let info;
+      if (q.trim()) { P.lista = ris.slice(0, 24); P.sorg = "ricerca"; info = `${ris.length} ${ris.length === 1 ? "referenza" : "referenze"} · mostrate le più pertinenti`; }
+      else if (sc.length) { P.lista = sc; P.sorg = "scaletta"; info = `La tua scaletta · <b>${E(scalAttiva().nome)}</b> · ${sc.length} ${sc.length === 1 ? "referenza" : "referenze"} · oppure scrivi un argomento per cercarne altre`; }
+      else { P.lista = ris.filter(r => r.materiale === "ricco").slice(0, 24); P.sorg = "pronte"; info = "Scrivi un argomento, oppure scegli una referenza"; }
+      b.innerHTML = `<div class="rf-pinfo">${info}</div>
+        <div class="rf-pgrid">${P.lista.map((r, i) => `<button class="rf-ptile" data-pi="${i}"><div class="c">${P.sorg === "scaletta" ? `<span class="rf-pn">${i + 1}</span>` : ""}${E(nomeCliente(r.cliente))} · ${E(r.mercato)}</div><div class="t">${E(r.titolo)}</div></button>`).join("")}</div>`;
       b.querySelectorAll("[data-pi]").forEach(x => x.onclick = () => { P.i = +x.dataset.pi; disegnaPresentazione(); });
       return;
     }
     const r = P.lista[P.i];
+    if (document.activeElement && document.activeElement.id === "rf-pq") document.activeElement.blur();
     b.innerHTML = `<div class="rf-pview"><div class="c"><b>${E(nomeCliente(r.cliente))}</b> · ${E(r.mercato)}${r.anno ? " · " + E(r.anno) : ""}</div><h2>${E(r.titolo)}</h2>
       <div class="rf-pitch">${E(r.pitch)}</div><div class="rf-ext">${estesoHtml(r, true)}</div>
-      <div class="rf-pnav"><button class="rf-btn" id="rf-pback">← Tutti i risultati</button><span><kbd>←</kbd> <kbd>→</kbd> ${P.i + 1} di ${P.lista.length}</span></div></div>`;
+      <div class="rf-pnav"><button class="rf-btn" id="rf-pback">${P.sorg === "scaletta" ? "← La scaletta" : "← Tutti i risultati"}</button><span><kbd>←</kbd> <kbd>→</kbd> ${P.sorg === "scaletta" ? "Scaletta · " : ""}${P.i + 1} di ${P.lista.length}</span></div></div>`;
     qs("#rf-pback", b).onclick = () => { P.i = -1; disegnaPresentazione(); };
     b.scrollTop = 0;
   }
@@ -281,7 +391,7 @@
     });
     out.querySelectorAll("[data-try]").forEach(b => b.onclick = () => { azzera(); ST.f.q = b.dataset.try; qs("#rf-q").value = b.dataset.try; aggiorna(); });
     out.querySelectorAll("[data-sel]").forEach(b => b.onclick = () => { ST.sel = b.dataset.sel; disegnaRisultati(); });
-    bindModifica(m, out); bindCopia(m, out);
+    bindModifica(m, out); bindCopia(m, out); bindStelle(out);
   }
   function aggiorna() {
     const m = ST.root; if (!m || !qs("#rf-out", m)) return;
@@ -308,7 +418,7 @@
           <div class="rf-segv" id="rf-view" role="group" aria-label="Vista"><button data-v="cards">${icona("rows-3")}Schede</button><button data-v="list">${icona("list")}Elenco</button></div></div>
         <div class="rf-chipsrow" id="rf-chips" hidden></div></div>
       <div id="rf-out"></div></div>`;
-    disegnaTestata();
+    disegnaTestata(); disegnaBarra();
     m.querySelectorAll(".rf-navtab").forEach(b => b.onclick = () => { ST.tab = b.dataset.tab; ST.sel = null; aggiorna(); });
     qs("#rf-q", m).oninput = e => { ST.f.q = e.target.value; aggiorna(); };
     qs("#rf-cl", m).oninput = e => { ST.f.cliente = e.target.value; ST.f.ids = null; aggiorna(); };
@@ -459,7 +569,7 @@
     const esc = e => { if (e.key === "Escape") chiudi(false); };
     document.addEventListener("keydown", esc);
     $e("#rf-x").onclick = $e("#rf-ann").onclick = () => chiudi(false);
-    const ricarica = async msg => { await caricaDati(); chiudi(true); toast(msg); monta(m); };
+    const ricarica = async msg => { await caricaDati(); await caricaScalette(); chiudi(true); toast(msg); monta(m); };
     const errore = e => { $e("#rf-err").textContent = e.message; $e("#rf-err").scrollIntoView({block: "nearest"}); };
     $e("#rf-salva").onclick = async () => {
       $e("#rf-err").textContent = "";
@@ -490,6 +600,7 @@
   // ---------------------------------------------------------------- schermata del primo caricamento
   function schermataVuota(m, info) {
     const ta = document.getElementById("rf-actions"); if (ta) ta.innerHTML = "";
+    rimuoviBarra();
     m.innerHTML = `<div class="rf-wrap"><div class="rf-empty-card"><h2>Archivio delle referenze non ancora caricato</h2>
       <p>Il primo caricamento legge un file <b>referenze.json</b> e crea il database delle referenze (separato da quello delle offerte). Si fa una volta sola: da quel momento il database è l'unica fonte.</p>
       <p class="rf-muted">File atteso: <code>${E(info.percorso_json)}</code> ${info.file_esiste ? "" : "— <b>non trovato</b>"}</p>
@@ -514,11 +625,12 @@
       if (S.view !== "referenze") return;
       if (d.stato !== "ok") { schermataVuota(m, d); return; }
       ST.SIN = indicizzaSinonimi(ST.cfg.sinonimi);
+      await caricaScalette();
       monta(m);
     },
     // chiamata dall'esterno (scheda Cliente): apre la ricerca già filtrata per cliente
     filtraPerCliente(nome, ids) { ST.tab = "cerca"; ST.f = {q: "", cliente: nome || "", ambito: "", tipologia: "", mercato: "", ids: ids && ids.length ? new Set(ids) : null}; },
   };
-  R.esci = () => { esciPresentazione(); const mn = document.getElementById("rf-menu"); if (mn) mn.hidden = true; };      // chiamata da app.js quando si lascia la vista
+  R.esci = () => { esciPresentazione(); rimuoviBarra(); const mn = document.getElementById("rf-menu"); if (mn) mn.hidden = true; };      // chiamata da app.js quando si lascia la vista
   window.Referenze = R;
 })();

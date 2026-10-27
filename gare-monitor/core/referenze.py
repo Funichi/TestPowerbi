@@ -47,6 +47,10 @@ def _esteso(v):
     return out
 
 
+def _ora_precisa():
+    return dt.datetime.now().isoformat(timespec="microseconds")      # per ordinare le scalette anche quando cambiano nello stesso secondo
+
+
 def _ora():
     return dt.datetime.now().isoformat(timespec="seconds")
 
@@ -80,6 +84,11 @@ CREATE TABLE IF NOT EXISTS referenze_log (n INTEGER PRIMARY KEY AUTOINCREMENT, i
 CREATE INDEX IF NOT EXISTS ix_log_ref ON referenze_log(id_referenza);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 """
+SCHEMA_SCALETTE = """
+CREATE TABLE IF NOT EXISTS scalette (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, creata_il TEXT, aggiornata_il TEXT);
+CREATE TABLE IF NOT EXISTS scalette_voci (id_scaletta INTEGER NOT NULL, pos INTEGER NOT NULL, id_referenza TEXT NOT NULL, PRIMARY KEY (id_scaletta, pos));
+"""
+MAX_SCALETTA = 100                                  # referenze in una scaletta
 COLONNE = ["id", "origine", "contatore", "cliente", "titolo", "titolo_excel", "ambito", "tipologie", "mercato", "segmento", "anno", "temi", "tecnologie",
            "pitch", "esteso", "fonti", "documenti", "confidenza", "materiale", "campi_mancanti", "da_verificare", "note", "descrizione_excel",
            "tecnologie_excel", "referente_aidata", "referente_mercato", "referente_progetto", "owner", "archiviata", "creata_il", "modificata_il"]
@@ -380,6 +389,84 @@ class RefStoreMod(RefStore):
             r = self.leggi(rid)
             self._log(c, rid, ora, "_eliminata", r)                            # la scheda intera resta nello storico: si può recuperare
             c.execute("DELETE FROM referenze WHERE id=?", (rid,))
+            self._togli_dalle_scalette(c, rid)
+
+    # ---------------------------------------------------------------- scalette del meeting (liste di referenze con nome, ordinate)
+    def _scalette_pronte(self, c):
+        c.executescript(SCHEMA_SCALETTE)            # CREATE IF NOT EXISTS: vale anche per i database creati prima di questa funzione
+
+    @staticmethod
+    def _nome_scaletta(nome):
+        n = " ".join(str(nome or "").split())
+        if not n:
+            raise RefError("Dai un nome alla scaletta")
+        if len(n) > 80:
+            raise RefError("Il nome della scaletta può essere lungo al massimo 80 caratteri")
+        return n
+
+    def _scaletta(self, c, sid):
+        r = c.execute("SELECT * FROM scalette WHERE id=?", (sid,)).fetchone()
+        if not r:
+            raise RefError("Scaletta non trovata")
+        ids = [x["id_referenza"] for x in c.execute(
+            "SELECT v.id_referenza FROM scalette_voci v JOIN referenze r ON r.id=v.id_referenza WHERE v.id_scaletta=? AND r.archiviata=0 ORDER BY v.pos", (sid,))]
+        return {"id": r["id"], "nome": r["nome"], "ids": ids, "aggiornata_il": r["aggiornata_il"]}
+
+    def scalette(self):
+        with self._lock, self.conn() as c:
+            self._scalette_pronte(c)
+            return [self._scaletta(c, x["id"]) for x in c.execute("SELECT id FROM scalette ORDER BY aggiornata_il DESC, id DESC")]
+
+    def _scrivi_voci(self, c, sid, ids):
+        if not isinstance(ids, list):
+            raise RefError("L'elenco delle referenze non è valido")
+        puliti = []
+        for i in ids:
+            i = str(i)
+            if i not in puliti:
+                puliti.append(i)
+        if len(puliti) > MAX_SCALETTA:
+            raise RefError(f"Una scaletta può contenere al massimo {MAX_SCALETTA} referenze")
+        validi = {x["id"] for x in c.execute("SELECT id FROM referenze WHERE archiviata=0")}
+        puliti = [i for i in puliti if i in validi]
+        c.execute("DELETE FROM scalette_voci WHERE id_scaletta=?", (sid,))
+        c.executemany("INSERT INTO scalette_voci VALUES (?,?,?)", [(sid, n, i) for n, i in enumerate(puliti)])
+
+    def crea_scaletta(self, nome, ids=(), ora=None):
+        nome, ora = self._nome_scaletta(nome), ora or _ora_precisa()
+        with self._lock, self.conn() as c:
+            self._scalette_pronte(c)
+            if c.execute("SELECT 1 FROM scalette WHERE lower(nome)=lower(?)", (nome,)).fetchone():
+                raise RefError("Esiste già una scaletta con questo nome")
+            sid = c.execute("INSERT INTO scalette (nome, creata_il, aggiornata_il) VALUES (?,?,?)", (nome, ora, ora)).lastrowid
+            self._scrivi_voci(c, sid, list(ids))
+            return self._scaletta(c, sid)
+
+    def aggiorna_scaletta(self, sid, nome=None, ids=None, ora=None):
+        ora = ora or _ora_precisa()
+        with self._lock, self.conn() as c:
+            self._scalette_pronte(c)
+            self._scaletta(c, sid)                              # esiste?
+            if nome is not None:
+                nome = self._nome_scaletta(nome)
+                if c.execute("SELECT 1 FROM scalette WHERE lower(nome)=lower(?) AND id<>?", (nome, sid)).fetchone():
+                    raise RefError("Esiste già una scaletta con questo nome")
+                c.execute("UPDATE scalette SET nome=? WHERE id=?", (nome, sid))
+            if ids is not None:
+                self._scrivi_voci(c, sid, ids)
+            c.execute("UPDATE scalette SET aggiornata_il=? WHERE id=?", (ora, sid))
+            return self._scaletta(c, sid)
+
+    def elimina_scaletta(self, sid):
+        with self._lock, self.conn() as c:
+            self._scalette_pronte(c)
+            self._scaletta(c, sid)
+            c.execute("DELETE FROM scalette_voci WHERE id_scaletta=?", (sid,))
+            c.execute("DELETE FROM scalette WHERE id=?", (sid,))
+
+    def _togli_dalle_scalette(self, c, rid):
+        self._scalette_pronte(c)
+        c.execute("DELETE FROM scalette_voci WHERE id_referenza=?", (rid,))
 
     def storico(self, rid):
         with self.conn() as c:
