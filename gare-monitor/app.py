@@ -4,6 +4,7 @@ Archivio di lavoro: database SQLite locale (monitoraggio.db), caricato dal file 
 L'Excel viene scritto SOLO quando si preme "Esporta in Excel" (righe nuove accodate, righe modificate aggiornate).
 """
 import calendar
+import io
 import datetime as dt
 import json
 import os
@@ -17,7 +18,7 @@ import time
 from flask import Flask, jsonify, redirect, request, send_file, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from core import accesso, clienti, logic, metrics, referenze, referenze_cfg, referenze_xlsx, stime, stime_motore, updater
+from core import accesso, clienti, logic, metrics, referenze, referenze_cfg, referenze_xlsx, stime, stime_motore, stime_xlsx, updater
 from core.db import Store
 from core.reader import ATT_LABELS, DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
 from core.writer import NoExcelError, OpenpyxlWriter, WriteError, excel_available, get_writer
@@ -587,6 +588,18 @@ def stime_corrente(sid):
 @app.post("/api/stime/<int:sid>/riallinea")
 def stime_riallinea(sid):
     return jsonify(stimestore().riallinea(sid, conferma=bool(_corpo().get("conferma"))))
+
+
+@app.get("/api/stime/<int:sid>/export")
+def stime_export(sid):
+    """Excel della stima con formule vive (bloccato se la stima ha errori di validazione)."""
+    s = stimestore().leggi(sid)
+    try:
+        contenuto, nome, _ = stime_xlsx.esporta(s)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return send_file(io.BytesIO(contenuto), as_attachment=True, download_name=nome,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @app.delete("/api/stime/<int:sid>")

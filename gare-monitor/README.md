@@ -98,7 +98,7 @@ Vista "Referenze" nel menu: ricerca per argomento (con sinonimi), cliente, ambit
 
 ## Stimometro (in sviluppo)
 
-Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale e tecnica", v1.0). Si sviluppa per fasi (fatte: 1 motore di calcolo, 2 dati e persistenza, 3 interfaccia).
+Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale e tecnica", v1.0). Si sviluppa per fasi (fatte: 1 motore di calcolo, 2 dati e persistenza, 3 interfaccia, 4 export Excel).
 
 - `core/stime_catalogo.py`: catalogo dei parametri di default (team e costi, parametri generali, moduli, tipi oggetto, fasi, parametri AM). È il seed iniziale: i valori si calibreranno dall'app.
 - `core/stime_motore.py`: motore di calcolo, unica implementazione delle regole (capitolo 4 della specifica). Senza database né interfaccia; aritmetica decimale con arrotondamento a mezza giornata (`R(x) = ROUND(x/Passo;0)×Passo`, valori normalizzati a 9 decimali); totali come somme di valori già arrotondati; divisioni per zero = "n/d" (None). Ogni stima porta con sé lo snapshot dei parametri e il motore usa solo quello.
@@ -115,6 +115,11 @@ Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale 
   - Le giornate si mostrano **totali**: BE e FE restano separati nel calcolo (contingency, FTE, ripartizione dell'AM, costi) e negli input che li richiedono.
   - A destra, dal passo 2: impostazioni, avvisi e **totali a scomparsa** (chiusi: giornate e prezzo). Ricalcolo in tempo reale dal server; input negativi o non numerici non accettati; gli errori bloccano solo l'export.
   - **Catalogo parametri**: figure e costi, parametri generali, attività a corpo predefinite, fasi, moduli e tipi oggetto (aggiunta e disattivazione), parametri AM.
+- **Fase 4: export Excel** (`core/stime_xlsx.py`, pulsante "Esporta Excel" nell'elenco e nel menu ⋯ dell'editor; `GET /api/stime/<id>/export`): file `Stima_<cliente>_<nome>_v<versione>_<aaaa-mm-gg>.xlsx` con cinque fogli (Riepilogo, Parametri, Stima, Ripartizione BE-FE, AM).
+  - **Formule vive**: ogni valore calcolato è una formula con le stesse regole del motore, arrotondamento compreso (`ROUND(ROUND(x;9)/Passo;0)*Passo`). Gli input (celle gialle, testo blu) sono nel foglio Parametri, nelle colonne di input del foglio Stima (quantità, mix modificati, giornate a corpo, attività a corpo, training) e nelle quantità degli oggetti in esercizio del foglio AM: cambiandoli, tutto si ricalcola. Il mix non modificato rimanda al default del tipo oggetto.
+  - Nomi definiti per i parametri scalari (Passo, MargineProgetto, MargineAM, GgMese, CostoBE/FE/PM, PctPM, PctContingency, Durata, PrezzoObiettivo, parametri AM); solo SUM, ROUND, IF, MAX; nessun collegamento esterno né macro; ricalcolo completo all'apertura; nessun errore visibile (divisioni protette); quadratura con il foglio Stima = 0; margine risultante in rosso se sotto il margine; stampa orizzontale su una pagina in larghezza.
+  - L'export è bloccato se la stima ha errori di validazione (il messaggio dice quali). È a senso unico: le modifiche fatte nell'Excel non tornano nell'app.
+  - Verifica: `python -m pytest -q tests/test_stime_xlsx.py` genera l'Excel di TC1, TC2 e TC3, lo ricalcola con **LibreOffice** headless e confronta le celle chiave con il motore (tolleranza 0,01), cerca errori di formula e prova che cambiando input nell'Excel i risultati seguono. Serve LibreOffice (`soffice`): dove non c'è i test si saltano; in GitHub Actions girano in un job Linux dedicato.
 - **Regole cambiate rispetto alla specifica v1.0** (concordate):
   - niente modulo **Architettura** (disegno architetturale, ambienti, pipeline): se serve, si inserisce come attività a corpo. Nei database esistenti il modulo viene disattivato; le righe già inserite restano con i loro parametri;
   - **analisi e disegno** sono due fasi con una **percentuale unica** (default 6%) sull'implementazione di tutti i moduli, calcolata per team: `Analisi(t) = R(Σ Impl(m,t) × %Analisi)`, lo stesso per il disegno. Le stime esistenti prendono la percentuale che avevano i moduli;

@@ -106,7 +106,7 @@
           <td>v${x.versione}${x.corrente ? ` <span class="st-badge ok">corrente</span>` : ""}</td><td class="r">${F.gg(x.gg)}</td><td class="r">${F.eur0(x.prezzo)}</td><td class="r">${F.pct(x.margine)}</td>
           <td class="r">${x.am_prezzo == null ? `<span class="muted">—</span>` : F.eur0(x.am_prezzo)}</td><td>${E((x.modificata_il || "").replace("T", " ").slice(0, 16))}</td>
           <td class="st-azioni"><button class="st-ib" data-az="versione" data-id="${x.id}" title="Nuova versione">${icona("plus")}</button><button class="st-ib" data-az="clona" data-id="${x.id}" title="Clona">${icona("copy")}</button>
-            <button class="st-ib" title="Esporta Excel: arriva con la fase 4" disabled>${icona("download")}</button><button class="st-ib" data-az="elimina" data-id="${x.id}" title="Elimina">${icona("trash-2")}</button></td></tr>`).join("")}
+            <button class="st-ib" data-az="esporta" data-id="${x.id}" title="Esporta Excel">${icona("download")}</button><button class="st-ib" data-az="elimina" data-id="${x.id}" title="Elimina">${icona("trash-2")}</button></td></tr>`).join("")}
         </tbody></table></div>` : `<div class="card st-vuoto"><h3>${f.q || f.cliente || f.gara ? "Nessuna stima con questi filtri" : "Ancora nessuna stima"}</h3><p class="muted">Una stima nasce con una copia dei parametri del catalogo: le modifiche al catalogo valgono per le stime create dopo.</p></div>`}</div>`;
     bindSchede(m);
     let t;
@@ -129,6 +129,18 @@
         await api(`/api/stime/${id}`, {method: "DELETE"}); toast("Stima eliminata"); disegna();
       } else if (az === "versione") { const n = await api(`/api/stime/${id}/versione`, {method: "POST"}); toast(`Creata la versione ${n.versione}`); vai("editor", n.id); }
       else if (az === "clona") dialogoClona(id);
+      else if (az === "esporta") esporta(id);
+    } catch (e) { toast(e.message, true); }
+  }
+  // Excel con formule vive: si scarica solo se la stima non ha errori (il server li ricontrolla e spiega quali)
+  async function esporta(id) {
+    try {
+      const r = await fetch(`/api/stime/${id}/export`);
+      if (!r.ok) { let j = {}; try { j = await r.json(); } catch (e) {} if (r.status === 401 && j.login) { location.href = "/login"; return; } throw new Error(j.error || r.statusText); }
+      const nome = ((r.headers.get("Content-Disposition") || "").match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i) || [])[1] || "Stima.xlsx";
+      const url = URL.createObjectURL(await r.blob()), a = document.createElement("a");
+      a.href = url; a.download = decodeURIComponent(nome); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast("Excel esportato");
     } catch (e) { toast(e.message, true); }
   }
   async function nuova(prefill = {}) {
@@ -204,7 +216,7 @@
           <button id="st-indietro">${icona("arrow-left")}Elenco</button><button class="primary" id="st-salva">Salva</button>
           <button class="st-more" id="st-more" aria-label="Altre azioni">${icona("ellipsis")}</button>
           <div class="st-menu" id="st-menu" hidden><button data-m="versione">Nuova versione</button><button data-m="clona">Clona…</button>
-            <button data-m="esporta" disabled title="Arriva con la fase 4">Esporta Excel</button><hr><button data-m="elimina" class="danger">Elimina…</button></div></div>
+            <button data-m="esporta">Esporta Excel</button><hr><button data-m="elimina" class="danger">Elimina…</button></div></div>
         <div class="st-passi">${PASSI.map(([k, l], i) => `<button class="st-passo ${passo === k ? "on" : ""} ${PASSI.findIndex(x => x[0] === passo) > i ? "fatto" : ""}" data-passo="${k}"><span>${i + 1}</span>${l}</button>`).join(`<i class="st-freccia"></i>`)}
           <span class="st-sp"></span><button class="linkbtn ${passo === "parametri" ? "on" : ""}" data-passo="parametri">${icona("sliders-horizontal")}Parametri avanzati</button></div></div>
       ${passo === "impostazioni" ? `<div class="card st-imp-full"><div class="st-rh"><h3>Impostazioni della stima</h3></div>${impostazioniHtml(s, false)}${navHtml()}</div>`
@@ -223,6 +235,7 @@
       if (!(await salvaSeServe())) return;
       if (b.dataset.m === "versione") { const n = await api(`/api/stime/${s.id}/versione`, {method: "POST"}); toast(`Creata la versione ${n.versione}`); apri(n.id); }
       if (b.dataset.m === "clona") { ST.elenco = [s]; dialogoClona(s.id); }
+      if (b.dataset.m === "esporta") esporta(s.id);
     });
     qsa("[data-passo]", m).forEach(b => b.onclick = () => vaiPasso(b.dataset.passo));
     bindImpostazioni(qs(passo === "impostazioni" ? ".st-imp-full" : ".st-imp-dx", m));
