@@ -204,6 +204,30 @@ function loadStime() {
     document.head.appendChild(s);
   });
 }
+// dalla finestra di una gara: apre la vista Stime e poi esegue l'azione (aprire una versione, crearne una nuova)
+function goStime(azione) { S.view = "stime"; render(); loadStime().then(R => R.dopo(azione)).catch(e => toast(e.message, true)); }
+// sezione "Stime" della gara: chiave stabile "codice SS | anno della Data ins." (sopravvive al reimport dell'Excel)
+const chiaveGara = (ss, data) => { const s = String(ss || "").replace(/\s+/g, "").toUpperCase(), a = String(data || "").slice(0, 4); return s && /^\d{4}$/.test(a) ? `${s}|${a}` : null; };
+async function caricaStimeGara(el, row) {
+  const box = $("#f-stime", el); if (!box) return;
+  const k = chiaveGara(row.SS, row["Data ins."]);
+  const testa = extra => `<div class="fs-h">${ico("calculator")}<b>Stime</b>${extra || ""}</div>`;
+  if (!k) { box.innerHTML = testa() + `<div class="hint">Per collegare una stima servono il codice SS e la data di inserimento della gara.</div>`; return; }
+  let lista;
+  try { lista = (await api("/api/stime?gara=" + encodeURIComponent(k))).stime; } catch (e) { box.innerHTML = testa() + `<div class="hint">${esc(e.message)}</div>`; return; }
+  lista.sort((a, b) => (b.corrente - a.corrente) || (b.versione - a.versione));
+  const n1 = new Intl.NumberFormat("it-IT", {minimumFractionDigits: 1, maximumFractionDigits: 1}), n0 = new Intl.NumberFormat("it-IT", {maximumFractionDigits: 0});
+  const gg = x => x == null ? "n/d" : n1.format(x) + " gg", eur = x => x == null ? "n/d" : n0.format(x) + " €", pct = x => x == null ? "n/d" : n1.format(x * 100) + "%";
+  const cor = lista.find(x => x.corrente);
+  box.innerHTML = testa(`<span class="muted">${lista.length ? `${lista.length} ${lista.length === 1 ? "versione" : "versioni"}` : "nessuna stima collegata"}</span><span style="flex:1"></span><button type="button" id="fs-nuova">${ico("plus")}Nuova stima</button>`)
+    + (cor ? `<div class="fs-cor"><span class="lchip">corrente</span> <b>${esc(cor.nome)} · v${cor.versione}</b><span class="fs-num">${gg(cor.gg)} · ${eur(cor.prezzo)} · margine ${pct(cor.margine)}${cor.am_prezzo != null ? ` · AM ${eur(cor.am_prezzo)}` : ""}</span></div>` : "")
+    + (lista.length ? `<ul class="fs-l">${lista.map(x => `<li><button type="button" class="linkbtn" data-st="${x.id}">${esc(x.nome)} · v${x.versione}</button>${x.corrente ? ` <span class="muted">corrente</span>` : ""}<span class="fs-num muted">${gg(x.gg)} · ${eur(x.prezzo)}</span></li>`).join("")}</ul>` : "");
+  box.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { closeModal(); goStime(R => R.apri(+b.dataset.st)); });
+  $("#fs-nuova", box).onclick = () => {
+    const g = {ss: k.split("|")[0], anno: +k.split("|")[1], data_ins: row["Data ins."], cliente: row.Cliente || "", oggetto: row.Oggetto || "", chiave: k};
+    closeModal(); goStime(R => R.nuovaPerGara(g));
+  };
+}
 function renderStime(m) {
   m.innerHTML = `<p class="muted pad">Caricamento…</p>`;
   loadStime().then(R => { if (S.view === "stime") R.render(m); }).catch(e => { m.innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div></div>`; });
@@ -1115,6 +1139,7 @@ function openForm(row) {
       <div class="ochips" id="o-chips">${OWNERS.map(o => `<button type="button" class="ochip" data-o="${o}">${o}</button>`).join("")}</div><div class="hint" id="h-sol"></div></div>
     ${edit ? `<div class="full"><label for="f-Attenzione">Attenzione (colora il nome cliente nell'Excel)</label><select id="f-Attenzione">${attOpts(v.Attenzione)}</select></div>` : ""}
   </div>
+  ${edit ? `<div class="fstime" id="f-stime"></div>` : ""}
   <details style="margin-top:14px"><summary>Altri campi</summary><div class="grid" style="margin-top:10px">
     <div><label for="f-SS">Codice SS</label><input id="f-SS" value="${esc(v.SS)}"><div class="hint" id="h-ss"></div></div>
     <div><label for="f-Commessa">Commessa</label><input id="f-Commessa" value="${esc(v.Commessa)}"><div class="hint" id="h-com"></div></div>
@@ -1160,6 +1185,7 @@ function openForm(row) {
     suggest();
   });
   $("#f-cancel", el).onclick = closeModal;
+  if (edit) caricaStimeGara(el, row);
   const del = $("#f-del", el); if (del) del.onclick = async () => { if (!confirm("Eliminare questa riga? Non è ancora nell'Excel.")) return; try { await api("/api/rows/" + row._row, {method: "DELETE"}); closeModal(); await loadAll(true); toast("Riga eliminata"); } catch (e) { toast(e.message, true); } };
   const rev = $("#f-rev", el); if (rev) rev.onclick = async () => { if (!confirm("Annullare le modifiche di questa riga e tornare ai valori dell'Excel?")) return; try { await api("/api/rows/" + row._row + "/revert", {method: "POST"}); closeModal(); await loadAll(true); toast("Modifiche annullate"); } catch (e) { toast(e.message, true); } };
   F_("Cliente").focus();

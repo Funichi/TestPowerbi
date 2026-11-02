@@ -694,17 +694,25 @@
 
   // ================================================================ ingresso
   const R = {
-    async render(m) {
+    render(m) {
       ST.root = m;
       m.innerHTML = `<p class="muted pad">Caricamento…</p>`;
-      try { if (!ST.cat) await caricaCatalogo(); ST.gare = await caricaGare(); }
-      catch (e) { m.innerHTML = `<div class="card"><div class="err">${E(e.message)}</div></div>`; return; }
-      if (S.view !== "stime") return;
-      if (ST.vista === "editor" && ST.s && !ST.sporco) { await apri(ST.s.id); return; }      // al rientro: dati freschi, a meno di modifiche in corso
-      disegna();
+      ST.pronto = (async () => {
+        try { if (!ST.cat) await caricaCatalogo(); ST.gare = await caricaGare(); }
+        catch (e) { m.innerHTML = `<div class="card"><div class="err">${E(e.message)}</div></div>`; return; }
+        if (S.view !== "stime") return;
+        if (ST.vista === "editor" && ST.s && !ST.sporco) { await apri(ST.s.id); return; }      // al rientro: dati freschi, a meno di modifiche in corso
+        disegna();
+      })();
+      return ST.pronto;
     },
-    // dalla scheda di una gara (fase 5): nuova stima già collegata
-    async nuovaPerGara(g) { ST.root = ST.root || document.getElementById("main"); if (!ST.cat) await caricaCatalogo(); ST.gare = await caricaGare(); return nuova({gara: g, cliente: g.cliente, nome: "Stima " + (g.ss || "")}); },
+    // azioni chiamate da fuori (finestra della gara) dopo che la vista è pronta
+    dopo(azione) { return Promise.resolve(ST.pronto).then(() => azione(R)); },
+    async nuovaPerGara(g) {
+      if (ST.vista === "editor" && ST.sporco && !confirm("Ci sono modifiche non salvate alla stima aperta. Continuare senza salvarle?")) return;
+      ST.sporco = false;
+      return nuova({gara: g, cliente: g.cliente, nome: `Stima ${g.ss}${g.oggetto ? " · " + String(g.oggetto).slice(0, 40) : ""}`});
+    },
     apri: id => vai("editor", id),
   };
   window.Stime = R;
