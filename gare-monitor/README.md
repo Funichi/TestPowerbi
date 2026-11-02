@@ -98,7 +98,7 @@ Vista "Referenze" nel menu: ricerca per argomento (con sinonimi), cliente, ambit
 
 ## Stimometro (in sviluppo)
 
-Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale e tecnica", v1.0). Si sviluppa per fasi (fatte: 1 motore di calcolo, 2 dati e persistenza).
+Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale e tecnica", v1.0). Si sviluppa per fasi (fatte: 1 motore di calcolo, 2 dati e persistenza, 3 interfaccia).
 
 - `core/stime_catalogo.py`: catalogo dei parametri di default (team e costi, parametri generali, moduli, tipi oggetto, fasi, parametri AM). È il seed iniziale: i valori si calibreranno dall'app.
 - `core/stime_motore.py`: motore di calcolo, unica implementazione delle regole (capitolo 4 della specifica). Senza database né interfaccia; aritmetica decimale con arrotondamento a mezza giornata (`R(x) = ROUND(x/Passo;0)×Passo`, valori normalizzati a 9 decimali); totali come somme di valori già arrotondati; divisioni per zero = "n/d" (None). Ogni stima porta con sé lo snapshot dei parametri e il motore usa solo quello.
@@ -109,5 +109,10 @@ Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale 
   - Catalogo: codici univoci e non modificabili; moduli e tipi oggetto si aggiungono o si disattivano, non si eliminano; team e fasi fissi (cambiano costi e percentuali).
   - Totali memorizzati per l'elenco: giornate complessive, costo, prezzo e margine del progetto; prezzo AM a parte.
   - API: `GET/POST /api/stime`, `GET/PUT/DELETE /api/stime/<id>`, `POST /api/stime/<id>/versione|clona|corrente|riallinea`, `POST /api/stime/calcola` (ricalcolo senza salvare), `GET/PUT /api/stime/catalogo`.
+- **Fase 3: interfaccia** (`static/stime.js`, `static/stime.css`, caricati solo all'apertura della voce di menu **Stime**):
+  - **Elenco**: nome, cliente, gara, versione (con "corrente"), giornate, prezzo, margine, AM, ultima modifica; filtri per testo, cliente e gara; azioni nuova versione, clona, elimina.
+  - **Editor**: dati generali (nome, cliente, gara collegata scelta tra le gare dell'app, note) e cinque schede: *Moduli* (righe raggruppate per modulo, quantità, mix S/M/D con il default in grigio, modificabile e ripristinabile, righe a corpo con giornate BE/FE, duplica, sposta, elimina), *Attività a corpo e training* (con sicurezza e fasi calcolate), *Economia e tempi* (margini, prezzo obiettivo, costi dei team, durata), *AM* (nessuna, manuale o da driver, con gli oggetti in esercizio), *Parametri della stima* (tutto lo snapshot, con il pallino sui valori diversi dal catalogo, il ripristino del singolo valore e "Riallinea ai default correnti" con l'elenco delle differenze).
+  - **Riepilogo sempre visibile**: blocchi BE/FE con i pesi, TP, PM, contingency, totale complessivo, costi, prezzo, margine, prezzo obiettivo e margine risultante (in rosso se sotto il margine), FTE, sintesi AM, errori/avvisi/informazioni (§4.13). Ricalcolo in tempo reale dal server a ogni modifica, senza salvare; gli input negativi o non numerici non vengono accettati (campo rosso); gli errori bloccano solo l'export.
+  - **Catalogo parametri**: modifica di costi, parametri generali, attività a corpo predefinite, moduli e tipi oggetto (aggiunta e disattivazione), fasi con min/max, parametri AM.
 - Test: `python -m pytest -q tests/test_stime_motore.py tests/test_stime_store.py` (casi TC1, TC2, TC3 della specifica, regole generali, persistenza e API).
 
