@@ -10,6 +10,20 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
+  # export Excel dello Stimometro: l'Excel generato si ricalcola con LibreOffice e deve dare gli stessi risultati del motore
+  test-export-excel:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gare-monitor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-calc
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q tests/test_stime_xlsx.py
   build:
     runs-on: windows-latest
     defaults:
