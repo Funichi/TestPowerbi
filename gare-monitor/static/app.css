@@ -515,3 +515,10 @@ tr.row-old td{color:var(--text-3);background:var(--bg)}
 /* riquadro Referenze nella scheda cliente */
 .refbox{display:inline-flex;align-items:baseline;gap:10px;border:1px solid var(--border);border-radius:12px;padding:8px 14px;background:var(--bg);font-size:14px}
 .refbox[hidden]{display:none}.refbox-t{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:600}.refbox b{font-size:18px}
+
+/* finestra della gara: sezione "Stime" (Stimometro) */
+.fstime{margin-top:14px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px}
+.fs-h{display:flex;align-items:center;gap:8px}.fs-h .ico{width:18px;height:18px;color:var(--accent)}.fs-h button{padding:5px 12px}
+.fs-cor{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.fs-num{margin-left:auto;font-variant-numeric:tabular-nums}
+.fs-l{list-style:none;margin:6px 0 0;padding:0}.fs-l li{display:flex;gap:6px;align-items:center;padding:3px 0;border-top:1px solid var(--row-line)}

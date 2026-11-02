@@ -96,9 +96,9 @@ Vista "Referenze" nel menu: ricerca per argomento (con sinonimi), cliente, ambit
 - **Copia testo**: copia negli appunti titolo e cliente, racconto da 30 secondi e racconto esteso in testo semplice (sezioni con titolo, elenchi con «• »).
 - **Scheda Cliente**: riquadro «Referenze» con il numero di referenze del cliente (nome abbinato senza maiuscole, punteggiatura e S.p.A.) e il link «Vedi le referenze →» alla ricerca già filtrata. Compare solo se l'archivio delle referenze esiste.
 
-## Stimometro (in sviluppo)
+## Stimometro
 
-Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale e tecnica", v1.0). Si sviluppa per fasi (fatte: 1 motore di calcolo, 2 dati e persistenza, 3 interfaccia, 4 export Excel).
+Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale e tecnica", v1.0). Sviluppato per fasi: 1 motore di calcolo, 2 dati e persistenza, 3 interfaccia, 4 export Excel, 5 integrazione con le gare.
 
 - `core/stime_catalogo.py`: catalogo dei parametri di default (team e costi, parametri generali, moduli, tipi oggetto, fasi, parametri AM). È il seed iniziale: i valori si calibreranno dall'app.
 - `core/stime_motore.py`: motore di calcolo, unica implementazione delle regole (capitolo 4 della specifica). Senza database né interfaccia; aritmetica decimale con arrotondamento a mezza giornata (`R(x) = ROUND(x/Passo;0)×Passo`, valori normalizzati a 9 decimali); totali come somme di valori già arrotondati; divisioni per zero = "n/d" (None). Ogni stima porta con sé lo snapshot dei parametri e il motore usa solo quello.
@@ -120,6 +120,7 @@ Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale 
   - Nomi definiti per i parametri scalari (Passo, MargineProgetto, MargineAM, GgMese, CostoBE/FE/PM, PctPM, PctContingency, Durata, PrezzoObiettivo, parametri AM); solo SUM, ROUND, IF, MAX; nessun collegamento esterno né macro; ricalcolo completo all'apertura; nessun errore visibile (divisioni protette); quadratura con il foglio Stima = 0; margine risultante in rosso se sotto il margine; stampa orizzontale su una pagina in larghezza.
   - L'export è bloccato se la stima ha errori di validazione (il messaggio dice quali). È a senso unico: le modifiche fatte nell'Excel non tornano nell'app.
   - Verifica: `python -m pytest -q tests/test_stime_xlsx.py` genera l'Excel di TC1, TC2 e TC3, lo ricalcola con **LibreOffice** headless e confronta le celle chiave con il motore (tolleranza 0,01), cerca errori di formula e prova che cambiando input nell'Excel i risultati seguono. Serve LibreOffice (`soffice`): dove non c'è i test si saltano; in GitHub Actions girano in un job Linux dedicato.
+- **Fase 5: integrazione con le gare**: nella finestra "Modifica offerta" (dalla Tabella) c'è la sezione **Stime**, con le versioni collegate alla gara, la corrente per prima con giornate, prezzo, margine e AM, e il pulsante **Nuova stima**, che apre la vista Stime con gara e cliente già compilati. Un clic su una versione la apre. Il collegamento usa la chiave stabile "codice SS | anno della Data ins.", che sopravvive al reimport dell'Excel; servono il codice SS e la data di inserimento della gara. I totali mostrati sono quelli memorizzati a ogni salvataggio.
 - **Regole cambiate rispetto alla specifica v1.0** (concordate):
   - niente modulo **Architettura** (disegno architetturale, ambienti, pipeline): se serve, si inserisce come attività a corpo. Nei database esistenti il modulo viene disattivato; le righe già inserite restano con i loro parametri;
   - **analisi e disegno** sono due fasi con una **percentuale unica** (default 6%) sull'implementazione di tutti i moduli, calcolata per team: `Analisi(t) = R(Σ Impl(m,t) × %Analisi)`, lo stesso per il disegno. Le stime esistenti prendono la percentuale che avevano i moduli;
