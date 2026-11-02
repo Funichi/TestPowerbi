@@ -95,9 +95,8 @@ def _catalogo_da_tabelle(c):
     am = {k[3:]: v for k, v in par.items() if k.startswith("am.")}
     team = [{"codice": r["codice"], "nome": r["nome"], "contenuto": r["contenuto"], "costo": r["costo"]}
             for r in c.execute("SELECT * FROM team ORDER BY ordine")]
-    moduli = [{"codice": r["codice"], "nome": r["nome"], "blocco": r["blocco"], "pct_analisi": r["pct_analisi"], "pct_disegno": r["pct_disegno"],
-               "min_analisi": r["min_analisi"], "max_analisi": r["max_analisi"], "min_disegno": r["min_disegno"], "max_disegno": r["max_disegno"],
-               "attivo": bool(r["attivo"])} for r in c.execute("SELECT * FROM moduli ORDER BY ordine")]
+    moduli = [{"codice": r["codice"], "nome": r["nome"], "blocco": r["blocco"], "attivo": bool(r["attivo"])}       # analisi e disegno: fasi ANA e DIS
+              for r in c.execute("SELECT * FROM moduli ORDER BY ordine")]
     tipi = []
     for r in c.execute("SELECT * FROM tipi_oggetto ORDER BY ordine"):
         q = r["modalita"] == "quantita"
@@ -168,8 +167,8 @@ def valida_catalogo(nuovo, attuale):
     for m in k["moduli"]:
         if m.get("blocco") not in cat.BLOCCHI_MODULO:
             raise StimaError(f"Modulo {m['codice']}: il blocco è Implementazione o Architettura")
-        for f in ("pct_analisi", "pct_disegno"):
-            m[f] = _pct(m.get(f), f"{m['codice']} {f}", 0)
+        for f in ("pct_analisi", "pct_disegno", "min_analisi", "max_analisi", "min_disegno", "max_disegno"):
+            m.pop(f, None)                                   # analisi e disegno sono fasi (ANA, DIS) con una percentuale unica
         m["attivo"] = bool(m.get("attivo", True))
     vecchi = {t["codice"]: t for t in attuale["tipi"]}
     for t in k["tipi"]:
@@ -313,11 +312,33 @@ class StimeStore:
                 if not c.execute("SELECT 1 FROM meta WHERE k='seed'").fetchone():
                     _scrivi_catalogo(c, cat.catalogo_default())
                     c.execute("INSERT INTO meta VALUES ('seed', ?)", (_ora(),))
-                    c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '1')")
+                    c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '2')")
+                self._migra(c)
                 c.commit()
             finally:
                 c.close()
         self._pronto = True
+
+    @staticmethod
+    def _migra(c):
+        """Schema 2 (percorso): analisi e disegno diventano fasi a percentuale unica (ANA, DIS) e il modulo Architettura
+        si disattiva (al suo posto, se serve, un'attività a corpo). Le stime esistenti si adeguano alla lettura."""
+        r = c.execute("SELECT v FROM meta WHERE k='schema'").fetchone()
+        if r and r[0] >= "2":
+            return
+        pa = c.execute("SELECT pct_analisi, pct_disegno FROM moduli WHERE pct_analisi IS NOT NULL ORDER BY ordine LIMIT 1").fetchone()
+        k = _catalogo_da_tabelle(c)
+        k["moduli"] = [{**m, "pct_analisi": pa[0] if pa else 0.06, "pct_disegno": pa[1] if pa else 0.06} for m in k["moduli"]]
+        cat.migra_snapshot(k)
+        for m in k["moduli"]:
+            m.pop("pct_analisi", None), m.pop("pct_disegno", None)
+            if m["codice"] == "ARC":
+                m["attivo"] = False
+        for t in k["tipi"]:
+            if t["modulo"] == "ARC":
+                t["attivo"] = False
+        _scrivi_catalogo(c, k)
+        c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '2')")
 
     def backup(self, ora=None):
         """Copia coerente in backup_stime/stime_AAAAMMGG_HHMM.db; tiene le ultime 20."""
@@ -364,9 +385,16 @@ class StimeStore:
         return {"id": r["id"], "famiglia": r["famiglia"], "versione": r["versione"], "corrente": bool(r["corrente"]), "nome": r["nome"] or "",
                 "cliente": r["cliente"] or "", "gara": ({**info, "chiave": r["gara_chiave"]} if r["gara_chiave"] else None),
                 "durata_mesi": r["durata_mesi"], "prezzo_obiettivo": r["prezzo_obiettivo"], "training_be": r["training_be"], "training_fe": r["training_fe"],
-                "note": r["note"] or "", "snapshot": json.loads(r["snapshot"]), "am": json.loads(r["am"]) if r["am"] else {"modalita": None},
+                "note": r["note"] or "", "snapshot": StimeStore._snapshot(r["snapshot"]), "am": json.loads(r["am"]) if r["am"] else {"modalita": None},
                 "righe": righe, "voci_corpo": voci, "creata_il": r["creata_il"], "modificata_il": r["modificata_il"],
                 "totali": {"gg": r["tot_gg"], "costo": r["tot_costo"], "prezzo": r["tot_prezzo"], "margine": r["tot_margine"], "am_prezzo": r["tot_am_prezzo"]}}
+
+    @staticmethod
+    def _snapshot(testo):
+        snap = json.loads(testo)
+        if snap.get("tipi"):
+            cat.migra_snapshot(snap)                         # stime create prima della percentuale unica di analisi e disegno
+        return snap
 
     def _riga_stima(self, c, sid):
         r = c.execute("SELECT * FROM stime WHERE id=?", (sid,)).fetchone()
