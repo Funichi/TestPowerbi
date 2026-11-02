@@ -12,6 +12,7 @@ dist/
 *.db-wal
 *.db-shm
 backup_referenze/
+backup_stime/
 referenze*.json
 !tests/fixtures/referenze_finte.json
 Referenze*.xlsx

@@ -98,9 +98,16 @@ Vista "Referenze" nel menu: ricerca per argomento (con sinonimi), cliente, ambit
 
 ## Stimometro (in sviluppo)
 
-Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale e tecnica", v1.0). Si sviluppa per fasi; questa è la **Fase 1: motore di calcolo**.
+Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale e tecnica", v1.0). Si sviluppa per fasi (fatte: 1 motore di calcolo, 2 dati e persistenza).
 
 - `core/stime_catalogo.py`: catalogo dei parametri di default (team e costi, parametri generali, moduli, tipi oggetto, fasi, parametri AM). È il seed iniziale: i valori si calibreranno dall'app.
 - `core/stime_motore.py`: motore di calcolo, unica implementazione delle regole (capitolo 4 della specifica). Senza database né interfaccia; aritmetica decimale con arrotondamento a mezza giornata (`R(x) = ROUND(x/Passo;0)×Passo`, valori normalizzati a 9 decimali); totali come somme di valori già arrotondati; divisioni per zero = "n/d" (None). Ogni stima porta con sé lo snapshot dei parametri e il motore usa solo quello.
-- Test: `python -m pytest -q tests/test_stime_motore.py` (casi TC1, TC2, TC3 della specifica e regole generali).
+- `core/stime.py` (**Fase 2: dati e persistenza**): database `stime.db` accanto a `monitoraggio.db`, indipendente (il reimport dell'Excel non lo tocca; percorso modificabile con `stime_db` in `config.json`; copia in `backup_stime/` a ogni avvio, ultime 20). Contiene il catalogo (tabelle `team`, `parametri`, `moduli`, `tipi_oggetto`, `fasi`, con il seed del §5 alla prima apertura) e le stime (`stime`, `righe_stima`, `voci_corpo`).
+  - Ogni stima ha la copia congelata dei parametri (snapshot): modificare il catalogo vale solo per le stime create dopo; le differenze dal default corrente si vedono campo per campo e "Riallinea" le sostituisce con il catalogo (i tipi oggetto disattivati usati dalle righe restano con i parametri precedenti, con un avviso).
+  - Versioni: "nuova versione" copia tutto con versione + 1, stesso nome e stessa gara, e diventa la corrente; "clona" crea una stima indipendente in versione 1 con lo stesso snapshot. Al massimo una versione corrente per gara (per le stime senza gara, una per famiglia di versioni).
+  - Collegamento alle gare: chiave stabile "codice SS | anno della Data ins." (sopravvive al reimport), con una fotografia della gara (cliente, oggetto).
+  - Catalogo: codici univoci e non modificabili; moduli e tipi oggetto si aggiungono o si disattivano, non si eliminano; team e fasi fissi (cambiano costi e percentuali).
+  - Totali memorizzati per l'elenco: giornate complessive, costo, prezzo e margine del progetto; prezzo AM a parte.
+  - API: `GET/POST /api/stime`, `GET/PUT/DELETE /api/stime/<id>`, `POST /api/stime/<id>/versione|clona|corrente|riallinea`, `POST /api/stime/calcola` (ricalcolo senza salvare), `GET/PUT /api/stime/catalogo`.
+- Test: `python -m pytest -q tests/test_stime_motore.py tests/test_stime_store.py` (casi TC1, TC2, TC3 della specifica, regole generali, persistenza e API).
 
