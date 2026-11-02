@@ -29,16 +29,15 @@ CATALOGO = {
         "voci_corpo": [{"nome": "Altre attività", "gg_be": 10, "gg_fe": 10}],
     },
     "moduli": [
-        {"codice": "STG", "nome": "Staging (ingestion batch)", "blocco": "Implementazione", "pct_analisi": 0.06, "pct_disegno": 0.06, "attivo": True},
-        {"codice": "CDC", "nome": "Ingestion CDC/streaming", "blocco": "Implementazione", "pct_analisi": 0.06, "pct_disegno": 0.06, "attivo": True},
-        {"codice": "DWH", "nome": "Data Platform / DWH", "blocco": "Implementazione", "pct_analisi": 0.06, "pct_disegno": 0.06, "attivo": True},
-        {"codice": "DQ", "nome": "Data quality", "blocco": "Implementazione", "pct_analisi": 0.06, "pct_disegno": 0.06, "attivo": True},
-        {"codice": "GOV", "nome": "Governance e catalogo", "blocco": "Implementazione", "pct_analisi": 0.06, "pct_disegno": 0.06, "attivo": True},
-        {"codice": "DM", "nome": "Data model", "blocco": "Implementazione", "pct_analisi": 0.06, "pct_disegno": 0.06, "attivo": True},
-        {"codice": "REP", "nome": "Report", "blocco": "Implementazione", "pct_analisi": 0.06, "pct_disegno": 0.06, "attivo": True},
-        {"codice": "API", "nome": "API / data product", "blocco": "Implementazione", "pct_analisi": 0.06, "pct_disegno": 0.06, "attivo": True},
-        {"codice": "MIG", "nome": "Migrazione", "blocco": "Implementazione", "pct_analisi": 0.06, "pct_disegno": 0.06, "attivo": True},
-        {"codice": "ARC", "nome": "Architettura", "blocco": "Architettura", "pct_analisi": 0.0, "pct_disegno": 0.0, "attivo": True},
+        {"codice": "STG", "nome": "Staging (ingestion batch)", "blocco": "Implementazione", "attivo": True},
+        {"codice": "CDC", "nome": "Ingestion CDC/streaming", "blocco": "Implementazione", "attivo": True},
+        {"codice": "DWH", "nome": "Data Platform / DWH", "blocco": "Implementazione", "attivo": True},
+        {"codice": "DQ", "nome": "Data quality", "blocco": "Implementazione", "attivo": True},
+        {"codice": "GOV", "nome": "Governance e catalogo", "blocco": "Implementazione", "attivo": True},
+        {"codice": "DM", "nome": "Data model", "blocco": "Implementazione", "attivo": True},
+        {"codice": "REP", "nome": "Report", "blocco": "Implementazione", "attivo": True},
+        {"codice": "API", "nome": "API / data product", "blocco": "Implementazione", "attivo": True},
+        {"codice": "MIG", "nome": "Migrazione", "blocco": "Implementazione", "attivo": True},
     ],
     "tipi": [
         _T("STG.FLUSSO", "STG", "Flusso", "1 tabella = 1 flusso", (0.35, 0.40, 0.25), (0.25, 0.5, 1.5), 1, 0),
@@ -51,13 +50,12 @@ CATALOGO = {
         _T("API.ENDPOINT", "API", "Endpoint", "endpoint", (0.40, 0.40, 0.20), (1, 3, 5), 1, 0),
         _T("MIG.REPORT", "MIG", "Report da migrare", "report", (0.40, 0.40, 0.20), (1, 2, 4), 0, 1),
         _T("MIG.STORICO", "MIG", "Tabella di dato storico", "tabella", (0.40, 0.40, 0.20), (0.5, 1, 2), 1, 0),
-        {"codice": "ARC.DISEGNO", "modulo": "ARC", "nome": "Disegno architetturale", "unita": "a corpo", "modalita": "corpo",
-         "mix": None, "gg": None, "pct_be": None, "pct_fe": None, "corpo_be": 5, "corpo_fe": 0, "attivo": True},
-        _T("ARC.AMBIENTE", "ARC", "Ambiente da configurare", "ambiente", (0.40, 0.40, 0.20), (2, 3, 5), 1, 0),
-        _T("ARC.PIPELINE", "ARC", "Pipeline CI/CD o template IaC", "pipeline", (0.40, 0.40, 0.20), (1, 2, 4), 1, 0),
     ],
-    # base: "B" (implementazione), "BaseModuli" (solo moduli del blocco Implementazione), "TP" (PM), "TP_team" (contingency, per team)
+    # base: "Moduli_team" (implementazione dei moduli, per team: analisi e disegno), "B" (implementazione), "BaseModuli" (somma dei moduli),
+    # "TP" (PM), "TP_team" (contingency, per team)
     "fasi": [
+        {"codice": "ANA", "nome": "Analisi", "blocco": "Analisi", "base": "Moduli_team", "pct": 0.06, "pct_be": None, "pct_fe": None, "min": None, "max": None},
+        {"codice": "DIS", "nome": "Disegno", "blocco": "Disegno", "base": "Moduli_team", "pct": 0.06, "pct_be": None, "pct_fe": None, "min": None, "max": None},
         {"codice": "KO", "nome": "Kick-off", "blocco": "Analisi", "base": "B", "pct": 0.002, "pct_be": 0.5, "pct_fe": 0.5, "min": None, "max": None},
         {"codice": "SEC", "nome": "Sicurezza", "blocco": "Implementazione", "base": "BaseModuli", "pct": 0.02, "pct_be": 0.5, "pct_fe": 0.5, "min": None, "max": None},
         {"codice": "SIT", "nome": "System & integration test", "blocco": "Test", "base": "B", "pct": 0.04, "pct_be": 0.9, "pct_fe": 0.1, "min": None, "max": None},
@@ -76,6 +74,24 @@ CATALOGO = {
         "anni_max": 5,
     },
 }
+
+
+FASI_ANALISI_DISEGNO = ("ANA", "DIS")
+
+
+def migra_snapshot(snap):
+    """Snapshot creati prima della percentuale unica di analisi e disegno (percentuali per modulo): aggiunge le fasi
+    ANA e DIS con la percentuale del primo modulo (6% di default). Non tocca nient'altro. Restituisce True se ha cambiato."""
+    fasi = snap.setdefault("fasi", [])
+    if any(f.get("codice") in FASI_ANALISI_DISEGNO for f in fasi):
+        return False
+    moduli = snap.get("moduli") or [{}]
+    pa = next((m.get("pct_analisi") for m in moduli if m.get("pct_analisi") is not None), 0.06)
+    pd = next((m.get("pct_disegno") for m in moduli if m.get("pct_disegno") is not None), 0.06)
+    nuove = [f for f in copy.deepcopy(CATALOGO["fasi"]) if f["codice"] in FASI_ANALISI_DISEGNO]
+    nuove[0]["pct"], nuove[1]["pct"] = pa, pd
+    snap["fasi"] = nuove + fasi
+    return True
 
 
 def catalogo_default():

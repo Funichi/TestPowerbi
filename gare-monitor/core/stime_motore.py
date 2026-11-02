@@ -171,18 +171,13 @@ def _progetto(ctx, stima):
     for codice in dict.fromkeys(r["tipo"] for r in righe if r["tipo"] in ctx.tipi):
         _controlla_tipo(ctx, ctx.tipi[codice])
 
-    # implementazione, analisi e disegno per modulo (§4.2, §4.3)
+    # implementazione per modulo (§4.2)
     moduli = []
     usati = [c for c in ctx.ordine_moduli if any(r["modulo"] == c for r in righe)]
     for c in usati:
         mod = ctx.moduli[c]
-        impl = _somma(*[r for r in righe if r["modulo"] == c])
-        pa, pd = D(mod.get("pct_analisi")), D(mod.get("pct_disegno"))
-        ctx.pct_fuori(pa, {"min": mod.get("min_analisi"), "max": mod.get("max_analisi")}, f"Analisi {c}", f"modulo:{c}")
-        ctx.pct_fuori(pd, {"min": mod.get("min_disegno"), "max": mod.get("max_disegno")}, f"Disegno {c}", f"modulo:{c}")
-        moduli.append({"codice": c, "nome": mod.get("nome"), "blocco": mod.get("blocco") or "Implementazione", "impl": impl,
-                       "analisi": _bt(R(impl["BE"] * pa), R(impl["FE"] * pa)),
-                       "disegno": _bt(R(impl["BE"] * pd), R(impl["FE"] * pd))})
+        moduli.append({"codice": c, "nome": mod.get("nome"), "blocco": mod.get("blocco") or "Implementazione",
+                       "impl": _somma(*[r for r in righe if r["modulo"] == c])})
     impl_moduli = [m for m in moduli if m["blocco"] != "Architettura"]
     arc_moduli = [m for m in moduli if m["blocco"] == "Architettura"]
 
@@ -204,12 +199,19 @@ def _progetto(ctx, stima):
     B = implementazione["BE"] + implementazione["FE"]
     architettura = _somma(*[m["impl"] for m in arc_moduli])
 
-    # fasi trasversali e training (§4.5)
+    # fasi trasversali e training (§4.5). Analisi e disegno (base "Moduli_team"): un'unica percentuale sull'implementazione
+    # dei moduli, calcolata per team (le giornate BE restano BE): Analisi(t) = R(Σ Impl(m,t) × %Analisi)
+    impl_mod = _somma(*[m["impl"] for m in impl_moduli])
     fasi = {}
     for f in ctx.snap.get("fasi", []):
         if f.get("codice") in ("PM", "CONT"):
             continue
         ctx.pct_fuori(f.get("pct"), f, f.get("nome") or f["codice"], f"fase:{f['codice']}")
+        if f.get("base") == "Moduli_team":
+            pct = D(f.get("pct"))
+            fasi[f["codice"]] = {"codice": f["codice"], "nome": f.get("nome"), "blocco": f.get("blocco"), "X": base_moduli * pct,
+                                 **_bt(R(impl_mod["BE"] * pct), R(impl_mod["FE"] * pct))}
+            continue
         if not _somma_uno([f.get("pct_be"), f.get("pct_fe")]):
             ctx.m("errore", "ripartizione_fase", f"{f.get('nome') or f['codice']}: %BE + %FE non è 100%", f"fase:{f['codice']}")
         if f.get("base") != "B":
@@ -228,8 +230,8 @@ def _progetto(ctx, stima):
         if f["blocco"] in per_blocco:
             per_blocco[f["blocco"]].append(f)
     blocchi = {
-        "Analisi": _somma(*per_blocco["Analisi"], *[m["analisi"] for m in moduli]),
-        "Disegno": _somma(*per_blocco["Disegno"], *[m["disegno"] for m in moduli]),
+        "Analisi": _somma(*per_blocco["Analisi"]),
+        "Disegno": _somma(*per_blocco["Disegno"]),
         "Architettura": _somma(architettura, *per_blocco["Architettura"]),
         "Implementazione": _somma(implementazione, *per_blocco["Implementazione"]),
         "Training": _somma(training, *per_blocco["Training"]),
