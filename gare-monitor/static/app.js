@@ -28,6 +28,7 @@ const TITLES = {
   wip: ["Consegne WIP", "Scadenze delle offerte in corso e preparazione della riunione"],
   cliente: ["Clienti", "Il cruscotto di un singolo cliente: storico, esiti e tempi"],
   referenze: ["Referenze", "Libreria delle referenze AI & Data da raccontare ai clienti"],
+  stime: ["Stime", "Stimometro: stime dei progetti Data con versioni, parametri e AM"],
   tempi: ["Tempi di consegna", "Quanto passa in media tra Data ins. e Data consegna"],
   clean: ["Pulizia dati", "Uniforma gli stati e correggi i dati nel file Excel"],
 };
@@ -167,9 +168,9 @@ function render() {
   const m = $("#main");
   if (S.view !== "table") setHash("");
   if (S.view !== "referenze" && window.Referenze) window.Referenze.esci();        // la modalità presentazione e il menu valgono solo nella vista Referenze
-  $(".actions:not(#rf-actions)").hidden = S.view === "referenze";          // i pulsanti Excel riguardano solo le offerte
+  $(".actions:not(#rf-actions)").hidden = S.view === "referenze" || S.view === "stime";          // i pulsanti Excel riguardano solo le offerte
   $("#rf-actions").hidden = S.view !== "referenze";                         // la testata delle Referenze la disegna il modulo
-  ({referenze: renderReferenze, dash: renderDash, table: renderTable, wip: renderWip, cliente: renderCliente, tempi: renderTempi, clean: renderClean})[S.view](m);
+  ({referenze: renderReferenze, stime: renderStime, dash: renderDash, table: renderTable, wip: renderWip, cliente: renderCliente, tempi: renderTempi, clean: renderClean})[S.view](m);
 }
 
 // ------------------------------------------------------------ referenze (modulo caricato solo alla prima apertura della vista)
@@ -189,6 +190,23 @@ function goReferenze(cliente, ids) { S.refFiltro = {cliente, ids}; S.view = "ref
 function renderReferenze(m) {
   m.innerHTML = `<p class="muted pad">Caricamento…</p>`;
   loadReferenze().then(R => { if (S.view !== "referenze") return; if (S.refFiltro) { R.filtraPerCliente(S.refFiltro.cliente, S.refFiltro.ids); S.refFiltro = null; } R.render(m); }).catch(e => { m.innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div></div>`; });
+}
+
+// ------------------------------------------------------------ stime (Stimometro: modulo caricato solo alla prima apertura della vista)
+let _stimeModulo = null;
+function loadStime() {
+  if (_stimeModulo) return _stimeModulo;
+  const v = encodeURIComponent((S.state && S.state.version) || "0");
+  const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "/static/stime.css?v=" + v; document.head.appendChild(css);
+  return _stimeModulo = new Promise((ok, ko) => {
+    const s = document.createElement("script"); s.src = "/static/stime.js?v=" + v;
+    s.onload = () => ok(window.Stime); s.onerror = () => { _stimeModulo = null; ko(new Error("Non riesco a caricare il modulo Stime")); };
+    document.head.appendChild(s);
+  });
+}
+function renderStime(m) {
+  m.innerHTML = `<p class="muted pad">Caricamento…</p>`;
+  loadStime().then(R => { if (S.view === "stime") R.render(m); }).catch(e => { m.innerHTML = `<div class="card"><div class="err">${esc(e.message)}</div></div>`; });
 }
 
 // ------------------------------------------------------------ cruscotto

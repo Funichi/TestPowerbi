@@ -248,3 +248,20 @@ def test_api_stime_da_fuori_con_password(client):
     c, x, tmp = client
     remote = {"environ_overrides": {"REMOTE_ADDR": "192.168.1.50"}}
     assert c.get("/api/stime", **remote).status_code in (401, 403)                   # dietro lo stesso controllo d'accesso dell'app
+
+
+def test_interfaccia_stime_collegata():
+    """Voce di menu, icone usate e sintassi dei file dell'interfaccia (il modulo si carica solo all'apertura della vista)."""
+    import shutil
+    import subprocess
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
+    assert 'data-view="stime"' in open(os.path.join(base, "index.html"), encoding="utf-8").read()
+    js = open(os.path.join(base, "stime.js"), encoding="utf-8").read()
+    icone = open(os.path.join(base, "icons.js"), encoding="utf-8").read()
+    import re
+    for n in set(re.findall(r'icona\("([a-z0-9-]+)"\)', js)) | {"calculator"}:
+        assert f'"{n}":' in icone, n
+    assert "loadStime" in open(os.path.join(base, "app.js"), encoding="utf-8").read()
+    if shutil.which("node"):
+        for f in ("stime.js", "app.js", "icons.js"):
+            subprocess.run(["node", "--check", os.path.join(base, f)], check=True, capture_output=True)
