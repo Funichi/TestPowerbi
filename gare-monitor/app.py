@@ -17,7 +17,7 @@ import time
 from flask import Flask, jsonify, redirect, request, send_file, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from core import accesso, clienti, logic, metrics, referenze, referenze_cfg, referenze_xlsx, updater
+from core import accesso, clienti, logic, metrics, referenze, referenze_cfg, referenze_xlsx, stime, stime_motore, updater
 from core.db import Store
 from core.reader import ATT_LABELS, DATE_FIELDS, FIELDS, clean_text, read_excel, row_sig, to_date
 from core.writer import NoExcelError, OpenpyxlWriter, WriteError, excel_available, get_writer
@@ -72,6 +72,19 @@ def referenze_json_path():
 
 
 _refstore = {"obj": None}
+_stimestore = {"obj": None}
+
+
+def stime_db_path():
+    """stime.db (Stimometro) sta accanto a monitoraggio.db ma è un database indipendente: il reimport dell'Excel non lo tocca."""
+    return load_config().get("stime_db") or os.path.join(os.path.dirname(os.path.abspath(db_path())), "stime.db")
+
+
+def stimestore():
+    p = stime_db_path()
+    if _stimestore["obj"] is None or _stimestore["obj"].path != p:
+        _stimestore["obj"] = stime.StimeStore(p)
+    return _stimestore["obj"]
 
 
 def refstore():
@@ -384,6 +397,11 @@ def _ref_ok():
     return rs
 
 
+@app.errorhandler(stime.StimaError)
+def _stima_error(e):
+    return jsonify({"error": str(e)}), 400
+
+
 @app.errorhandler(referenze.RefError)
 def _ref_error(e):
     return jsonify({"error": str(e)}), 400
@@ -501,6 +519,80 @@ def referenze_carica():
     cfg["referenze_json"] = p
     save_config(cfg)
     return jsonify({"ok": True, "caricate": n})
+
+
+# ------------------------------------------------------------------ Stimometro (database separato: stime.db)
+
+def _corpo():
+    return request.get_json(silent=True) or {}
+
+
+@app.get("/api/stime")
+def stime_elenco():
+    a = request.args
+    return jsonify({"stime": stimestore().elenco(a.get("cliente") or None, a.get("gara") or None, a.get("q") or None)})
+
+
+@app.post("/api/stime")
+def stime_crea():
+    return jsonify(stimestore().crea(_corpo()))
+
+
+@app.post("/api/stime/calcola")
+def stime_calcola_bozza():
+    """Ricalcolo in tempo reale dell'editor: calcola la stima ricevuta (con il suo snapshot) senza salvarla."""
+    b = _corpo()
+    if not isinstance(b.get("snapshot"), dict):
+        raise stime.StimaError("Parametri della stima mancanti")
+    return jsonify(stime_motore.in_json(stime_motore.calcola(b)))
+
+
+@app.get("/api/stime/catalogo")
+def stime_catalogo_leggi():
+    return jsonify(stimestore().catalogo())
+
+
+@app.put("/api/stime/catalogo")
+def stime_catalogo_salva():
+    return jsonify(stimestore().salva_catalogo(_corpo()))
+
+
+@app.get("/api/stime/<int:sid>")
+def stime_leggi(sid):
+    return jsonify(stimestore().calcola(sid))
+
+
+@app.put("/api/stime/<int:sid>")
+def stime_salva(sid):
+    stimestore().salva(sid, _corpo())
+    return jsonify(stimestore().calcola(sid))
+
+
+@app.post("/api/stime/<int:sid>/versione")
+def stime_versione(sid):
+    return jsonify(stimestore().nuova_versione(sid))
+
+
+@app.post("/api/stime/<int:sid>/clona")
+def stime_clona(sid):
+    b = _corpo()
+    return jsonify(stimestore().clona(sid, gara=b.get("gara"), nome=b.get("nome"), cliente=b.get("cliente")))
+
+
+@app.post("/api/stime/<int:sid>/corrente")
+def stime_corrente(sid):
+    return jsonify(stimestore().imposta_corrente(sid))
+
+
+@app.post("/api/stime/<int:sid>/riallinea")
+def stime_riallinea(sid):
+    return jsonify(stimestore().riallinea(sid, conferma=bool(_corpo().get("conferma"))))
+
+
+@app.delete("/api/stime/<int:sid>")
+def stime_elimina(sid):
+    stimestore().elimina(sid)
+    return jsonify({"ok": True})
 
 
 # ------------------------------------------------------------------ aggiornamento dell'app da GitHub (Release privata)
@@ -923,6 +1015,11 @@ def main():
             rs.backup()                                    # copia di sicurezza di referenze.db a ogni avvio (ultime 20)
     except Exception as e:
         print(f" Backup delle referenze non riuscito: {e}")
+    try:
+        if os.path.isfile(stime_db_path()):
+            stimestore().backup()                          # copia di sicurezza di stime.db a ogni avvio (ultime 20)
+    except Exception as e:
+        print(f" Backup delle stime non riuscito: {e}")
     lan = bool(load_config().get("listen_all"))
     if lan:
         print(" Accesso dalla rete locale attivo (serve la password impostata nelle Impostazioni).")
