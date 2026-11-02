@@ -95,3 +95,12 @@ Vista "Referenze" nel menu: ricerca per argomento (con sinonimi), cliente, ambit
 - **Modalità presentazione** (pulsante nella barra della vista; si esce con Esc o con il pulsante in alto a destra): testo molto più grande e niente di interno: barra laterale, intestazione, schede «Ricerca / Da completare», badge, ID, fonti, campi mancanti, referenti, pulsanti «Copia testo» e «Modifica».
 - **Copia testo**: copia negli appunti titolo e cliente, racconto da 30 secondi e racconto esteso in testo semplice (sezioni con titolo, elenchi con «• »).
 - **Scheda Cliente**: riquadro «Referenze» con il numero di referenze del cliente (nome abbinato senza maiuscole, punteggiatura e S.p.A.) e il link «Vedi le referenze →» alla ricerca già filtrata. Compare solo se l'archivio delle referenze esiste.
+
+## Stimometro (in sviluppo)
+
+Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale e tecnica", v1.0). Si sviluppa per fasi; questa è la **Fase 1: motore di calcolo**.
+
+- `core/stime_catalogo.py`: catalogo dei parametri di default (team e costi, parametri generali, moduli, tipi oggetto, fasi, parametri AM). È il seed iniziale: i valori si calibreranno dall'app.
+- `core/stime_motore.py`: motore di calcolo, unica implementazione delle regole (capitolo 4 della specifica). Senza database né interfaccia; aritmetica decimale con arrotondamento a mezza giornata (`R(x) = ROUND(x/Passo;0)×Passo`, valori normalizzati a 9 decimali); totali come somme di valori già arrotondati; divisioni per zero = "n/d" (None). Ogni stima porta con sé lo snapshot dei parametri e il motore usa solo quello.
+- Test: `python -m pytest -q tests/test_stime_motore.py` (casi TC1, TC2, TC3 della specifica e regole generali).
+
