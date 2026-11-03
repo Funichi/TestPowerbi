@@ -144,7 +144,7 @@ def esporta(stima, oggi=None):
     r += 2
     P.put(r, 1, "Fasi, PM e contingency", bold=True)
     r += 1
-    P.testa(r, ["Codice", "Fase", "Blocco", "Calcolata su", "%", "% BE", "% FE"])
+    P.testa(r, ["Codice", "Fase", "Blocco", "Calcolata su", "%", "% BE", "% FE", "gg fissi"])
     basi = {"Moduli_team": "Implementazione dei moduli (per team)", "B": "Implementazione (B)", "BaseModuli": "Somma dei moduli", "TP": "Totale progetto", "TP_team": "Totale progetto (per team)"}
     fase_pos = {}
     for f in snap["fasi"]:
@@ -157,7 +157,8 @@ def esporta(stima, oggi=None):
         if f.get("pct_be") is not None:
             P.put(r, 6, _n(f.get("pct_be")), F_PCT, inp=True)
             P.put(r, 7, _n(f.get("pct_fe")), F_PCT, inp=True)
-        fase_pos[f["codice"]] = {"pct": P.ext(r, 5), "be": P.ext(r, 6), "fe": P.ext(r, 7)}
+        P.put(r, 8, _n(f.get("gg_fissi")), F_NUM, inp=True)            # vuoto: vale la percentuale; pieno: vale il numero di giornate
+        fase_pos[f["codice"]] = {"pct": P.ext(r, 5), "be": P.ext(r, 6), "fe": P.ext(r, 7), "gf": P.ext(r, 8)}
         if f["codice"] == "PM":
             nome_def("PctPM", P, r, 5)
         if f["codice"] == "CONT":
@@ -354,12 +355,19 @@ def esporta(stima, oggi=None):
         if cod in ("SEC", "PM", "CONT"):
             continue
         pos = fase_pos[cod]
+        gf, be_qui = pos["gf"], S.ref(r, cBE)
+        # giornate fisse: BE = R(N × quota BE), FE = R(N) − BE (come nel motore); vuoto = percentuale
         if f.get("base") == "Moduli_team":
-            fasi_calc[cod] = (f.get("blocco"), riga_bt(f.get("nome"), "=" + R(f"{impl_mod[0]}*{pos['pct']}"), "=" + R(f"{impl_mod[1]}*{pos['pct']}")))
+            fasi_calc[cod] = (f.get("blocco"), riga_bt(
+                f.get("nome"),
+                f'=IF({gf}="",{R(f"{impl_mod[0]}*{pos["pct"]}")},IF({impl_mod[2]}=0,{R(f"{gf}*0.5")},{R(f"{gf}*{impl_mod[0]}/{impl_mod[2]}")}))',
+                f'=IF({gf}="",{R(f"{impl_mod[1]}*{pos["pct"]}")},{R(gf)}-{be_qui})'))
         elif f.get("base") == "B":
-            S.put(r, cX, f"={B}*{pos['pct']}", F_NUM)
+            S.put(r, cX, f'=IF({gf}="",{B}*{pos["pct"]},{gf})', F_NUM)
             x = S.ref(r, cX)
-            fasi_calc[cod] = (f.get("blocco"), riga_bt(f.get("nome"), "=" + R(f"{x}*{pos['be']}"), "=" + R(f"{x}*{pos['fe']}")))
+            fasi_calc[cod] = (f.get("blocco"), riga_bt(
+                f.get("nome"), f'=IF({gf}="",{R(f"{x}*{pos["be"]}")},{R(f"{gf}*{pos["be"]}")})',
+                f'=IF({gf}="",{R(f"{x}*{pos["fe"]}")},{R(gf)}-{be_qui})'))
     r += 1
     S.put(r, 1, "Blocchi", bold=True)
     r += 1
@@ -377,12 +385,16 @@ def esporta(stima, oggi=None):
         celle[f"BLK_{b}"] = S.ext(r - 1, cT)
     TP = riga_bt("Totale progetto (TP)", "=" + somma([x[0] for x in blocchi.values()]), "=" + somma([x[1] for x in blocchi.values()]), bold=True)
     celle["TP"] = S.ext(r - 1, cT)
-    S.put(r, 2, "Project management (TP × % PM)")
-    S.put(r, cT, "=" + R(f"{TP[2]}*PctPM"), F_GG)
+    gpm, gco = fase_pos["PM"]["gf"], fase_pos["CONT"]["gf"]
+    S.put(r, 2, "Project management (TP × % PM, o giornate fisse)")
+    S.put(r, cT, f'=IF({gpm}="",{R(f"{TP[2]}*PctPM")},{R(gpm)})', F_GG)
     PM = S.ref(r, cT)
     celle["PM"] = S.ext(r, cT)
     r += 1
-    CONT = riga_bt("Contingency (TP per team × %)", "=" + R(f"{TP[0]}*PctContingency"), "=" + R(f"{TP[1]}*PctContingency"))
+    be_qui = S.ref(r, cBE)
+    CONT = riga_bt("Contingency (TP per team × %, o giornate fisse)",
+                   f'=IF({gco}="",{R(f"{TP[0]}*PctContingency")},IF({TP[2]}=0,{R(f"{gco}*0.5")},{R(f"{gco}*{TP[0]}/{TP[2]}")}))',
+                   f'=IF({gco}="",{R(f"{TP[1]}*PctContingency")},{R(gco)}-{be_qui})')
     celle["CONT"] = S.ext(r - 1, cT)
     S.put(r, 2, "Totale complessivo", bold=True)
     S.put(r, cT, f"={TP[2]}+{PM}+{CONT[2]}", F_GG, bold=True)

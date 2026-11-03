@@ -192,6 +192,7 @@ def valida_catalogo(nuovo, attuale):
         for campo in ("blocco", "base"):                               # struttura delle fasi fissa: cambiano solo le percentuali
             f[campo] = vf[f["codice"]][campo]
         f["pct"] = _pct(f.get("pct"), f"{f['codice']} %", 0)
+        f.pop("gg_fissi", None)                                # nel catalogo valgono solo le percentuali
         for campo in ("pct_be", "pct_fe", "min", "max"):
             f[campo] = _pct(f.get(campo), f"{f['codice']} {campo}")
     g = k["generali"]
@@ -245,7 +246,7 @@ def differenze(snap, catalogo):
                 out.append({"sezione": sez, "codice": x["codice"], "campo": None, "stima": "presente", "default": "assente"})
                 continue
             for campo in sorted(set(x) | set(d)):
-                if campo not in ("codice", "ordine"):
+                if campo not in ("codice", "ordine", "gg_fissi"):
                     conf(sez, x["codice"], campo, x.get(campo), d.get(campo))
     for sez in ("generali", "am"):
         a, b = snap.get(sez, {}), catalogo.get(sez, {})
@@ -258,6 +259,10 @@ def snapshot_riallineato(snap, catalogo, codici_usati):
     """Nuovo snapshot = catalogo corrente; i tipi oggetto usati dalle righe ma disattivati o assenti nel catalogo restano
     con i parametri precedenti (e il loro modulo), così la stima resta calcolabile e il motore lo segnala con un avviso."""
     nuovo = copy.deepcopy(catalogo)
+    fissi = {f["codice"]: f.get("gg_fissi") for f in snap.get("fasi", []) if f.get("gg_fissi") is not None}
+    for f in nuovo["fasi"]:
+        if f["codice"] in fissi:
+            f["gg_fissi"] = fissi[f["codice"]]                 # le giornate fisse sono una scelta della stima: restano
     tipi = {t["codice"]: t for t in nuovo["tipi"]}
     moduli = {m["codice"]: m for m in nuovo["moduli"]}
     vecchi_t = {t["codice"]: t for t in snap.get("tipi", [])}
@@ -312,8 +317,9 @@ class StimeStore:
                 if not c.execute("SELECT 1 FROM meta WHERE k='seed'").fetchone():
                     _scrivi_catalogo(c, cat.catalogo_default())
                     c.execute("INSERT INTO meta VALUES ('seed', ?)", (_ora(),))
-                    c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '2')")
+                    c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '3')")
                 self._migra(c)
+                self._migra3(c)
                 c.commit()
             finally:
                 c.close()
@@ -339,6 +345,23 @@ class StimeStore:
                 t["attivo"] = False
         _scrivi_catalogo(c, k)
         c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '2')")
+
+    @staticmethod
+    def _migra3(c):
+        """Schema 3: la sicurezza non è più una percentuale sui moduli ma un'attività a corpo; nel catalogo spariscono la fase SEC
+        e compaiono le attività di base (setup degli ambienti, gestione della sicurezza del dato). Le stime già salvate restano
+        come sono (la loro copia dei parametri conserva la sicurezza in percentuale)."""
+        r = c.execute("SELECT v FROM meta WHERE k='schema'").fetchone()
+        if r and r[0] >= "3":
+            return
+        k = _catalogo_da_tabelle(c)
+        k["fasi"] = [f for f in k["fasi"] if f["codice"] != "SEC"]
+        voci = k["generali"].get("voci_corpo") or []
+        nomi = {v.get("nome") for v in voci}
+        base = [v for v in cat.catalogo_default()["generali"]["voci_corpo"] if v["nome"] != "Altre attività" and v["nome"] not in nomi]
+        k["generali"]["voci_corpo"] = base + voci
+        _scrivi_catalogo(c, k)
+        c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '3')")
 
     def backup(self, ora=None):
         """Copia coerente in backup_stime/stime_AAAAMMGG_HHMM.db; tiene le ultime 20."""

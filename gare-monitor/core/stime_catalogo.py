@@ -26,7 +26,9 @@ CATALOGO = {
         "gg_mese": 20,                             # giornate lavorative al mese (G)
         "passo": 0.5,                              # passo di arrotondamento (P)
         "training_be": 10, "training_fe": 10,      # training predefinito in una nuova stima
-        "voci_corpo": [{"nome": "Altre attività", "gg_be": 10, "gg_fe": 10}],
+        # attività di base proposte in ogni stima nuova: la sicurezza del dato e il setup degli ambienti sono giornate a corpo
+        "voci_corpo": [{"nome": n, "gg_be": 0, "gg_fe": 0} for n in ("Setup degli ambienti", "Gestione della sicurezza del dato")]
+                      + [{"nome": "Altre attività", "gg_be": 10, "gg_fe": 10}],
     },
     "moduli": [
         {"codice": "STG", "nome": "Staging (ingestion batch)", "blocco": "Implementazione", "attivo": True},
@@ -57,7 +59,6 @@ CATALOGO = {
         {"codice": "ANA", "nome": "Analisi", "blocco": "Analisi", "base": "Moduli_team", "pct": 0.06, "pct_be": None, "pct_fe": None, "min": None, "max": None},
         {"codice": "DIS", "nome": "Disegno", "blocco": "Disegno", "base": "Moduli_team", "pct": 0.06, "pct_be": None, "pct_fe": None, "min": None, "max": None},
         {"codice": "KO", "nome": "Kick-off", "blocco": "Analisi", "base": "B", "pct": 0.002, "pct_be": 0.5, "pct_fe": 0.5, "min": None, "max": None},
-        {"codice": "SEC", "nome": "Sicurezza", "blocco": "Implementazione", "base": "BaseModuli", "pct": 0.02, "pct_be": 0.5, "pct_fe": 0.5, "min": None, "max": None},
         {"codice": "SIT", "nome": "System & integration test", "blocco": "Test", "base": "B", "pct": 0.04, "pct_be": 0.9, "pct_fe": 0.1, "min": None, "max": None},
         {"codice": "UAT", "nome": "UAT e fixing", "blocco": "Test", "base": "B", "pct": 0.06, "pct_be": 0.2, "pct_fe": 0.8, "min": None, "max": None},
         {"codice": "DOC", "nome": "Documentazione", "blocco": "Test", "base": "B", "pct": 0.02, "pct_be": 0.5, "pct_fe": 0.5, "min": None, "max": None},

@@ -101,6 +101,32 @@ def _somma_uno(valori):
     return normalizza(sum((D(v) for v in valori), ZERO)) == UNO
 
 
+# ------------------------------------------------------------------ giornate fisse sulle fasi (al posto della percentuale)
+# Una fase (anche PM e contingency) può avere "gg_fissi" nello snapshot della stima: allora vale quel numero di giornate.
+# Ripartizione per team: BE = R(N × quota BE), FE = R(N) − BE, così BE + FE = R(N) esattamente. La quota BE è %BE della fase,
+# oppure (analisi, disegno, contingency) la quota BE della base su cui si calcolerebbe la percentuale; con base zero, 50%.
+
+def _gg_fissi(ctx, f):
+    v = (f or {}).get("gg_fissi")
+    if v is None or v == "":
+        return None
+    n = D(v)
+    if n < 0:
+        ctx.m("errore", "negativo", f"{f.get('nome') or f.get('codice')}: giornate fisse negative", f"fase:{f.get('codice')}")
+    return n
+
+
+def quota_be(bt):
+    tot = bt["BE"] + bt["FE"]
+    return Decimal("0.5") if tot == 0 else bt["BE"] / tot
+
+
+def _ripartisci_fisso(ctx, n, q_be):
+    tot = ctx.R(n)
+    be = ctx.R(n * q_be)
+    return _bt(be, tot - be)
+
+
 # ------------------------------------------------------------------ righe (§4.2)
 
 def calcola_riga(ctx, r, dove):
@@ -204,21 +230,25 @@ def _progetto(ctx, stima):
     impl_mod = _somma(*[m["impl"] for m in impl_moduli])
     fasi = {}
     for f in ctx.snap.get("fasi", []):
-        if f.get("codice") in ("PM", "CONT"):
+        if f.get("codice") in ("PM", "CONT") or f.get("base") not in ("Moduli_team", "B"):
             continue
         ctx.pct_fuori(f.get("pct"), f, f.get("nome") or f["codice"], f"fase:{f['codice']}")
+        fisso = _gg_fissi(ctx, f)
+        voce = {"codice": f["codice"], "nome": f.get("nome"), "blocco": f.get("blocco"), "fisso": fisso is not None}
         if f.get("base") == "Moduli_team":
             pct = D(f.get("pct"))
-            fasi[f["codice"]] = {"codice": f["codice"], "nome": f.get("nome"), "blocco": f.get("blocco"), "X": base_moduli * pct,
-                                 **_bt(R(impl_mod["BE"] * pct), R(impl_mod["FE"] * pct))}
+            if fisso is None:
+                fasi[f["codice"]] = {**voce, "X": base_moduli * pct, **_bt(R(impl_mod["BE"] * pct), R(impl_mod["FE"] * pct))}
+            else:
+                fasi[f["codice"]] = {**voce, "X": fisso, **_ripartisci_fisso(ctx, fisso, quota_be(impl_mod))}
             continue
         if not _somma_uno([f.get("pct_be"), f.get("pct_fe")]):
             ctx.m("errore", "ripartizione_fase", f"{f.get('nome') or f['codice']}: %BE + %FE non è 100%", f"fase:{f['codice']}")
-        if f.get("base") != "B":
-            continue
-        X = B * D(f.get("pct"))
-        fasi[f["codice"]] = {"codice": f["codice"], "nome": f.get("nome"), "blocco": f.get("blocco"), "X": X,
-                             **_bt(R(X * D(f.get("pct_be"))), R(X * D(f.get("pct_fe"))))}
+        if fisso is None:
+            X = B * D(f.get("pct"))
+            fasi[f["codice"]] = {**voce, "X": X, **_bt(R(X * D(f.get("pct_be"))), R(X * D(f.get("pct_fe"))))}
+        else:
+            fasi[f["codice"]] = {**voce, "X": fisso, **_ripartisci_fisso(ctx, fisso, D(f.get("pct_be")))}
     tbe, tfe = D(stima.get("training_be")), D(stima.get("training_fe"))
     if tbe < 0 or tfe < 0:
         ctx.m("errore", "negativo", "Giornate di training negative", "training")
@@ -249,8 +279,12 @@ def _progetto(ctx, stima):
     fpm, fco = ctx.fasi.get("PM", {}), ctx.fasi.get("CONT", {})
     ctx.pct_fuori(fpm.get("pct"), fpm, "Project management", "fase:PM")
     ctx.pct_fuori(fco.get("pct"), fco, "Contingency", "fase:CONT")
-    PM = R(tp * D(fpm.get("pct")))
-    cont = _bt(R(TP["BE"] * D(fco.get("pct"))), R(TP["FE"] * D(fco.get("pct"))))
+    fisso_pm, fisso_co = _gg_fissi(ctx, fpm), _gg_fissi(ctx, fco)
+    PM = R(tp * D(fpm.get("pct"))) if fisso_pm is None else ctx.R(fisso_pm)
+    if fisso_co is None:
+        cont = _bt(R(TP["BE"] * D(fco.get("pct"))), R(TP["FE"] * D(fco.get("pct"))))
+    else:
+        cont = _ripartisci_fisso(ctx, fisso_co, quota_be(TP))
     cont["tot"] = cont["BE"] + cont["FE"]
     totale = tp + PM + cont["tot"]
 

@@ -47,6 +47,8 @@ def tc1():
         riga("REP.REPORT", "Data Platform", 50),
         riga("MIG.STORICO", "Dato storico", 20),
     ]
+    # la sicurezza non è più una percentuale sui moduli: è un'attività a corpo (qui con le stesse giornate di prima, 2% di 955,5)
+    s["voci_corpo"] = [{"nome": "Altre attività", "gg_be": 10, "gg_fe": 10}, {"nome": "Gestione della sicurezza del dato", "gg_be": 9.5, "gg_fe": 9.5}]
     s["prezzo_obiettivo"] = 750000
     s["durata_mesi"] = 10
     s["am"] = {"modalita": "manuale", "manuale": {"BE": {"gg_mese": 20, "mesi": 12}, "FE": {"gg_mese": 20, "mesi": 12}}}
@@ -66,7 +68,7 @@ def test_tc1_moduli_analisi_e_disegno_a_percentuale_unica():
 
 def test_tc1_sicurezza_fasi_blocchi_e_totali():
     p = calcola(tc1())["progetto"]
-    assert p["sicurezza"]["S"] == g("19,11") and (p["sicurezza"]["BE"], p["sicurezza"]["FE"]) == (g("9,5"), g("9,5"))
+    assert p["sicurezza"]["S"] == 0 and [(v["BE"], v["FE"]) for v in p["voci_corpo"]] == [(g(10), g(10)), (g("9,5"), g("9,5"))]
     assert p["B"] == g("994,5")
     fasi = {k: (v["BE"], v["FE"]) for k, v in p["fasi"].items() if k not in ("ANA", "DIS")}
     assert fasi == {"KO": (g(1), g(1)), "SIT": (g(36), g(4)), "UAT": (g(12), g("47,5")), "DOC": (g(10), g(10)),
@@ -117,7 +119,7 @@ def tc2():
         riga("MIG.REPORT", "Report legacy", 40, mix=[0.6, 0.3, 0.1]),
         riga("MIG.STORICO", "Storico 5 anni", 30),
     ]
-    s["voci_corpo"] = []                                   # la voce predefinita "Altre attività" è stata eliminata
+    s["voci_corpo"] = [{"nome": "Gestione della sicurezza del dato", "gg_be": 2, "gg_fe": 2}]    # al posto della sicurezza al 2%
     s["training_be"], s["training_fe"] = 5, 5
     s["durata_mesi"] = 6
     s["am"] = {"modalita": "driver", "driver": {"fonte": "progetto", "servizio": "H12", "anni": 3, "evolutiva": 50, "presa": False}}
@@ -129,7 +131,7 @@ def test_tc2_righe_e_fasi():
     righe = {r["etichetta"]: (r["BE"], r["FE"]) for r in p["righe"]}
     assert righe == {"Sorgenti IoT": (g(20), g(0)), "Regole anagrafiche": (g(42), g(0)), "Domini": (g(11), g("4,5")),
                      "Data product": (g(21), g(0)), "Report legacy": (g(0), g(64)), "Storico 5 anni": (g(30), g(0))}
-    assert p["sicurezza"]["S"] == g("3,85") and (p["sicurezza"]["BE"], p["sicurezza"]["FE"]) == (g(2), g(2))
+    assert [(v["BE"], v["FE"]) for v in p["voci_corpo"]] == [(g(2), g(2))]
     assert p["B"] == g("196,5")
     assert p["fasi"]["KO"]["X"] == g("0,393") and (p["fasi"]["KO"]["BE"], p["fasi"]["KO"]["FE"]) == (0, 0)     # arrotondato a zero
     fasi = {k: (v["BE"], v["FE"]) for k, v in p["fasi"].items() if k != "KO"}
@@ -272,3 +274,26 @@ def test_snapshot_vecchi_con_analisi_per_modulo_si_adeguano():
     s["snapshot"] = vecchio
     p = calcola(s)["progetto"]
     assert (p["fasi"]["ANA"]["BE"], p["fasi"]["DIS"]["FE"]) == (g("21,0"), g("21,5"))   # R(423 × 5%) = R(21,15) · R(532,5 × 4%) = R(21,3)
+
+
+def test_giornate_fisse_al_posto_della_percentuale():
+    """Su una fase (anche PM e contingency) si può scrivere un numero di giornate: vale quello, ripartito per team in modo che
+    BE + FE dia esattamente il numero arrotondato."""
+    s = tc1()
+    fasi = {f["codice"]: f for f in s["snapshot"]["fasi"]}
+    fasi["UAT"]["gg_fissi"] = 40.3            # 20/80: BE = R(8,06) = 8,0 · FE = 40,5 − 8,0 = 32,5
+    fasi["ANA"]["gg_fissi"] = 30              # quota BE dell'implementazione dei moduli: 423 / 955,5 → R(13,28) = 13,5 · FE 16,5
+    fasi["PM"]["gg_fissi"] = 100.2            # R(100,2) = 100,0
+    fasi["CONT"]["gg_fissi"] = 50             # quota BE del TP
+    p = calcola(s)["progetto"]
+    assert (p["fasi"]["UAT"]["BE"], p["fasi"]["UAT"]["FE"], p["fasi"]["UAT"]["fisso"]) == (g(8), g("32,5"), True)
+    assert (p["fasi"]["ANA"]["BE"], p["fasi"]["ANA"]["FE"]) == (g("13,5"), g("16,5"))
+    assert p["fasi"]["DIS"]["fisso"] is False and p["fasi"]["DIS"]["BE"] == g("25,5")
+    assert p["PM"] == g(100)
+    tp = p["TP"]
+    be = arrotonda(Decimal(50) * tp["BE"] / tp["tot"], Decimal("0.5"))
+    assert (p["contingency"]["BE"], p["contingency"]["FE"], p["contingency"]["tot"]) == (be, g(50) - be, g(50))
+    fasi["UAT"]["gg_fissi"] = -1
+    assert calcola(s)["export_bloccato"] is True
+    fasi["UAT"]["gg_fissi"] = None                                                   # vuoto: torna la percentuale
+    assert calcola(s)["progetto"]["fasi"]["UAT"]["fisso"] is False

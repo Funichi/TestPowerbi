@@ -32,7 +32,7 @@ def test_chiave_della_gara():
 def test_seed_del_catalogo_e_database_separato(st, tmp_path):
     k = st.catalogo()
     assert [t["codice"] for t in k["team"]] == ["BE", "FE", "PM"] and k["team"][2]["costo"] == 468
-    assert len(k["moduli"]) == 9 and len(k["tipi"]) == 10 and len(k["fasi"]) == 11
+    assert len(k["moduli"]) == 9 and len(k["tipi"]) == 10 and len(k["fasi"]) == 10 and "SEC" not in [f["codice"] for f in k["fasi"]]
     assert k["generali"]["margine_progetto"] == 0.3 and k["am"]["coeff"]["H24"] == 1.5
     assert [f["codice"] for f in k["fasi"]][:2] == ["ANA", "DIS"] and not any(m["codice"] == "ARC" for m in k["moduli"])
     assert os.listdir(tmp_path) == ["stime.db"]                                       # nessun altro file toccato
@@ -59,7 +59,7 @@ def test_crea_salva_e_ricalcola_i_totali(st):
 
 def test_nuova_stima_con_i_default_e_valori_non_validi(st):
     s = st.crea({"nome": "Vuota"})
-    assert s["voci_corpo"] == [{"id": s["voci_corpo"][0]["id"], "nome": "Altre attività", "gg_be": 10, "gg_fe": 10}]
+    assert [(v["nome"], v["gg_be"], v["gg_fe"]) for v in s["voci_corpo"]] == [("Setup degli ambienti", 0, 0), ("Gestione della sicurezza del dato", 0, 0), ("Altre attività", 10, 10)]
     assert (s["training_be"], s["training_fe"]) == (10, 10) and s["am"] == {"modalita": None}
     with pytest.raises(StimaError):
         st.salva(s["id"], {"durata_mesi": "dieci"})
@@ -300,3 +300,47 @@ def test_database_creato_prima_del_percorso_si_aggiorna(tmp_path):
     p = st.calcola(1)["risultati"]["progetto"]
     assert p["fasi"]["ANA"]["BE"] == 1.5 and p["blocchi"]["Architettura"]["tot"] == 9    # l'Ambiente già inserito resta, con i suoi parametri
     StimeStore(path).catalogo()                                                          # la migrazione non si ripete
+
+
+def test_schema_2_si_aggiorna_alla_sicurezza_come_attivita(tmp_path):
+    """Un database con la sicurezza in percentuale (fase SEC): il catalogo perde la fase e prende le attività di base;
+    una stima già salvata conserva la sua sicurezza in percentuale (la sua copia dei parametri non cambia)."""
+    import json as _json
+    from core.stime_catalogo import catalogo_default
+    vecchio = catalogo_default()
+    vecchio["fasi"].insert(2, {"codice": "SEC", "nome": "Sicurezza", "blocco": "Implementazione", "base": "BaseModuli", "pct": 0.02,
+                               "pct_be": 0.5, "pct_fe": 0.5, "min": None, "max": None})
+    vecchio["generali"]["voci_corpo"] = [{"nome": "Altre attività", "gg_be": 10, "gg_fe": 10}]
+    path = str(tmp_path / "stime.db")
+    with sqlite3.connect(path) as c:
+        c.executescript(stime.SCHEMA)
+        stime._scrivi_catalogo(c, vecchio)
+        c.execute("INSERT INTO meta VALUES ('seed', 'x')")
+        c.execute("INSERT INTO meta VALUES ('schema', '2')")
+        c.execute("INSERT INTO stime (famiglia, versione, corrente, nome, snapshot, am, training_be, training_fe) VALUES (1, 1, 1, 'vecchia', ?, '{}', 0, 0)",
+                  (_json.dumps(vecchio),))
+        c.execute("INSERT INTO righe_stima (stima_id, contesto, codice_tipo, quantita, ordine) VALUES (1, 'progetto', 'DWH.OGGETTO', 80, 0)")
+    st = StimeStore(path)
+    k = st.catalogo()
+    assert "SEC" not in [f["codice"] for f in k["fasi"]]
+    assert [v["nome"] for v in k["generali"]["voci_corpo"]] == ["Setup degli ambienti", "Gestione della sicurezza del dato", "Altre attività"]
+    p = st.calcola(1)["risultati"]["progetto"]
+    assert (p["sicurezza"]["BE"], p["sicurezza"]["FE"]) == (4, 4)                      # 380 × 2% = 7,6 → R(3,8) = 4,0 per team
+    assert st.crea({"nome": "nuova"})["snapshot"]["fasi"][0]["codice"] == "ANA"
+    StimeStore(path).catalogo()
+
+
+def test_giornate_fisse_restano_nel_riallineamento_e_non_sono_differenze(st):
+    s = st.crea({"nome": "x", **dati_tc1()})
+    snap = s["snapshot"]
+    next(f for f in snap["fasi"] if f["codice"] == "UAT")["gg_fissi"] = 40
+    st.salva(s["id"], {"snapshot": snap})
+    assert st.calcola(s["id"])["differenze"] == []                                     # un input della stima, non un parametro diverso
+    k = st.catalogo()
+    k["team"][0]["costo"] = 350
+    st.salva_catalogo(k)
+    r = st.riallinea(s["id"], conferma=True)
+    assert next(f for f in r["stima"]["snapshot"]["fasi"] if f["codice"] == "UAT")["gg_fissi"] == 40
+    assert r["stima"]["snapshot"]["team"][0]["costo"] == 350
+    k["fasi"][0]["gg_fissi"] = 5                                                        # nel catalogo valgono solo le percentuali
+    assert "gg_fissi" not in st.salva_catalogo(k)["fasi"][0]
