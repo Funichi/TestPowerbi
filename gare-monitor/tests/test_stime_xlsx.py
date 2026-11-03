@@ -1,5 +1,6 @@
-"""Stimometro, fase 4: l'Excel esportato, ricalcolato con LibreOffice, dà gli stessi risultati del motore (specifica §8.4).
-Per ogni caso: genera l'Excel, lo ricalcola in modalità headless, confronta le celle chiave (tolleranza 0,01) e cerca errori di formula."""
+"""Stimometro: l'Excel esportato (layout dello Stimometro originale: Parametri, Stima, Appoggio redistribuzione), ricalcolato con
+LibreOffice, dà gli stessi risultati del motore (specifica §8.4). Per ogni caso: genera l'Excel, lo ricalcola in modalità headless,
+confronta le celle chiave (tolleranza 0,01), cerca errori di formula e controlla fogli ed etichette principali."""
 import io
 import shutil
 import subprocess
@@ -61,6 +62,9 @@ def confronta(wb, celle, res):
                            f"AM_Y{i}_MENSILE": a["mensile"], f"AM_Y{i}_FTE": a["fte"]})
     controllate = 0
     for chiave, atteso in attesi.items():
+        if chiave not in celle and chiave.endswith("_Architettura"):          # sezione presente solo se ha righe
+            assert atteso in (None, 0), f"{chiave}: {atteso}"
+            continue
         got = num(valore(wb, celle[chiave]))
         atteso = num(atteso)
         if atteso is None:
@@ -80,24 +84,30 @@ def test_excel_ricalcolato_uguale_al_motore(caso, tmp_path):
     wb = ricalcola(contenuto, tmp_path)
     assert errori_di_formula(wb) == []
     assert confronta(wb, celle, calcola(s)) >= 25
-    assert wb.sheetnames == ["Riepilogo", "Parametri", "Stima", "Ripartizione BE-FE", "AM"]
+    assert wb.sheetnames == ["Parametri", "Stima", "Appoggio redistribuzione"]
+    testi = {str(c.value) for ws in wb.worksheets for riga in ws.iter_rows() for c in riga if isinstance(c.value, str)}
+    for etichetta in ("Stima Completa", "Totale Progetto", "Totale Progetto + Contingency", "Costo totale", "Ricavi", "Maintenance",
+                      "Peso %", "Val x GG", "GG Backend", "GG Frontend", "Tempi e FTE", "Attività a corpo", "% Distribuzione", "Check"):
+        assert etichetta in testi, etichetta
+    for codice in ("STG.FLUSSO", "DWH.OGGETTO", "REP.REPORT", "KO", "SIT", "UAT", "PGL", "CONT"):   # nessun codice tecnico visibile
+        assert codice not in testi, codice
 
 
 @con_libreoffice
 def test_le_formule_sono_vive_cambiando_un_input_nell_excel(tmp_path):
-    """Cambio la quantità dello Staging e il margine direttamente nell'Excel: dopo il ricalcolo i risultati sono quelli
-    che il motore dà con gli stessi input."""
+    """Cambio la quantità dello Staging (foglio Parametri) e il margine (foglio Stima) direttamente nell'Excel: dopo il ricalcolo
+    i risultati sono quelli che il motore dà con gli stessi input."""
     s = tc1()
     s.update(nome="TC1", cliente="Acme", versione=1)
     contenuto, _, celle = esporta(s)
     wb = openpyxl.load_workbook(io.BytesIO(contenuto))
-    ws = wb["Stima"]
-    riga = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 1).value == "STG")
-    ws.cell(riga, 4).value = 50
-    wb.defined_names["MargineProgetto"]                                                    # nome definito presente
     p = wb["Parametri"]
-    cella_margine = next(c for riga_ in p.iter_rows() for c in riga_ if c.value == "Margine del progetto")
-    p.cell(cella_margine.row, 3).value = 0.25
+    riga = next(r for r in range(1, p.max_row + 1) if p.cell(r, 2).value == "Sorgente 1")
+    p.cell(riga, 3).value = 50
+    st = wb["Stima"]
+    riga = next(r for r in range(1, st.max_row + 1) if st.cell(r, 2).value == "Margine")
+    st.cell(riga, 3).value = 0.25
+    assert "MargineProgetto" in wb.defined_names
     buf = io.BytesIO()
     wb.save(buf)
     wb2 = ricalcola(buf.getvalue(), tmp_path)
@@ -131,6 +141,13 @@ def test_struttura_del_file_senza_libreoffice():
     for vietata in ("XLOOKUP", "LET(", "LAMBDA", "FILTER(", "[", "http"):
         assert vietata not in testo, vietata
     assert "ROUND(ROUND(" in testo
+    for ws in wb.worksheets:
+        assert not ws.tables and ws.sheet_view.showGridLines is False, ws.title         # niente tabelle Excel, griglia nascosta
+        for riga in ws.iter_rows():
+            for c in riga:
+                assert not (c.fill and c.fill.fill_type and str(c.fill.fgColor.rgb).endswith("FFF2CC")), c.coordinate   # niente giallo
+    st = wb["Stima"]
+    assert st["B2"].value == "Stima Completa" and str(st["B2"].fill.fgColor.rgb).endswith("002060")
 
 
 def test_api_export(client):  # noqa: F811
@@ -142,7 +159,7 @@ def test_api_export(client):  # noqa: F811
     assert r.status_code == 200 and r.mimetype.endswith("spreadsheetml.sheet")
     assert "Stima_Terna_Data_platform_v1_" in r.headers["Content-Disposition"]
     wb = openpyxl.load_workbook(io.BytesIO(r.data))
-    assert wb.sheetnames[0] == "Riepilogo"
+    assert wb.sheetnames == ["Parametri", "Stima", "Appoggio redistribuzione"] and wb.active.title == "Stima"
     righe = st["righe"]
     righe[0]["mix"] = [0.5, 0.3, 0.1]
     c.put(f"/api/stime/{st['id']}", json={"righe": righe})
@@ -163,9 +180,10 @@ def test_excel_con_giornate_fisse_uguale_al_motore(tmp_path):
     confronta(wb, celle, calcola(s))
     # nell'Excel svuoto le giornate fisse di UAT: torna la percentuale
     wb2 = openpyxl.load_workbook(io.BytesIO(contenuto))
-    p = wb2["Parametri"]
-    riga = next(r for r in range(1, p.max_row + 1) if p.cell(r, 1).value == "UAT")
-    p.cell(riga, 8).value = None
+    a = wb2["Appoggio redistribuzione"]
+    riga = next(r for r in range(1, a.max_row + 1) if a.cell(r, 2).value == "UAT e fixing")
+    assert a.cell(riga, 10).value == 40.3
+    a.cell(riga, 10).value = None
     buf = io.BytesIO()
     wb2.save(buf)
     fasi["UAT"]["gg_fissi"] = None
