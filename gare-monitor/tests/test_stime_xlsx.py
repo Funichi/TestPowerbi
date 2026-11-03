@@ -148,3 +148,26 @@ def test_api_export(client):  # noqa: F811
     c.put(f"/api/stime/{st['id']}", json={"righe": righe})
     r = c.get(f"/api/stime/{st['id']}/export")
     assert r.status_code == 400 and "Export bloccato" in r.get_json()["error"]
+
+
+@con_libreoffice
+def test_excel_con_giornate_fisse_uguale_al_motore(tmp_path):
+    """Giornate fisse su UAT, analisi, PM e contingency: l'Excel le applica come il motore; svuotandole torna la percentuale."""
+    s = tc1()
+    s.update(nome="TC1 fisse", cliente="Acme", versione=1)
+    fasi = {f["codice"]: f for f in s["snapshot"]["fasi"]}
+    fasi["UAT"]["gg_fissi"], fasi["ANA"]["gg_fissi"], fasi["PM"]["gg_fissi"], fasi["CONT"]["gg_fissi"] = 40.3, 30, 100.2, 50
+    contenuto, _, celle = esporta(s)
+    wb = ricalcola(contenuto, tmp_path)
+    assert errori_di_formula(wb) == []
+    confronta(wb, celle, calcola(s))
+    # nell'Excel svuoto le giornate fisse di UAT: torna la percentuale
+    wb2 = openpyxl.load_workbook(io.BytesIO(contenuto))
+    p = wb2["Parametri"]
+    riga = next(r for r in range(1, p.max_row + 1) if p.cell(r, 1).value == "UAT")
+    p.cell(riga, 8).value = None
+    buf = io.BytesIO()
+    wb2.save(buf)
+    fasi["UAT"]["gg_fissi"] = None
+    wb3 = ricalcola(buf.getvalue(), tmp_path / "b") if (tmp_path / "b").mkdir() is None else None
+    confronta(wb3, celle, calcola(s))

@@ -48,7 +48,7 @@
   }
 
   const ST = {vista: "elenco", cat: null, gare: [], elenco: [], filtri: {cliente: "", gara: "", q: ""}, s: null, res: null, sporco: false,
-    tab: "moduli", root: null, timer: null, seq: 0, catEdit: null, catErr: ""};
+    tab: "moduli", aperti: {}, root: null, timer: null, seq: 0, catEdit: null, catErr: ""};
 
   // ---------------------------------------------------------------- percorsi dei parametri: "sezione|codice|campo|indice"
   const contenitore = (obj, sez, cod) => (sez === "generali" || sez === "am") ? obj[sez] : (obj[sez] || []).find(x => x.codice === cod);
@@ -180,55 +180,44 @@
   }
 
   // ================================================================ EDITOR (percorso a passi)
-  // 1 Impostazioni · 2 Moduli · 3 Fasi e attività · 4 AM · 5 Riepilogo, più "Parametri avanzati". Dal passo 2 le impostazioni
-  // stanno a destra con i totali a scomparsa. Le giornate si mostrano totali: BE e FE restano separati nel calcolo (e negli input
-  // che li richiedono: attività a corpo, training, AM manuale, ripartizioni nei parametri avanzati).
-  const PASSI = [["impostazioni", "Impostazioni"], ["moduli", "Moduli"], ["fasi", "Fasi e attività"], ["am", "AM"], ["riepilogo", "Riepilogo"]];
+  // 1 Impostazioni · 2 Moduli · 3 Attività · 4 Fasi · 5 AM · 6 Riepilogo, più "Parametri avanzati". A destra solo i totali, sempre
+  // visibili. Le giornate si mostrano totali: BE e FE restano separati nel calcolo (e negli input che li richiedono).
+  const PASSI = [["impostazioni", "Impostazioni"], ["moduli", "Moduli"], ["attivita", "Attività"], ["fasi", "Fasi"], ["am", "AM"], ["riepilogo", "Riepilogo"]];
+  const nfIt = new Intl.NumberFormat("it-IT", {maximumFractionDigits: 4});
   async function apri(id, passo) {
     try {
       const precedente = ST.s && ST.s.id, r = await api(`/api/stime/${id}`);
       ST.s = r.stima; ST.res = r.risultati; ST.sporco = false; ST.vista = "editor";
+      if (precedente !== id) ST.aperti = {};
       ST.passo = passo || (precedente === id && ST.passo ? ST.passo : "moduli");          // una stima esistente si apre sui moduli
-      assicuraRighe(ST.s);
       disegna();
     } catch (e) { toast(e.message, true); ST.vista = "elenco"; disegna(); }
   }
   const tipo = (snap, c) => snap.tipi.find(t => t.codice === c);
-  const nomeModulo = (snap, c) => { const m = snap.moduli.find(x => x.codice === c); return m ? m.nome : c; };
   const vuota = r => (r.quantita == null || +r.quantita === 0) && !r.etichetta && !r.mix && r.gg_be == null && r.gg_fe == null;
-
-  // tutti i moduli e i tipi oggetto attivi già pronti: una riga vuota per ogni tipo che non ne ha (le righe vuote non si salvano)
-  function assicuraRighe(s) {
-    const snap = s.snapshot, usati = new Set(s.righe.filter(r => (r.contesto || "progetto") === "progetto").map(r => r.tipo));
-    snap.moduli.filter(m => m.attivo !== false).forEach(m => snap.tipi.filter(t => t.modulo === m.codice && t.attivo !== false && !usati.has(t.codice)).forEach(t =>
-      s.righe.push(rigaNuova(t, "progetto"))));
-  }
-  const rigaNuova = (t, contesto) => ({contesto, tipo: t.codice, etichetta: "", quantita: null, mix: null,
-    gg_be: t.modalita === "corpo" ? null : null, gg_fe: null});
-  const daSalvare = s => ({...s, righe: s.righe.filter(r => !vuota(r))});
+  const rigaNuova = (t, contesto) => ({contesto, tipo: t.codice, etichetta: "", quantita: null, mix: null, gg_be: null, gg_fe: null});
+  const daSalvare = s => ({...s, righe: s.righe.filter(r => !vuota(r))});   // le righe lasciate vuote non si salvano
 
   function disegnaEditor(m) {
-    const s = ST.s, passo = ST.passo;
+    const s = ST.s, passo = ST.passo, conTotali = passo !== "riepilogo";
     m.innerHTML = `<div class="st-wrap st-ed">${schede()}
       <div class="card st-testa"><div class="st-testa-r"><input id="st-nome" class="st-nome" value="${E(s.nome)}" aria-label="Nome della stima">
           <span class="st-ver">v${s.versione}${s.corrente ? ` <span class="st-badge ok">corrente</span>` : ` <button class="linkbtn" id="st-corr">Rendi corrente</button>`}</span>
           <span class="st-sp"></span><span class="st-stato" id="st-stato"></span>
-          <button id="st-indietro">${icona("arrow-left")}Elenco</button><button class="primary" id="st-salva">Salva</button>
+          <button id="st-indietro">${icona("arrow-left")}Elenco</button>
           <button class="st-more" id="st-more" aria-label="Altre azioni">${icona("ellipsis")}</button>
           <div class="st-menu" id="st-menu" hidden><button data-m="versione">Nuova versione</button><button data-m="clona">Clona…</button>
             <button data-m="esporta">Esporta Excel</button><hr><button data-m="elimina" class="danger">Elimina…</button></div></div>
         <div class="st-passi">${PASSI.map(([k, l], i) => `<button class="st-passo ${passo === k ? "on" : ""} ${PASSI.findIndex(x => x[0] === passo) > i ? "fatto" : ""}" data-passo="${k}"><span>${i + 1}</span>${l}</button>`).join(`<i class="st-freccia"></i>`)}
           <span class="st-sp"></span><button class="linkbtn ${passo === "parametri" ? "on" : ""}" data-passo="parametri">${icona("sliders-horizontal")}Parametri avanzati</button></div></div>
-      ${passo === "impostazioni" ? `<div class="card st-imp-full"><div class="st-rh"><h3>Impostazioni della stima</h3></div>${impostazioniHtml(s, false)}${navHtml()}</div>`
-        : `<div class="st-corpo"><div class="st-sx"><div id="st-passoc"></div>${navHtml()}</div><aside class="st-dx"><div class="card st-imp-dx">${impostazioniHtml(s, true)}</div><div id="st-riep"></div></aside></div>`}</div>`;
+      <div class="st-corpo ${conTotali ? "" : "st-pieno"}"><div class="st-sx"><div id="st-passoc"></div>${navHtml()}</div>${conTotali ? `<aside class="st-dx" id="st-riep"></aside>` : ""}</div></div>`;
     bindSchede(m);
     qs("#st-indietro", m).onclick = () => vai("elenco");
-    qs("#st-salva", m).onclick = salva;
     qs("#st-nome", m).oninput = e => { s.nome = e.target.value; modificato(false); };
     const c = qs("#st-corr", m); if (c) c.onclick = async () => { if (await salvaSeServe()) { await api(`/api/stime/${s.id}/corrente`, {method: "POST"}); toast("Ora è la versione corrente"); apri(s.id); } };
     const menu = qs("#st-menu", m);
     qs("#st-more", m).onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; };
-    qs(".st-ed", m).onclick = e => { if (!e.target.closest("#st-menu, #st-more")) menu.hidden = true; };
+    qs(".st-ed", m).onclick = e => { if (!e.target.closest("#st-menu, #st-more")) menu.hidden = true; if (!e.target.closest(".st-pop, [data-mixpop], [data-aiuto]")) chiudiPopover(); };
     qsa("[data-m]", menu).forEach(b => b.onclick = async () => {
       menu.hidden = true;
       if (b.dataset.m === "elimina") { if (confirm(`Eliminare questa versione (v${s.versione}) di “${s.nome}”? Non si può annullare.`)) { await api(`/api/stime/${s.id}`, {method: "DELETE"}); ST.sporco = false; toast("Stima eliminata"); vai("elenco"); } return; }
@@ -238,9 +227,7 @@
       if (b.dataset.m === "esporta") esporta(s.id);
     });
     qsa("[data-passo]", m).forEach(b => b.onclick = () => vaiPasso(b.dataset.passo));
-    bindImpostazioni(qs(passo === "impostazioni" ? ".st-imp-full" : ".st-imp-dx", m));
-    if (passo !== "impostazioni") disegnaPasso();
-    disegnaRiepilogo(); stato();
+    disegnaPasso(); disegnaRiepilogo(); stato();
   }
   function navHtml() {
     const i = PASSI.findIndex(x => x[0] === ST.passo);
@@ -250,25 +237,18 @@
   }
   function vaiPasso(p) {
     if (p === ST.passo) return;
-    const prima = ST.passo; ST.passo = p;
-    if (prima === "impostazioni" || p === "impostazioni") { disegnaEditor(ST.root); }
-    else {
-      qsa(".st-passo, [data-passo='parametri']", ST.root).forEach(b => b.classList.toggle("on", b.dataset.passo === p));
-      const i = PASSI.findIndex(x => x[0] === p);
-      qsa(".st-passo", ST.root).forEach((b, k) => b.classList.toggle("fatto", k < i));
-      qs(".st-sx .st-nav", ST.root).outerHTML = navHtml();
-      qsa(".st-sx .st-nav [data-passo]", ST.root).forEach(b => b.onclick = () => vaiPasso(b.dataset.passo));
-      disegnaPasso(); disegnaRiepilogo();
-    }
+    ST.passo = p; chiudiPopover();
+    disegnaEditor(ST.root);
     window.scrollTo({top: 0, behavior: "smooth"});
   }
   function stato() {
     const el = qs("#st-stato", ST.root); if (!el) return;
-    el.innerHTML = ST.sporco ? `<span class="st-badge warn">Modifiche non salvate</span>` : `<span class="muted">Salvata ${E((ST.s.modificata_il || "").replace("T", " ").slice(0, 16))}</span>`;
-    const b = qs("#st-salva", ST.root); if (b) b.disabled = !ST.sporco;
+    el.innerHTML = ST.sporco ? `<span class="st-badge warn">Modifiche non salvate</span><button class="primary" id="st-salva">Salva</button>`
+      : `<span class="st-salvato" title="Salvata ${E((ST.s.modificata_il || "").replace("T", " ").slice(0, 16))}">Tutto salvato ✓</span>`;
+    const b = qs("#st-salva", el); if (b) b.onclick = salva;
   }
   function modificato(strutturale) {
-    ST.sporco = true; stato();
+    const prima = ST.sporco; ST.sporco = true; if (!prima) stato();
     if (strutturale) disegnaPasso();
     clearTimeout(ST.timer); ST.timer = setTimeout(ricalcola, 180);
   }
@@ -283,7 +263,7 @@
   async function salva() {
     try {
       const r = await api(`/api/stime/${ST.s.id}`, {method: "PUT", body: daSalvare(ST.s)});
-      ST.s = r.stima; ST.res = r.risultati; ST.sporco = false; assicuraRighe(ST.s); toast("Stima salvata"); disegna();
+      ST.s = r.stima; ST.res = r.risultati; ST.sporco = false; toast("Stima salvata"); disegna();
       return true;
     } catch (e) { toast(e.message, true); return false; }
   }
@@ -291,11 +271,11 @@
   window.addEventListener("beforeunload", e => { if (ST.vista === "editor" && ST.sporco) { e.preventDefault(); e.returnValue = ""; } });
 
   // ---------------------------------------------------------------- campo numerico generico
-  // data-k: "s:campo" (stima), "p:sez|cod|campo|idx" (snapshot), "r:i:campo[:idx]" (riga), "v:i:campo" (attività a corpo), "a:percorso" (AM)
+  // data-k: "s:campo" (stima), "p:sez|cod|campo|idx" (snapshot), "r:i:campo" (riga), "v:i:campo" (attività a corpo), "a:percorso" (AM)
   function campo(k, valore, opz = {}) {
-    const pct = opz.pct, v = pct ? inPct(valore) : inNum(valore);
-    return `<input class="st-n ${opz.cls || ""}" data-k="${E(k)}" data-f="${pct ? "pct" : "num"}" ${opz.max1 ? "data-max1" : ""}
-      value="${E(v)}" inputmode="decimal" placeholder="${E(opz.ph == null ? "" : opz.ph)}" ${opz.title ? `title="${E(opz.title)}"` : ""} autocomplete="off">`;
+    const pct = opz.pct, v = pct ? inPct(valore) : (opz.it && valore != null && valore !== "" ? nfIt.format(valore) : inNum(valore));
+    return `<input class="st-n ${opz.cls || ""}" data-k="${E(k)}" data-f="${pct ? "pct" : "num"}" ${opz.max1 ? "data-max1" : ""} ${opz.it ? "data-it" : ""}
+      value="${E(v)}" inputmode="decimal" placeholder="${E(opz.ph == null ? "" : opz.ph)}" ${opz.title ? `title="${E(opz.title)}"` : ""} ${opz.label ? `aria-label="${E(opz.label)}"` : ""} autocomplete="off">`;
   }
   function leggiCampo(el) {
     const n = leggiNum(el.value), pct = el.dataset.f === "pct";
@@ -306,26 +286,29 @@
     return ok ? {ok, v: pct ? pctDaInput(n) : n} : {ok};
   }
   function bindCampi(root, applica) {
-    qsa("input.st-n[data-k]", root).forEach(el => el.oninput = () => { const r = leggiCampo(el); if (r.ok) applica(el.dataset.k, r.v, el); });
+    qsa("input.st-n[data-k]", root).forEach(el => {
+      el.oninput = () => { const r = leggiCampo(el); if (r.ok) applica(el.dataset.k, r.v, el); };
+      el.onfocus = () => el.select();                         // il contenuto si seleziona: si riscrive senza cancellare
+      if (el.hasAttribute("data-it")) el.onblur = () => { const n = leggiNum(el.value); if (n != null && !Number.isNaN(n)) el.value = nfIt.format(n); };
+    });
+    qsa("input:not(.st-n)", root).forEach(el => { if (!el.onfocus && el.type !== "checkbox") el.onfocus = () => el.select(); });
   }
   function applicaCampo(k, v) {
     const s = ST.s, [t, ...r] = k.split(":");
     if (t === "s") s[r[0]] = v;
     else if (t === "p") pset(s.snapshot, r.join(":"), v);
-    else if (t === "r") {
-      const riga = s.righe[+r[0]], campo = r[1];
-      if (campo === "mix") { if (!riga.mix) riga.mix = [...tipo(s.snapshot, riga.tipo).mix]; riga.mix[+r[2]] = v; marcaMix(+r[0]); }
-      else riga[campo] = v;
-    } else if (t === "v") s.voci_corpo[+r[0]][r[1]] = v;
+    else if (t === "r") s.righe[+r[0]][r[1]] = v;
+    else if (t === "v") s.voci_corpo[+r[0]][r[1]] = v;
     else if (t === "a") { const [modo, ...p] = r[0].split("."); s.am[modo] = s.am[modo] || {}; let o = s.am[modo]; p.slice(0, -1).forEach(x => o = o[x] = o[x] || {}); o[p[p.length - 1]] = v; }
     if (t === "p") segnaDiff(ST.root);
     modificato(false);
   }
-  const diffDot = p => ST.cat && !uguali(pget(ST.s.snapshot, p), pget(ST.cat, p)) ? ` <span class="st-diff-i" title="Default corrente: ${E(fmtDef(p))}"></span><button class="st-ib st-rip" data-rip="${E(p)}" title="Ripristina il default">${icona("undo-2")}</button>` : "";
+  const diffDot = p => ST.cat && !uguali(pget(ST.s.snapshot, p), pget(ST.cat, p)) ? ` <span class="st-diff-i" title="Default corrente: ${E(fmtDef(p))}"></span><button class="st-ib st-rip" data-rip="${E(p)}" title="Ripristina il default" aria-label="Ripristina il default">${icona("undo-2")}</button>` : "";
   function fmtDef(p) { const v = pget(ST.cat, p); return v == null ? "vuoto" : Array.isArray(v) ? v.map(x => /mix|pct/.test(p) ? inPct(x) + "%" : inNum(x)).join(" / ") : typeof v === "number" ? (/pct|margine|decalage|correttiva|presa|\|min\||\|max\|/.test(p) ? inPct(v) + "%" : inNum(v)) : String(v); }
   function segnaDiff(root) {                                    // pallini "diverso dal default" aggiornati senza ridisegnare
     qsa("[data-k^='p:']", root).forEach(el => {
       const p = el.dataset.k.slice(2), base = /\|(mix|gg)\|\d+$/.test(p) ? p.replace(/\d+$/, "") : p;
+      if (/\|gg_fissi\|/.test(p)) return;
       const box = el.closest("td, .st-cv"); if (!box) return;
       const diff = !uguali(pget(ST.s.snapshot, base), pget(ST.cat, base)), dot = box.querySelector(".st-diff-i");
       if (diff && !dot) box.insertAdjacentHTML("beforeend", ` <span class="st-diff-i" title="Diverso dal default corrente: si salva con la stima"></span>`);
@@ -334,31 +317,43 @@
   }
   function bindComuni(box) {
     bindCampi(box, applicaCampo);
-    qsa("[data-rip]", box).forEach(b => b.onclick = () => { pset(ST.s.snapshot, b.dataset.rip, copia(pget(ST.cat, b.dataset.rip))); ST.sporco = true; disegnaEditor(ST.root); clearTimeout(ST.timer); ST.timer = setTimeout(ricalcola, 50); });
+    qsa("[data-rip]", box).forEach(b => b.onclick = () => { pset(ST.s.snapshot, b.dataset.rip, copia(pget(ST.cat, b.dataset.rip))); modificato(true); });
+  }
+  const aiuto = testo => `<button type="button" class="st-aiuto" data-aiuto="${E(testo)}" aria-label="Aiuto">?</button>`;
+  function bindAiuto(box) {
+    qsa("[data-aiuto]", box).forEach(b => b.onclick = e => { e.stopPropagation(); apriPopover(b, `<div class="st-aiuto-t">${b.dataset.aiuto}</div>`); });
   }
 
-  // ---------------------------------------------------------------- 1. impostazioni (passo iniziale, poi a destra)
-  function impostazioniHtml(s, compatto) {
+  // ---------------------------------------------------------------- popover (mix e aiuto): uno alla volta, chiuso da clic fuori o Esc
+  function chiudiPopover() { const p = document.getElementById("st-pop"); if (p) p.remove(); }
+  function apriPopover(ancora, html) {
+    chiudiPopover();
+    const p = document.createElement("div"); p.id = "st-pop"; p.className = "st-pop"; p.innerHTML = html;
+    document.body.appendChild(p);
+    const r = ancora.getBoundingClientRect(), w = p.offsetWidth;
+    p.style.top = `${window.scrollY + r.bottom + 6}px`;
+    p.style.left = `${Math.max(8, Math.min(window.scrollX + r.right - w, window.scrollX + document.documentElement.clientWidth - w - 8))}px`;
+    p.onclick = e => e.stopPropagation();
+    return p;
+  }
+  document.addEventListener("keydown", e => { if (e.key === "Escape") chiudiPopover(); });
+
+  // ---------------------------------------------------------------- 1. impostazioni
+  function passoImpostazioni(s) {
     const g = s.gara, gEsiste = !g || ST.gare.some(x => x.chiave === g.chiave), snap = s.snapshot;
-    const P = (lab, p, opz = {}) => `<div class="st-campo"><label>${lab}</label><div class="st-cv">${campo("p:" + p, pget(snap, p), opz)}${opz.suf ? `<span class="muted">${opz.suf}</span>` : ""}${diffDot(p)}</div></div>`;
-    const S_ = (lab, k, suf) => `<div class="st-campo"><label>${lab}</label><div class="st-cv">${campo("s:" + k, s[k])}<span class="muted">${suf}</span></div></div>`;
-    return `${compatto ? `<div class="st-rh"><h3>Impostazioni</h3></div>` : ""}<div class="${compatto ? "st-campi1" : "st-campi"}">
-      <div class="st-campo ${compatto ? "" : "st-l2"}"><label for="st-cli">Cliente</label><input id="st-cli" list="st-cli-dl" value="${E(s.cliente)}" autocomplete="off">
+    return `<div class="card"><div class="st-rh"><h3>Impostazioni della stima</h3></div><div class="st-campi st-imp">
+      <div class="st-campo st-l2"><label for="st-cli">Cliente</label><input id="st-cli" list="st-cli-dl" value="${E(s.cliente)}" autocomplete="off">
         <datalist id="st-cli-dl">${[...new Set(ST.gare.map(x => x.cliente).filter(Boolean))].sort().map(c => `<option value="${E(c)}">`).join("")}</datalist></div>
-      <div class="st-campo ${compatto ? "" : "st-l2"}"><label for="st-gara">Gara collegata</label>${campoGara("st-gara", g && gEsiste ? ST.gare.find(x => x.chiave === g.chiave) : null)}
+      <div class="st-campo st-l2"><label for="st-gara">Gara collegata</label>${campoGara("st-gara", g && gEsiste ? ST.gare.find(x => x.chiave === g.chiave) : null)}
         ${g && !gEsiste ? `<div class="hint warn">Gara ${E(g.ss)} · ${g.anno} (${E(g.cliente || "")}) non trovata tra le gare attuali: il collegamento resta.</div>` : ""}</div>
-      ${S_("Durata del progetto", "durata_mesi", "mesi")}${S_("Prezzo obiettivo (facoltativo)", "prezzo_obiettivo", "€")}
-      ${P("Margine del progetto", "generali||margine_progetto|", {pct: true, max1: true, suf: "%"})}
-      ${snap.team.map(t => P(`Costo ${E(t.nome)}`, `team|${t.codice}|costo|`, {suf: "€/gg"})).join("")}
-      ${P("Giornate lavorative al mese", "generali||gg_mese|")}${P("Arrotondamento", "generali||passo|", {suf: "gg"})}
-      <div class="st-campo ${compatto ? "" : "st-l4"}"><label for="st-note">Note</label><input id="st-note" value="${E(s.note)}"></div></div>`;
+      <div class="st-campo"><label>Durata del progetto</label><div class="st-cv">${campo("s:durata_mesi", s.durata_mesi, {it: true})}<span class="muted">mesi</span></div></div>
+      <div class="st-campo"><label>Prezzo obiettivo (facoltativo)</label><div class="st-cv">${campo("s:prezzo_obiettivo", s.prezzo_obiettivo, {it: true})}<span class="muted">€</span></div></div>
+      <div class="st-campo"><label>Margine del progetto</label><div class="st-cv">${campo("p:generali||margine_progetto|", pget(snap, "generali||margine_progetto|"), {pct: true, max1: true})}<span class="muted">%</span>${diffDot("generali||margine_progetto|")}</div></div></div>
+      <p class="hint">Costi delle figure, giornate al mese, arrotondamento e note sono nei <button class="linkbtn" data-passo="parametri">parametri avanzati</button>.</p></div>`;
   }
   function bindImpostazioni(box) {
-    if (!box) return;
     const s = ST.s;
-    bindComuni(box);
     qs("#st-cli", box).oninput = e => { s.cliente = e.target.value; modificato(false); };
-    qs("#st-note", box).oninput = e => { s.note = e.target.value; modificato(false); };
     qs("#st-gara", box).onchange = e => {
       const v = garaDaCampo(e.target.value);
       if (v === undefined) { e.target.classList.add("bad"); toast("Scegli una gara dall'elenco dei suggerimenti, o lascia il campo vuoto", true); return; }
@@ -369,91 +364,166 @@
     };
   }
 
-  // ---------------------------------------------------------------- passi 2-5 e parametri avanzati
+  // ---------------------------------------------------------------- disegno del passo corrente
   function disegnaPasso() {
     const box = qs("#st-passoc", ST.root); if (!box) return;
     const s = ST.s, p = ST.passo;
-    box.innerHTML = p === "moduli" ? passoModuli(s) : p === "fasi" ? passoFasi(s) : p === "am" ? passoAm(s) : p === "riepilogo" ? `<div class="card" data-blocco="riep-full"></div>` : passoParametri(s);
-    bindComuni(box);
+    box.innerHTML = p === "impostazioni" ? passoImpostazioni(s) : p === "moduli" ? passoModuli(s) : p === "attivita" ? passoAttivita(s)
+      : p === "fasi" ? passoFasi(s) : p === "am" ? passoAm(s) : p === "riepilogo" ? `<div data-blocco="riep-full"></div>` : passoParametri(s);
+    bindComuni(box); bindAiuto(box);
+    qsa("[data-passo]", box).forEach(b => b.onclick = () => vaiPasso(b.dataset.passo));
+    if (p === "impostazioni") bindImpostazioni(box);
     qsa("[data-et]", box).forEach(el => el.oninput = () => { s.righe[+el.dataset.et].etichetta = el.value; modificato(false); });
     qsa("[data-vn]", box).forEach(el => el.oninput = () => { s.voci_corpo[+el.dataset.vn].nome = el.value; modificato(false); });
-    qsa("[data-rip-mix]", box).forEach(b => b.onclick = () => { s.righe[+b.dataset.ripMix].mix = null; modificato(true); });
-    qsa("[data-riga]", box).forEach(b => b.onclick = () => azioneRiga(b.dataset.riga, +b.dataset.i));
-    qsa("[data-voce]", box).forEach(b => b.onclick = () => { if (b.dataset.voce === "del") s.voci_corpo.splice(+b.dataset.i, 1); else s.voci_corpo.push({nome: "Nuova attività", gg_be: 0, gg_fe: 0}); modificato(true); });
+    qsa("[data-cat]", box).forEach(b => b.onclick = e => { if (e.target.closest("[data-agg]")) return; ST.aperti[b.dataset.cat] = !apertoModulo(b.dataset.cat); disegnaPasso(); });
+    qsa("[data-agg]", box).forEach(b => b.onclick = e => { e.stopPropagation(); aggiungiRiga(b.dataset.agg, b.dataset.ctx || "progetto", null); });
+    qsa("[data-del]", box).forEach(b => b.onclick = () => eliminaRiga(+b.dataset.del));
+    qsa("[data-mixpop]", box).forEach(b => b.onclick = e => { e.stopPropagation(); popoverMix(b, +b.dataset.mixpop); });
+    qsa("input[data-k$=':quantita']", box).forEach(el => el.onkeydown = e => {    // Invio sulla quantità: nuova riga dello stesso tipo
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const i = +el.dataset.k.split(":")[1], r = s.righe[i];
+      aggiungiRiga(r.tipo, r.contesto || "progetto", i);
+    });
+    qsa("[data-voce]", box).forEach(b => b.onclick = () => { if (b.dataset.voce === "del") s.voci_corpo.splice(+b.dataset.i, 1); else s.voci_corpo.push({nome: "", gg_be: 0, gg_fe: 0}); modificato(true);
+      if (b.dataset.voce === "add") { const el = qsa("[data-vn]", ST.root).pop(); if (el) el.focus(); } });
+    qsa("[data-fisso-off]", box).forEach(b => b.onclick = () => { const f = s.snapshot.fasi.find(x => x.codice === b.dataset.fissoOff); if (f) f.gg_fissi = null; modificato(true); });
+    qsa("input[data-k$='|gg_fissi|']", box).forEach(el => el.addEventListener("change", () => {     // badge "fisse" e ↺ aggiornati senza perdere il fuoco
+      const cod = el.dataset.k.split("|")[1], f = s.snapshot.fasi.find(x => x.codice === cod), tr = el.closest("tr"); if (!f || !tr) return;
+      const fisso = f.gg_fissi != null && f.gg_fissi !== "";
+      tr.classList.toggle("st-fisso", fisso);
+      const badge = tr.querySelector(".st-badge"); if (fisso && !badge) tr.cells[0].insertAdjacentHTML("beforeend", ` <span class="st-badge">fisse</span>`); if (!fisso && badge) badge.remove();
+      tr.cells[4].innerHTML = fisso ? `<button type="button" class="st-ib" data-fisso-off="${E(cod)}" title="Torna alla percentuale" aria-label="Torna alla percentuale">${icona("undo-2")}</button>` : "";
+      const b = tr.querySelector("[data-fisso-off]"); if (b) b.onclick = () => { f.gg_fissi = null; modificato(true); };
+    }));
     qsa("[data-ammodo]", box).forEach(b => b.onclick = () => { s.am.modalita = b.dataset.ammodo || null; if (s.am.modalita === "manuale" && !s.am.manuale) s.am.manuale = {BE: {gg_mese: 0, mesi: 12}, FE: {gg_mese: 0, mesi: 12}};
-      if (s.am.modalita === "driver" && !s.am.driver) s.am.driver = {fonte: "progetto", servizio: "H8", anni: 3, evolutiva: 0, presa: null};
-      if (s.am.modalita === "driver" && s.am.driver.fonte === "esercizio") assicuraRigheEsercizio(s); modificato(true); });
-    qsa("[data-amsel]", box).forEach(el => el.onchange = () => { const d = s.am.driver; d[el.dataset.amsel] = el.dataset.amsel === "anni" ? +el.value : el.value; if (el.dataset.amsel === "fonte") { d.presa = null; if (el.value === "esercizio") assicuraRigheEsercizio(s); } modificato(true); });
+      if (s.am.modalita === "driver" && !s.am.driver) s.am.driver = {fonte: "progetto", servizio: "H8", anni: 3, evolutiva: 0, presa: null}; modificato(true); });
+    qsa("[data-amsel]", box).forEach(el => el.onchange = () => { const d = s.am.driver; d[el.dataset.amsel] = el.dataset.amsel === "anni" ? +el.value : el.value; if (el.dataset.amsel === "fonte") d.presa = null; modificato(true); });
     const presa = qs("#st-presa", box); if (presa) presa.onchange = () => { s.am.driver.presa = presa.checked; modificato(false); };
     const ri = qs("#st-riall", box); if (ri) ri.onclick = riallinea;
+    const note = qs("#st-note", box); if (note) note.oninput = () => { s.note = note.value; modificato(false); };
     aggiornaCalcolati();
   }
-  function assicuraRigheEsercizio(s) {
-    if (s.righe.some(r => r.contesto === "am_esercizio")) return;
-    s.snapshot.moduli.filter(m => m.attivo !== false).forEach(m => s.snapshot.tipi.filter(t => t.modulo === m.codice && t.attivo !== false && t.modalita === "quantita")
-      .forEach(t => s.righe.push(rigaNuova(t, "am_esercizio"))));
-  }
-  function azioneRiga(az, i) {
-    const r = ST.s.righe, x = r[i];
-    if (az === "add") r.splice(i + 1, 0, rigaNuova(tipo(ST.s.snapshot, x.tipo) || {codice: x.tipo}, x.contesto || "progetto"));
-    else {
-      const altre = r.filter((y, j) => j !== i && y.tipo === x.tipo && (y.contesto || "progetto") === (x.contesto || "progetto")).length;
-      if (!vuota(x) && !confirm(`Eliminare la riga “${x.etichetta || (tipo(ST.s.snapshot, x.tipo) || {}).nome || x.tipo}”?`)) return;
-      if (altre) r.splice(i, 1); else Object.assign(x, {etichetta: "", quantita: null, mix: null, gg_be: null, gg_fe: null});   // l'ultima riga di un tipo resta, vuota
-    }
+  function aggiungiRiga(codice, contesto, dopo) {
+    const t = tipo(ST.s.snapshot, codice); if (!t) return;
+    const r = ST.s.righe, nuova = rigaNuova(t, contesto);
+    if (dopo == null) { const ult = r.map((x, j) => x.tipo === codice && (x.contesto || "progetto") === contesto ? j : -1).filter(j => j >= 0).pop(); dopo = ult == null ? r.length - 1 : ult; }
+    r.splice(dopo + 1, 0, nuova);
+    ST.aperti[(t.modulo) + ":" + contesto] = true;
     modificato(true);
+    const el = qs(`[data-et="${dopo + 1}"]`, ST.root); if (el) el.focus();
+  }
+  function eliminaRiga(i) {
+    const x = ST.s.righe[i];
+    if (!vuota(x) && !confirm(`Eliminare la riga “${x.etichetta || (tipo(ST.s.snapshot, x.tipo) || {}).nome || x.tipo}”?`)) return;
+    ST.s.righe.splice(i, 1); modificato(true);
   }
 
-  // 2. moduli: tutti visibili, ogni tipo oggetto con le sue righe; "+" aggiunge un'altra riga dello stesso tipo
+  // ---------------------------------------------------------------- 2. moduli: categorie a scomparsa, un sottotitolo per tipo oggetto
+  const righeDi = (s, contesto) => s.righe.map((r, i) => ({r, i})).filter(x => (x.r.contesto || "progetto") === contesto);
+  const piena = r => !vuota(r);
+  function apertoModulo(chiave) {
+    if (ST.aperti[chiave] != null) return ST.aperti[chiave];
+    const [mod, ctx] = chiave.split(":");
+    return righeDi(ST.s, ctx).some(x => (tipo(ST.s.snapshot, x.r.tipo) || {}).modulo === mod && piena(x.r));    // aperte solo le categorie compilate
+  }
+  const mixTesto = m => `S${nfIt.format(Math.round(m[0] * 1000) / 10)} · M${nfIt.format(Math.round(m[1] * 1000) / 10)} · D${nfIt.format(Math.round(m[2] * 1000) / 10)}`;
   function tabellaRighe(s, contesto) {
-    const snap = s.snapshot, righe = s.righe.map((r, i) => ({r, i})).filter(x => (x.r.contesto || "progetto") === contesto);
-    const moduli = snap.moduli.filter(m => righe.some(x => (tipo(snap, x.r.tipo) || {}).modulo === m.codice));
+    const snap = s.snapshot, righe = righeDi(s, contesto), quant = contesto === "am_esercizio";
+    const moduli = snap.moduli.filter(m => m.attivo !== false || righe.some(x => (tipo(snap, x.r.tipo) || {}).modulo === m.codice));
+    const tipiDi = m => snap.tipi.filter(t => t.modulo === m.codice && (t.attivo !== false || righe.some(x => x.r.tipo === t.codice)) && (!quant || t.modalita === "quantita"));
     const orfane = righe.filter(x => !tipo(snap, x.r.tipo));
-    return `<div class="st-scroll"><table class="st-righe st-moduli"><thead><tr><th>Tipo oggetto</th><th>Etichetta</th><th class="r">Quantità</th><th class="r" title="Mix di complessità Semplice / Medio / Difficile">Mix S / M / D %</th><th class="r">Giornate</th><th></th></tr></thead><tbody>
-      ${moduli.map(m => `<tr class="st-modrow"><td colspan="4">${E(m.nome)}</td><td class="r" data-out="mod:${E(m.codice)}:${contesto}"></td><td></td></tr>`
-        + snap.tipi.filter(t => t.modulo === m.codice).map(t => righe.filter(x => x.r.tipo === t.codice).map(({r, i}, k) => rigaHtml(snap, t, r, i, k)).join("")).join("")).join("")}
-      </tbody></table></div>` + (orfane.length ? `<div class="hint warn">Righe con un tipo oggetto non presente nei parametri: ${orfane.map(x => E(x.r.tipo)).join(", ")}</div>` : "");
+    const corpo = moduli.filter(m => tipiDi(m).length).map(m => {
+      const chiave = `${m.codice}:${contesto}`, aperto = apertoModulo(chiave), tipi = tipiDi(m);
+      const n = righe.filter(x => (tipo(snap, x.r.tipo) || {}).modulo === m.codice && piena(x.r)).length;
+      const testa = `<tbody class="st-cat-h"><tr><td colspan="5"><div class="st-cat" data-cat="${E(chiave)}" role="button" tabindex="0" aria-expanded="${aperto}">
+          <span class="st-chev">${icona(aperto ? "chevron-down" : "chevron-right")}</span><b>${E(m.nome)}</b>
+          ${!aperto && !n ? `<span class="st-cat-vuota">nessun elemento · ${tipi.map(t => `<button type="button" class="linkbtn" data-agg="${E(t.codice)}" data-ctx="${contesto}">+ Aggiungi ${E(t.nome.toLowerCase())}</button>`).join(" ")}</span>` : !aperto ? `<span class="st-cat-vuota">${n} ${n === 1 ? "riga" : "righe"}</span>` : ""}
+          <span class="st-sp"></span><span class="st-cat-tot" data-out="mod:${E(m.codice)}:${contesto}"></span></div></td></tr></tbody>`;
+      if (!aperto) return testa;
+      return testa + `<tbody class="st-cat-b">${tipi.map(t => {
+        const mie = righe.filter(x => x.r.tipo === t.codice), q = t.modalita === "quantita";
+        return `<tr class="st-tipo-h"><td colspan="5"><b>${E(t.nome)}</b>${t.unita && t.unita !== "a corpo" ? ` · ${E(t.unita)}` : ""}
+            <span class="st-tipo-gg">${q ? `gg unitari S/M/D: ${t.gg.map(v => nfIt.format(v)).join(" / ")}` : "a corpo: giornate BE e FE"}</span>${t.attivo === false ? ` <span class="muted">(disattivato)</span>` : ""}</td></tr>`
+          + mie.map(({r, i}) => rigaHtml(t, r, i)).join("")
+          + `<tr class="st-agg-r"><td colspan="5"><button type="button" class="linkbtn" data-agg="${E(t.codice)}" data-ctx="${contesto}">+ Aggiungi ${E(t.nome.toLowerCase())}</button></td></tr>`;
+      }).join("")}</tbody>`;
+    }).join("");
+    return `<table class="st-righe st-moduli"><thead><tr><th>Etichetta</th><th class="r">Quantità</th><th class="r">Mix</th><th class="r">Giornate</th><th></th></tr></thead>${corpo}
+      <tfoot><tr><td colspan="3">${quant ? "Build equivalente" : "Totale moduli"}</td><td class="r" data-out="tot-${contesto}"></td><td></td></tr></tfoot></table>`
+      + (orfane.length ? `<div class="hint warn">Righe con un tipo oggetto non presente nei parametri: ${orfane.map(x => E(x.r.tipo)).join(", ")}</div>` : "");
   }
-  function rigaHtml(snap, t, r, i, k) {
-    const corpo = t.modalita === "corpo", mixMod = !!r.mix;
-    const mix = corpo ? `<span class="st-corpo-in">BE ${campo(`r:${i}:gg_be`, r.gg_be, {cls: "st-n3", ph: inNum(t.corpo_be)})} FE ${campo(`r:${i}:gg_fe`, r.gg_fe, {cls: "st-n3", ph: inNum(t.corpo_fe)})}</span>`
-      : `<span class="st-mix ${mixMod ? "mod" : ""}" data-mix="${i}">${[0, 1, 2].map(j => campo(`r:${i}:mix:${j}`, mixMod ? r.mix[j] : null, {pct: true, ph: inPct(t.mix[j]), cls: "st-n3"})).join("")}${mixMod ? ripMixHtml(t, i) : ""}</span>`;
-    return `<tr data-i="${i}" data-t="${E(t.codice)}" class="${k ? "st-agg" : ""} ${t.attivo === false ? "spento" : ""}"><td>${k ? `<span class="muted">↳</span>` : `<b>${E(t.nome)}</b>${t.unita && t.unita !== "a corpo" ? `<div class="muted st-unita-t">${E(t.unita)}</div>` : ""}${t.attivo === false ? `<div class="muted">disattivato</div>` : ""}`}</td>
-      <td><input class="st-et" data-et="${i}" value="${E(r.etichetta)}" placeholder="${k ? "Etichetta" : "Etichetta (es. SAP ECC)"}"></td>
-      <td class="r">${corpo ? `<span class="muted">a corpo</span>` : campo(`r:${i}:quantita`, r.quantita, {cls: "st-n2", ph: "0"})}</td><td class="r">${mix}</td>
-      <td class="r b" data-out="riga:${i}"></td>
-      <td class="st-azioni"><button class="st-ib" data-riga="add" data-i="${i}" title="Aggiungi un'altra riga di ${E(t.nome)}">${icona("plus")}</button><button class="st-ib" data-riga="del" data-i="${i}" title="${k ? "Elimina la riga" : "Svuota la riga"}">${icona("trash-2")}</button></td></tr>`;
+  function rigaHtml(t, r, i) {
+    const q = t.modalita === "quantita", mod = !!r.mix, mix = r.mix || t.mix;
+    return `<tr data-i="${i}" data-t="${E(t.codice)}"><td><input class="st-et" data-et="${i}" value="${E(r.etichetta)}" placeholder="Etichetta (es. SAP ECC)" aria-label="Etichetta"></td>
+      <td class="r">${q ? campo(`r:${i}:quantita`, r.quantita, {cls: "st-n2", ph: "0", it: true, label: "Quantità"})
+        : `<span class="st-corpo-in">BE ${campo(`r:${i}:gg_be`, r.gg_be, {cls: "st-n3", ph: inNum(t.corpo_be), it: true, label: "Giornate BE"})} FE ${campo(`r:${i}:gg_fe`, r.gg_fe, {cls: "st-n3", ph: inNum(t.corpo_fe), it: true, label: "Giornate FE"})}</span>`}</td>
+      <td class="r">${q ? `<button type="button" class="st-chip-mix ${mod ? "mod" : ""}" data-mixpop="${i}" tabindex="-1" title="Mix di complessità Semplice / Medio / Difficile${mod ? " (personalizzato)" : " (default)"}: clic per modificarlo">${mixTesto(mix)}</button>` : ""}</td>
+      <td class="r b st-gg" data-out="riga:${i}" data-formula="${i}"></td>
+      <td class="st-azioni"><button type="button" class="st-ib st-cestino" data-del="${i}" tabindex="-1" title="Elimina la riga" aria-label="Elimina la riga">${icona("trash-2")}</button></td></tr>`;
   }
-  const ripMixHtml = (t, i) => `<button class="st-ib" data-rip-mix="${i}" title="Ripristina il mix di default (${t.mix.map(v => inPct(v)).join(" / ")})">${icona("undo-2")}</button>`;
-  function marcaMix(i) {                                    // mix modificato: evidenza e ripristino, senza ridisegnare (il cursore resta nel campo)
-    const el = qs(`[data-mix="${i}"]`, ST.root); if (!el || el.classList.contains("mod")) return;
-    el.classList.add("mod");
-    el.insertAdjacentHTML("beforeend", ripMixHtml(tipo(ST.s.snapshot, ST.s.righe[i].tipo), i));
-    qs("[data-rip-mix]", el).onclick = () => { ST.s.righe[i].mix = null; modificato(true); };
+  function popoverMix(chip, i) {
+    const r = ST.s.righe[i], t = tipo(ST.s.snapshot, r.tipo), val = [...(r.mix || t.mix)];
+    const p = apriPopover(chip, `<div class="st-pop-t">Mix di complessità</div>
+      <div class="st-pop-mix">${["S", "M", "D"].map((l, k) => `<label>${l}<span><input class="st-n" data-pm="${k}" value="${inPct(val[k])}" inputmode="decimal" aria-label="Mix ${l} %"> %</span></label>`).join("")}</div>
+      <div class="st-pop-msg" id="st-pm-msg"></div>
+      <div class="st-pop-a"><button type="button" id="st-pm-def">Ripristina default</button><span class="st-sp"></span><button type="button" class="primary" id="st-pm-ok">Fatto</button></div>
+      <div class="hint">Default: ${mixTesto(t.mix)}</div>`);
+    const msg = qs("#st-pm-msg", p), ins = qsa("[data-pm]", p);
+    const verifica = () => {
+      const n = ins.map(x => leggiNum(x.value)), ok = n.every(x => x != null && !Number.isNaN(x) && x >= 0), somma = ok ? n.reduce((a, b) => a + b, 0) : NaN;
+      const giusto = ok && Math.abs(somma - 100) < 1e-6;
+      msg.textContent = giusto ? "Somma 100% ✓" : `La somma è ${Number.isNaN(somma) ? "non valida" : nfIt.format(somma) + "%"}: deve fare 100%`;
+      msg.classList.toggle("bad", !giusto);
+      if (giusto) {
+        const nuovo = n.map(x => pctDaInput(x));
+        r.mix = nuovo.every((x, k) => Math.abs(x - t.mix[k]) < 1e-9) ? null : nuovo;
+        chip.textContent = mixTesto(r.mix || t.mix); chip.classList.toggle("mod", !!r.mix);
+        modificato(false);
+      }
+      return giusto;
+    };
+    ins.forEach(x => { x.oninput = verifica; x.onfocus = () => x.select(); x.onkeydown = e => { if (e.key === "Enter" && verifica()) chiudiPopover(); }; });
+    qs("#st-pm-def", p).onclick = () => { ins.forEach((x, k) => x.value = inPct(t.mix[k])); verifica(); };
+    qs("#st-pm-ok", p).onclick = () => { if (verifica()) chiudiPopover(); };
+    ins[0].focus();
+    verifica();
   }
+  const AIUTO_MODULI = "Per ogni categoria aggiungi le righe dei tipi oggetto che servono (per esempio una riga per sorgente) e scrivi la quantità. Le giornate di una riga sono quantità × (S% × gg S + M% × gg M + D% × gg D), divise tra BE e FE e arrotondate a mezza giornata: passa sopra le giornate per vedere il conto. Il mix (pastiglia grigia = default, colorata = personalizzato) si cambia con un clic. Con Invio sulla quantità aggiungi un'altra riga dello stesso tipo. Le righe lasciate vuote non si salvano.";
   function passoModuli(s) {
-    return `<div class="card"><div class="st-rh"><h3>Moduli</h3><span class="st-sp"></span><span class="muted" data-out="tot-moduli"></span></div>
-      <p class="hint" style="margin-top:0">Scrivi le quantità dei tipi oggetto che servono: le righe vuote non contano e non si salvano. Con ${icona("plus")} aggiungi un'altra riga dello stesso tipo (per esempio una per sorgente). Il mix S/M/D in grigio è quello di default: se lo cambi resta evidenziato e si ripristina con ${icona("undo-2")}.</p>
+    return `<div class="card st-card-mod"><div class="st-rh"><h3>Moduli</h3><span class="muted st-riga1">Aggiungi i tipi oggetto e scrivi le quantità.</span>${aiuto(AIUTO_MODULI)}</div>
       ${tabellaRighe(s, "progetto")}</div>`;
   }
 
-  // 3. fasi e attività
-  const BASI = {Moduli_team: "implementazione dei moduli", B: "implementazione (B)", BaseModuli: "somma dei moduli", TP: "totale progetto", TP_team: "totale progetto"};
-  function passoFasi(s) {
-    const snap = s.snapshot;
-    return `<div class="card"><div class="st-rh"><h3>Fasi</h3></div>
-      <table class="st-righe st-fasi"><thead><tr><th>Fase</th><th>Calcolata su</th><th class="r">%</th><th class="r">Giornate</th></tr></thead><tbody>
-      ${snap.fasi.map(f => `<tr><td><b>${E(f.nome)}</b></td><td class="muted">${E(BASI[f.base] || f.base)}</td><td class="r"><span class="st-cv st-cvr">${campo(`p:fasi|${f.codice}|pct|`, f.pct, {pct: true, cls: "st-n3"})}${diffDot(`fasi|${f.codice}|pct|`)}</span></td><td class="r b" data-out="fase:${f.codice}"></td></tr>`).join("")}
-      </tbody></table><p class="hint">Analisi e disegno sono una percentuale unica sull'implementazione di tutti i moduli. Le ripartizioni BE/FE delle fasi si trovano nei parametri avanzati.</p></div>
-      <div class="card"><div class="st-rh"><h3>Attività a corpo</h3></div>
-      <table class="st-righe"><thead><tr><th>Attività</th><th class="r">gg BE</th><th class="r">gg FE</th><th class="r">Giornate</th><th></th></tr></thead><tbody>
-      ${s.voci_corpo.map((v, i) => `<tr><td><input data-vn="${i}" value="${E(v.nome)}"></td><td class="r">${campo(`v:${i}:gg_be`, v.gg_be, {cls: "st-n2"})}</td><td class="r">${campo(`v:${i}:gg_fe`, v.gg_fe, {cls: "st-n2"})}</td>
-        <td class="r b" data-out="voce:${i}"></td><td class="st-azioni"><button class="st-ib" data-voce="del" data-i="${i}" title="Elimina">${icona("trash-2")}</button></td></tr>`).join("") || `<tr><td colspan="5" class="muted">Nessuna attività a corpo.</td></tr>`}</tbody></table>
-      <div class="st-add"><button data-voce="add">${icona("plus")}Aggiungi attività</button><span class="hint">Es. architettura, setup ambienti, attività particolari.</span></div>
-      <h3 class="st-h3">Training</h3><div class="st-due"><label>gg BE ${campo("s:training_be", s.training_be, {cls: "st-n2"})}</label><label>gg FE ${campo("s:training_fe", s.training_fe, {cls: "st-n2"})}</label><span class="muted" data-out="training"></span></div></div>`;
+  // ---------------------------------------------------------------- 3. attività a corpo (training e attività di base)
+  function passoAttivita(s) {
+    const riga = (nome, kbe, vbe, kfe, vfe, out, del) => `<tr>${nome}<td class="r">${campo(kbe, vbe, {cls: "st-n2", it: true, label: "Giornate BE"})}</td><td class="r">${campo(kfe, vfe, {cls: "st-n2", it: true, label: "Giornate FE"})}</td>
+      <td class="r b" data-out="${out}"></td><td class="st-azioni">${del}</td></tr>`;
+    return `<div class="card"><div class="st-rh"><h3>Attività a corpo</h3><span class="muted st-riga1">Giornate inserite a mano, divise tra BE e FE.</span>${aiuto("Il training è un blocco a sé. Le altre attività (setup degli ambienti, gestione della sicurezza del dato e quelle che aggiungi) fanno parte dell'implementazione: entrano nella base su cui si calcolano kick-off, test, documentazione e deploy, ma non generano analisi né disegno.")}</div>
+      <table class="st-righe st-attivita"><thead><tr><th>Attività</th><th class="r">gg BE</th><th class="r">gg FE</th><th class="r">Giornate</th><th></th></tr></thead><tbody>
+      ${riga(`<td><b>Training</b></td>`, "s:training_be", s.training_be, "s:training_fe", s.training_fe, "training", "")}
+      ${s.voci_corpo.map((v, i) => riga(`<td><input data-vn="${i}" value="${E(v.nome)}" placeholder="Nome dell'attività" aria-label="Nome dell'attività"></td>`, `v:${i}:gg_be`, v.gg_be, `v:${i}:gg_fe`, v.gg_fe, `voce:${i}`,
+        `<button type="button" class="st-ib st-cestino" data-voce="del" data-i="${i}" tabindex="-1" title="Elimina" aria-label="Elimina l'attività">${icona("trash-2")}</button>`)).join("")}
+      </tbody><tfoot><tr><td>Totale attività a corpo</td><td></td><td></td><td class="r" data-out="tot-attivita"></td><td></td></tr></tfoot></table>
+      <div class="st-add"><button type="button" class="linkbtn" data-voce="add">+ Aggiungi attività</button></div></div>`;
   }
 
-  // 4. AM: tutto quello che riguarda l'AM, parametri compresi
+  // ---------------------------------------------------------------- 4. fasi: percentuale oppure giornate fisse
+  const BASI = {Moduli_team: "implementazione dei moduli", B: "implementazione", BaseModuli: "somma dei moduli", TP: "totale attività", TP_team: "totale attività"};
+  function passoFasi(s) {
+    const snap = s.snapshot;
+    return `<div class="card"><div class="st-rh"><h3>Fasi</h3><span class="muted st-riga1">Percentuale sulla base, oppure un numero di giornate fisso.</span>${aiuto("Ogni fase si calcola come percentuale della sua base. Se per un caso particolare vuoi un numero preciso, scrivilo in “Giornate”: da quel momento vale quel numero (la fase è marcata “fisse”) e la percentuale non conta; con ↺ torni alla percentuale. Le giornate fisse si dividono tra BE e FE come farebbe la percentuale. Le ripartizioni BE/FE sono nei parametri avanzati.")}</div>
+      <table class="st-righe st-fasi"><thead><tr><th>Fase</th><th>Calcolata su</th><th class="r">%</th><th class="r">Giornate</th><th></th></tr></thead><tbody>
+      ${snap.fasi.map(f => {
+        const fisso = f.gg_fissi != null && f.gg_fissi !== "";
+        return `<tr class="${fisso ? "st-fisso" : ""}"><td><b>${E(f.nome)}</b>${fisso ? ` <span class="st-badge">fisse</span>` : ""}</td><td class="muted">${E(BASI[f.base] || f.base)}</td>
+          <td class="r"><span class="st-cv st-cvr">${campo(`p:fasi|${f.codice}|pct|`, f.pct, {pct: true, cls: "st-n3", label: `% ${f.nome}`})}${diffDot(`fasi|${f.codice}|pct|`)}</span></td>
+          <td class="r">${campo(`p:fasi|${f.codice}|gg_fissi|`, fisso ? f.gg_fissi : null, {cls: "st-n2", it: true, label: `Giornate ${f.nome}`, title: "Scrivi un numero per fissare le giornate"})}</td>
+          <td class="st-azioni">${fisso ? `<button type="button" class="st-ib" data-fisso-off="${E(f.codice)}" title="Torna alla percentuale" aria-label="Torna alla percentuale">${icona("undo-2")}</button>` : ""}</td></tr>`;
+      }).join("")}</tbody></table></div>`;
+  }
+
+  // ---------------------------------------------------------------- 5. AM
   function passoAm(s) {
     const am = s.am || {modalita: null}, snap = s.snapshot, modo = am.modalita || "", A = snap.am, coeff = A.coeff || {};
     const P = (lab, p, opz = {}) => `<div class="st-campo"><label>${lab}</label><div class="st-cv">${campo("p:" + p, pget(snap, p), opz)}${opz.suf ? `<span class="muted">${opz.suf}</span>` : ""}${diffDot(p)}</div></div>`;
@@ -461,7 +531,7 @@
     if (modo === "manuale") {
       const m = am.manuale || {};
       corpo = `<table class="st-righe"><thead><tr><th>Figura</th><th class="r">gg al mese</th><th class="r">Mesi</th><th class="r">Giornate</th></tr></thead><tbody>
-        ${["BE", "FE"].map(t => `<tr><td><b>${E((snap.team.find(x => x.codice === t) || {}).nome || t)}</b></td><td class="r">${campo(`a:manuale.${t}.gg_mese`, (m[t] || {}).gg_mese, {cls: "st-n2"})}</td><td class="r">${campo(`a:manuale.${t}.mesi`, (m[t] || {}).mesi, {cls: "st-n2"})}</td>
+        ${["BE", "FE"].map(t => `<tr><td><b>${E((snap.team.find(x => x.codice === t) || {}).nome || t)}</b></td><td class="r">${campo(`a:manuale.${t}.gg_mese`, (m[t] || {}).gg_mese, {cls: "st-n2", it: true})}</td><td class="r">${campo(`a:manuale.${t}.mesi`, (m[t] || {}).mesi, {cls: "st-n2", it: true})}</td>
           <td class="r b" data-out="am:${t}:gg"></td></tr>`).join("")}</tbody></table>`;
     } else if (modo === "driver") {
       const d = am.driver || {}, presa = d.presa == null ? d.fonte === "esercizio" : d.presa;
@@ -469,12 +539,12 @@
         <div class="st-campo st-l2"><label>Fonte del build equivalente</label><select data-amsel="fonte"><option value="progetto" ${d.fonte !== "esercizio" ? "selected" : ""}>Progetto (implementazione di questa stima)</option><option value="esercizio" ${d.fonte === "esercizio" ? "selected" : ""}>Oggetti in esercizio (sistema esistente)</option></select></div>
         <div class="st-campo"><label>Livello di servizio</label><select data-amsel="servizio">${["H8", "H12", "H24"].map(x => `<option value="${x}" ${d.servizio === x ? "selected" : ""}>${x} (× ${inNum(coeff[x])})</option>`).join("")}</select></div>
         <div class="st-campo"><label>Anni</label><select data-amsel="anni">${Array.from({length: A.anni_max || 5}, (_, k) => k + 1).map(k => `<option ${+d.anni === k ? "selected" : ""}>${k}</option>`).join("")}</select></div>
-        <div class="st-campo"><label>Evolutiva</label><div class="st-cv">${campo("a:driver.evolutiva", d.evolutiva)}<span class="muted">gg/anno</span></div></div>
+        <div class="st-campo"><label>Evolutiva</label><div class="st-cv">${campo("a:driver.evolutiva", d.evolutiva, {it: true})}<span class="muted">gg/anno</span></div></div>
         <div class="st-campo"><label>&nbsp;</label><label class="st-chk"><input type="checkbox" id="st-presa" ${presa ? "checked" : ""}> Presa in carico (solo anno 1)</label></div></div>
         ${d.fonte === "esercizio" ? `<h3 class="st-h3">Oggetti in esercizio</h3>${tabellaRighe(s, "am_esercizio")}` : ""}`;
     }
     return `<div class="card"><div class="st-rh"><h3>Application Management</h3></div>
-      <div class="st-seg">${[["", "Nessuna"], ["manuale", "Manuale"], ["driver", "Da driver"]].map(([k, l]) => `<button data-ammodo="${k}" class="${modo === k ? "on" : ""}">${l}</button>`).join("")}</div>
+      <div class="st-seg">${[["", "Nessuna"], ["manuale", "Manuale"], ["driver", "Da driver"]].map(([k, l]) => `<button type="button" data-ammodo="${k}" class="${modo === k ? "on" : ""}">${l}</button>`).join("")}</div>
       ${corpo}<div data-blocco="am-ris"></div></div>
       <div class="card"><div class="st-rh"><h3>Parametri AM</h3></div><div class="st-campi">
         ${P("Margine dell'AM", "generali||margine_am|", {pct: true, max1: true, suf: "%"})}
@@ -485,14 +555,19 @@
         ${P("Anni massimi", "am||anni_max|")}</div></div>`;
   }
 
-  // parametri avanzati: prima le fasi (con le ripartizioni), poi moduli e tipi oggetto
+  // ---------------------------------------------------------------- parametri avanzati: costi e generali, fasi, moduli e tipi oggetto
   function passoParametri(s) {
     const snap = s.snapshot, usati = new Set(s.righe.filter(r => !vuota(r)).map(r => r.tipo));
     const tipi = snap.tipi.filter(t => t.attivo !== false || usati.has(t.codice));
+    const P = (lab, p, opz = {}) => `<div class="st-campo"><label>${lab}</label><div class="st-cv">${campo("p:" + p, pget(snap, p), opz)}${opz.suf ? `<span class="muted">${opz.suf}</span>` : ""}${diffDot(p)}</div></div>`;
     const rip = (sez, c, x) => x.pct_be == null ? `<span class="muted">per team</span>` : `${campo(`p:${sez}|${c}|pct_be|`, x.pct_be, {pct: true, cls: "st-n3"})}${campo(`p:${sez}|${c}|pct_fe|`, x.pct_fe, {pct: true, cls: "st-n3"})}${diffDot(`${sez}|${c}|pct_be|`) || diffDot(`${sez}|${c}|pct_fe|`)}`;
     const errRip = x => x.pct_be != null && Math.abs((+x.pct_be || 0) + (+x.pct_fe || 0) - 1) > 1e-9;
-    return `<div class="card"><div class="st-rh"><h3>Parametri avanzati della stima</h3><span class="st-sp"></span><button id="st-riall">${icona("refresh-cw")}Riallinea ai default correnti</button></div>
-      <p class="hint" style="margin-top:0">Copia dei parametri congelata in questa stima. Il pallino <span class="st-diff-i"></span> segna i valori diversi dal catalogo corrente; ${icona("undo-2")} li riporta al default. Costi e margini sono nelle impostazioni, i parametri AM nel passo AM.</p>
+    return `<div class="card"><div class="st-rh"><h3>Parametri avanzati della stima</h3><span class="st-sp"></span><button type="button" id="st-riall">${icona("refresh-cw")}Riallinea ai default correnti</button></div>
+      <p class="hint" style="margin-top:0">Copia dei parametri congelata in questa stima. Il pallino <span class="st-diff-i"></span> segna i valori diversi dal catalogo corrente; ${icona("undo-2")} li riporta al default. I parametri AM sono nel passo AM.</p>
+      <h3 class="st-h3">Costi e parametri generali</h3><div class="st-campi">
+        ${snap.team.map(t => P(`Costo ${E(t.nome)}`, `team|${t.codice}|costo|`, {suf: "€/gg"})).join("")}
+        ${P("Giornate lavorative al mese", "generali||gg_mese|")}${P("Arrotondamento", "generali||passo|", {suf: "gg"})}
+        <div class="st-campo st-l4"><label for="st-note">Note</label><textarea id="st-note" rows="2">${E(s.note)}</textarea></div></div>
       <h3 class="st-h3">Fasi, PM e contingency</h3><table class="st-righe st-par"><thead><tr><th>Fase</th><th>Calcolata su</th><th class="r">%</th><th class="r">% BE / FE</th></tr></thead><tbody>
       ${snap.fasi.map(f => `<tr><td><b>${E(f.nome)}</b></td><td class="muted">${E(BASI[f.base] || f.base)}</td><td class="r">${campo(`p:fasi|${f.codice}|pct|`, f.pct, {pct: true, cls: "st-n3"})}${diffDot(`fasi|${f.codice}|pct|`)}</td>
         <td class="r ${errRip(f) ? "st-errc" : ""}">${f.codice === "PM" ? `<span class="muted">figura PM</span>` : rip("fasi", f.codice, f)}</td></tr>`).join("")}</tbody></table>
@@ -513,7 +588,7 @@
       if (!r.differenze.length) { toast("I parametri sono già allineati al catalogo"); return; }
       const nomeSez = {team: "Figure", moduli: "Moduli", tipi: "Tipi oggetto", fasi: "Fasi", generali: "Generali", am: "AM"};
       const val = v => v == null ? "—" : typeof v === "object" ? E(JSON.stringify(v)) : typeof v === "number" ? inNum(v) : E(v);
-      const el = modal(`<h2>Riallinea ai default correnti</h2><p class="muted">Questi valori della stima verranno sostituiti con quelli del catalogo. I tipi oggetto disattivati ancora usati dalle righe restano con i parametri attuali.</p>
+      const el = modal(`<h2>Riallinea ai default correnti</h2><p class="muted">Questi valori della stima verranno sostituiti con quelli del catalogo. Le giornate fisse delle fasi restano; i tipi oggetto disattivati ancora usati dalle righe restano con i parametri attuali.</p>
         <div class="st-scroll" style="max-height:50vh"><table class="st-righe"><thead><tr><th>Sezione</th><th>Voce</th><th>Campo</th><th class="r">Stima</th><th class="r">Catalogo</th></tr></thead><tbody>
         ${r.differenze.map(d => `<tr><td>${nomeSez[d.sezione] || d.sezione}</td><td>${E(d.codice || "")}</td><td>${E(d.campo || "")}</td><td class="r">${val(d.stima)}</td><td class="r">${val(d.default)}</td></tr>`).join("")}</tbody></table></div>
         <div class="foot"><button id="ra-x">Annulla</button><button class="primary" id="ra-ok">Riallinea</button></div>`);
@@ -524,24 +599,44 @@
 
   // ---------------------------------------------------------------- valori calcolati (solo totali: BE e FE restano nel calcolo)
   const tot = x => x == null ? null : (x.tot != null ? x.tot : (x.BE || 0) + (x.FE || 0));
+  function formulaRiga(i) {
+    const res = ST.res; if (!res) return "";
+    const r = ST.s.righe[i], t = r && tipo(ST.s.snapshot, r.tipo);
+    const calc = [...res.progetto.righe, ...((res.am && res.am.righe) || [])].find(x => x.indice === i);
+    if (!t || !calc) return "";
+    if (t.modalita !== "quantita") return `A corpo: BE ${F.gg(calc.BE)} + FE ${F.gg(calc.FE)} = ${F.gg(calc.tot)} gg`;
+    const mix = r.mix || t.mix, q = +(r.quantita || 0);
+    const grezzi = q * (mix[0] * t.gg[0] + mix[1] * t.gg[1] + mix[2] * t.gg[2]);
+    const pz = mix.map((m, k) => `${nfIt.format(Math.round(m * 1000) / 10)}%×${nfIt.format(t.gg[k])}`).join(" + ");
+    const esatto = Math.abs(grezzi - calc.tot) < 1e-9;
+    return `${nfIt.format(q)} × (${pz}) = ${esatto ? "" : nf(2).format(grezzi) + " → "}${F.gg(calc.tot)} gg${esatto ? "" : " (arrotondate a mezza giornata, divise tra BE e FE)"}`;
+  }
   function aggiornaCalcolati() {
     const res = ST.res, root = ST.root; if (!res || !root) return;
-    const p = res.progetto, out = {}, s = ST.s;
+    const p = res.progetto, out = {};
     p.righe.forEach(r => { out[`riga:${r.indice}`] = F.gg(r.tot); });
-    p.moduli.forEach(m => { out[`mod:${m.codice}:progetto`] = F.gg(tot(m.impl)); });
-    out["tot-moduli"] = `Implementazione dei moduli: ${F.gg(p.base_moduli)} gg`;
-    Object.values(p.fasi).forEach(f => { out[`fase:${f.codice}`] = F.gg(tot(f)); });
-    out["fase:SEC"] = F.gg(tot(p.sicurezza)); out["fase:PM"] = F.gg(p.PM); out["fase:CONT"] = F.gg(p.contingency.tot);
+    p.moduli.forEach(m => { out[`mod:${m.codice}:progetto`] = F.gg(tot(m.impl)) + " gg"; });
+    out["tot-progetto"] = F.gg(p.base_moduli) + " gg";
     p.voci_corpo.forEach((v, i) => { out[`voce:${i}`] = F.gg(tot(v)); });
-    out.training = `${F.gg(tot(p.training))} gg in totale`;
+    out.training = F.gg(tot(p.training));
+    out["tot-attivita"] = F.gg(tot(p.training) + p.voci_corpo.reduce((a, v) => a + tot(v), 0)) + " gg";
     const am = res.am;
     if (am && am.modalita === "driver") {
       (am.righe || []).forEach(r => { out[`riga:${r.indice}`] = F.gg(r.tot); });
       const perMod = {}; (am.righe || []).forEach(r => { perMod[r.modulo] = (perMod[r.modulo] || 0) + r.tot; });
-      Object.entries(perMod).forEach(([k, v]) => { out[`mod:${k}:am_esercizio`] = F.gg(v); });
+      Object.entries(perMod).forEach(([k, v]) => { out[`mod:${k}:am_esercizio`] = F.gg(v) + " gg"; });
+      out["tot-am_esercizio"] = F.gg(am.beq.tot) + " gg";
     }
     if (am && am.modalita === "manuale") ["BE", "FE"].forEach(t => { out[`am:${t}:gg`] = F.gg(am.team[t].gg); });
-    qsa("[data-out]", root).forEach(el => { el.textContent = out[el.dataset.out] ?? ""; });
+    qsa("[data-out]", root).forEach(el => { el.textContent = out[el.dataset.out] ?? (el.dataset.out.startsWith("mod:") ? "0,0 gg" : ""); });
+    qsa("[data-formula]", root).forEach(el => { el.title = formulaRiga(+el.dataset.formula); });
+    // fasi: le giornate calcolate come segnaposto del campo (o il valore fisso)
+    const valFase = cod => cod === "PM" ? p.PM : cod === "CONT" ? p.contingency.tot : cod === "SEC" ? tot(p.sicurezza) : (p.fasi[cod] ? tot(p.fasi[cod]) : null);
+    qsa("input[data-k$='|gg_fissi|']", root).forEach(el => {
+      const cod = el.dataset.k.split("|")[1], v = valFase(cod);
+      el.placeholder = v == null ? "" : nfIt.format(v);
+      if (el.value && v != null && document.activeElement !== el) el.title = `Giornate fisse: ${F.gg(v)} gg dopo l'arrotondamento`;
+    });
     const errRighe = new Set(res.messaggi.filter(x => x.livello === "errore" && /^riga:/.test(x.dove || "")).map(x => +x.dove.split(":")[1]));
     qsa("tr[data-i]", root).forEach(tr => tr.classList.toggle("st-err", errRighe.has(+tr.dataset.i)));
     const amb = qs("[data-blocco='am-ris']", root); if (amb) amb.innerHTML = amRisultatiHtml(am);
@@ -558,40 +653,62 @@
         <td class="r b">${F.gg(a.gg.tot)}</td><td class="r">${F.eur(a.costo)}</td><td class="r">${F.eur(a.prezzo)}</td><td class="r">${F.eur(a.mensile)}</td><td class="r">${F.fte(a.fte)}</td></tr>`).join("")}
       <tr class="tot"><td>Totale</td><td></td><td></td><td></td><td class="r">${F.gg(am.gg)}</td><td class="r">${F.eur(am.costo)}</td><td class="r">${F.eur(am.prezzo)}</td><td></td><td></td></tr></tbody></table></div>`;
   }
-  function messaggiHtml(res) {
-    const msg = res.messaggi.filter((x, i, a) => a.findIndex(y => y.testo === x.testo) === i), ord = {errore: 0, avviso: 1, info: 2};
+  function messaggiHtml(res, soloErrori) {
+    let msg = res.messaggi.filter((x, i, a) => a.findIndex(y => y.testo === x.testo) === i).filter(x => !soloErrori || x.livello !== "info");
+    const ord = {errore: 0, avviso: 1, info: 2};
     msg.sort((a, b) => ord[a.livello] - ord[b.livello]);
     return msg.length ? `<div class="st-msg">${msg.map(x => `<div class="st-m ${x.livello}">${E(x.testo)}</div>`).join("")}${res.export_bloccato ? `<div class="st-m errore b">Ci sono errori: l'export Excel è bloccato finché non li correggi (il salvataggio è sempre possibile).</div>` : ""}</div>` : "";
   }
-  function tabellaBlocchi(p) {
-    return `<table class="st-riep-t"><thead><tr><th>Blocco</th><th class="r">Giornate</th><th class="r">Peso</th></tr></thead><tbody>
-      ${BLOCCHI.filter(k => p.blocchi[k] && (k !== "Architettura" || p.blocchi[k].tot)).map(k => `<tr><td>${k}</td><td class="r">${F.gg(p.blocchi[k].tot)}</td><td class="r muted">${F.pct(p.blocchi[k].peso)}</td></tr>`).join("")}
-      <tr class="tot"><td>Totale progetto</td><td class="r">${F.gg(p.TP.tot)}</td><td class="r">${p.TP.tot ? "100,00%" : "n/d"}</td></tr>
-      <tr><td>PM</td><td class="r">${F.gg(p.PM)}</td><td class="r muted">${F.pct(p.peso_pm)}</td></tr>
-      <tr><td>Contingency</td><td class="r">${F.gg(p.contingency.tot)}</td><td class="r muted">${F.pct(p.peso_contingency)}</td></tr>
-      <tr class="tot big"><td>Totale complessivo</td><td class="r">${F.gg(p.totale)}</td><td></td></tr></tbody></table>`;
+  // implementazione = moduli + attività a corpo (+ sicurezza in percentuale, solo nelle stime create prima)
+  const altroImpl = p => tot(p.implementazione) - p.base_moduli;
+  function righeTotali(p) {
+    const r = (lab, v, cls = "", sub = "") => `<tr class="${cls}"><td>${lab}${sub ? `<div class="st-sub">${sub}</div>` : ""}</td><td class="r">${F.gg(v)}</td></tr>`;
+    const b = p.blocchi;
+    return [
+      r("Analisi", b.Analisi.tot), r("Disegno", b.Disegno.tot),
+      r("Implementazione", b.Implementazione.tot, "", `moduli ${F.gg(p.base_moduli)} + attività ${F.gg(altroImpl(p))}`),
+      b.Architettura.tot ? r("Architettura", b.Architettura.tot) : "",
+      r("Training", b.Training.tot), r("Test", b.Test.tot), r("Deploy", b.Deploy.tot),
+      r("Totale attività", p.TP.tot, "tot"), r("PM", p.PM), r("Contingency", p.contingency.tot),
+      r("Totale con PM e contingency", p.totale, "tot big"),
+    ].join("");
   }
-  function economiaHtml(p, am) {
-    const o = p.obiettivo, f = p.fte;
-    return `<div class="st-eco"><div><span>Costo</span><b>${F.eur(p.costi.tot)}</b></div><div><span>Margine</span><b>${F.pct(p.margine)}</b></div>
-      <div class="prezzo"><span>Prezzo</span><b>${F.eur(p.prezzo)}</b></div>
-      <div><span>Costo / prezzo medio al giorno</span><b>${F.eur(p.costo_medio)} · ${F.eur(p.prezzo_medio)}</b></div>
-      ${o ? `<div><span>Prezzo obiettivo</span><b>${F.eur(o.prezzo)}</b></div><div class="${o.sotto_margine ? "rosso" : ""}"><span>Margine risultante</span><b>${F.pct(o.margine)}</b></div><div><span>Scostamento dal prezzo</span><b>${F.eur(o.scostamento)}</b></div>` : ""}
-      <div><span>FTE${p.durata_mesi ? ` su ${nf(1).format(p.durata_mesi)} mesi` : ""}</span><b>${f ? `${F.fte(f.tot)} (di cui PM ${F.fte(f.PM)})` : "inserisci la durata"}</b></div>
-      ${am ? `<div class="am"><span>AM ${am.modalita === "driver" ? `da driver, ${am.anni_n} ${am.anni_n === 1 ? "anno" : "anni"}` : "manuale"}</span><b>${am.calcolabile === false ? "non calcolabile" : `${F.gg(am.gg)} gg · ${F.eur0(am.prezzo)}`}</b></div>` : ""}</div>`;
+  function obiettivoHtml(p, compatto) {
+    const o = p.obiettivo;
+    if (!o || o.prezzo == null || p.prezzo == null) return compatto ? "" : `<p class="muted">Nessun prezzo obiettivo: puoi indicarlo nelle impostazioni.</p>`;
+    const diff = p.prezzo - o.prezzo, perc = o.prezzo ? diff / o.prezzo : null, rapp = o.prezzo ? Math.min(p.prezzo / o.prezzo, 1.5) : 0;
+    const sopra = diff > 0.005, testo = Math.abs(diff) < 0.005 ? "In linea con l'obiettivo" : `${sopra ? "Sopra" : "Sotto"} l'obiettivo di ${F.eur0(Math.abs(diff))} (${sopra ? "+" : "−"}${nf(1).format(Math.abs(perc) * 100)}%)`;
+    return `<div class="st-obj ${sopra ? "sopra" : "sotto"}"><div class="st-obj-r"><span>Prezzo obiettivo</span><b>${F.eur0(o.prezzo)}</b></div>
+      <div class="st-barra" role="img" aria-label="${E(testo)}"><i style="width:${(rapp / 1.5) * 100}%"></i><s style="left:${100 / 1.5}%"></s></div>
+      <div class="st-obj-t">${testo}</div>
+      ${compatto ? "" : `<div class="st-obj-r ${o.sotto_margine ? "rosso" : ""}"><span>Margine se vendi al prezzo obiettivo</span><b>${F.pct(o.margine)}</b></div>`}</div>`;
   }
-  // a destra: totali a scomparsa (chiusi di default: solo giornate e prezzo)
+  // a destra: i totali, sempre visibili e semplificati (fino al prezzo)
   function disegnaRiepilogo() {
     const el = ST.root && qs("#st-riep", ST.root), res = ST.res; if (!el || !res) return;
-    const p = res.progetto, aperto = ST.totaliAperti;
-    el.innerHTML = `${messaggiHtml(res)}<details class="card st-riep" ${aperto ? "open" : ""}><summary><span>Totali</span><span class="st-sp"></span><b>${F.gg(p.totale)} gg</b><b class="st-prz">${F.eur0(p.prezzo)}</b></summary>
-      ${tabellaBlocchi(p)}${economiaHtml(p, res.am)}</details>`;
-    qs("details", el).ontoggle = e => { ST.totaliAperti = e.target.open; };
+    const p = res.progetto;
+    el.innerHTML = `${messaggiHtml({...res, messaggi: res.messaggi.filter(x => x.livello === "errore")}, true)}<div class="card st-riep"><div class="st-rh"><h3>Totali</h3><span class="st-sp"></span><span class="muted">giornate</span></div>
+      <table class="st-riep-t"><tbody>${righeTotali(p)}</tbody></table>
+      <div class="st-eco"><div><span>Costo</span><b>${F.eur0(p.costi.tot)}</b></div><div class="prezzo"><span>Prezzo</span><b>${F.eur0(p.prezzo)}</b></div></div>
+      ${obiettivoHtml(p, true)}</div>`;
   }
+  // 6. riepilogo: progetto, indicatori, AM, rispetto all'obiettivo
   function riepilogoCompleto() {
-    const res = ST.res, p = res.progetto, am = res.am;
-    return `<div class="st-rh"><h3>Riepilogo</h3></div>${messaggiHtml(res)}<div class="st-riep-full"><div>${tabellaBlocchi(p)}</div><div>${economiaHtml(p, am)}</div></div>
-      ${am ? `<h3 class="st-h3">Application Management</h3>${amRisultatiHtml(am)}` : ""}`;
+    const res = ST.res, p = res.progetto, am = res.am, f = p.fte;
+    const sez = (titolo, corpo) => `<div class="card st-sez"><div class="st-rh"><h3>${titolo}</h3></div>${corpo}</div>`;
+    const amHtml = !am ? `<p class="muted">Nessuna AM in questa stima.</p>` : am.calcolabile === false ? `<p class="hint warn">AM non calcolabile: il build equivalente è zero.</p>`
+      : `<div class="st-eco"><div><span>${am.modalita === "driver" ? `Da driver · ${am.anni_n} ${am.anni_n === 1 ? "anno" : "anni"}` : "Manuale"}</span><b>${F.gg(am.gg)} gg</b></div>
+        ${am.modalita === "driver" ? am.anni.map(a => `<div><span>Anno ${a.anno}</span><b>${F.gg(a.gg.tot)} gg · ${F.eur0(a.prezzo)}</b></div>`).join("") : `<div><span>Media mensile</span><b>${F.eur(am.mensile)}</b></div>`}
+        <div><span>Costo</span><b>${F.eur(am.costo)}</b></div><div class="prezzo"><span>Prezzo AM</span><b>${F.eur(am.prezzo)}</b></div></div>`;
+    return messaggiHtml(res, false) + `<div class="st-riep-grid">
+      ${sez("Progetto", `<table class="st-riep-t"><thead><tr><th>Blocco</th><th class="r">Giornate</th></tr></thead><tbody>${righeTotali(p)}</tbody></table>
+        <div class="st-eco"><div><span>Costo</span><b>${F.eur(p.costi.tot)}</b></div><div><span>Margine</span><b>${F.pct(p.margine)}</b></div><div class="prezzo"><span>Prezzo progetto</span><b>${F.eur(p.prezzo)}</b></div></div>`)}
+      ${sez("Application Management", amHtml)}
+      ${sez("Rispetto all'obiettivo", obiettivoHtml(p, false))}
+      ${sez("Indicatori", `<div class="st-eco">
+          <div><span>Durata del progetto</span><b>${p.durata_mesi ? nf(1).format(p.durata_mesi) + " mesi" : "non indicata"}</b></div>
+          <div><span>FTE medi</span><b>${f ? `${F.fte(f.tot)} (di cui PM ${F.fte(f.PM)})` : "inserisci la durata"}</b></div>
+          <div><span>Costo medio al giorno</span><b>${F.eur(p.costo_medio)}</b></div><div><span>Prezzo medio al giorno</span><b>${F.eur(p.prezzo_medio)}</b></div></div>`)}</div>`;
   }
 
   // ================================================================ CATALOGO
