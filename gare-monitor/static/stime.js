@@ -341,6 +341,7 @@
   // ---------------------------------------------------------------- 1. impostazioni
   function passoImpostazioni(s) {
     const g = s.gara, gEsiste = !g || ST.gare.some(x => x.chiave === g.chiave), snap = s.snapshot;
+    const P = (lab, p, opz = {}) => `<div class="st-campo"><label>${lab}</label><div class="st-cv">${campo("p:" + p, pget(snap, p), opz)}${opz.suf ? `<span class="muted">${opz.suf}</span>` : ""}${diffDot(p)}</div></div>`;
     return `<div class="card"><div class="st-rh"><h3>Impostazioni della stima</h3></div><div class="st-campi st-imp">
       <div class="st-campo st-l2"><label for="st-cli">Cliente</label><input id="st-cli" list="st-cli-dl" value="${E(s.cliente)}" autocomplete="off">
         <datalist id="st-cli-dl">${[...new Set(ST.gare.map(x => x.cliente).filter(Boolean))].sort().map(c => `<option value="${E(c)}">`).join("")}</datalist></div>
@@ -349,7 +350,10 @@
       <div class="st-campo"><label>Durata del progetto</label><div class="st-cv">${campo("s:durata_mesi", s.durata_mesi, {it: true})}<span class="muted">mesi</span></div></div>
       <div class="st-campo"><label>Prezzo obiettivo (facoltativo)</label><div class="st-cv">${campo("s:prezzo_obiettivo", s.prezzo_obiettivo, {it: true})}<span class="muted">€</span></div></div>
       <div class="st-campo"><label>Margine del progetto</label><div class="st-cv">${campo("p:generali||margine_progetto|", pget(snap, "generali||margine_progetto|"), {pct: true, max1: true})}<span class="muted">%</span>${diffDot("generali||margine_progetto|")}</div></div></div>
-      <p class="hint">Costi delle figure, giornate al mese, arrotondamento e note sono nei <button class="linkbtn" data-passo="parametri">parametri avanzati</button>.</p></div>`;
+      <h3 class="st-h3">Costi e parametri generali</h3><div class="st-campi st-imp">
+        ${snap.team.map(t => P(`Costo ${E(t.nome)}`, `team|${t.codice}|costo|`, {suf: "€/gg"})).join("")}
+        ${P("Giornate lavorative al mese", "generali||gg_mese|")}${P("Arrotondamento", "generali||passo|", {suf: "gg"})}
+        <div class="st-campo st-l4"><label for="st-note">Note</label><textarea id="st-note" rows="2">${E(s.note)}</textarea></div></div></div>`;
   }
   function bindImpostazioni(box) {
     const s = ST.s;
@@ -563,11 +567,7 @@
     const rip = (sez, c, x) => x.pct_be == null ? `<span class="muted">per team</span>` : `${campo(`p:${sez}|${c}|pct_be|`, x.pct_be, {pct: true, cls: "st-n3"})}${campo(`p:${sez}|${c}|pct_fe|`, x.pct_fe, {pct: true, cls: "st-n3"})}${diffDot(`${sez}|${c}|pct_be|`) || diffDot(`${sez}|${c}|pct_fe|`)}`;
     const errRip = x => x.pct_be != null && Math.abs((+x.pct_be || 0) + (+x.pct_fe || 0) - 1) > 1e-9;
     return `<div class="card"><div class="st-rh"><h3>Parametri avanzati della stima</h3><span class="st-sp"></span><button type="button" id="st-riall">${icona("refresh-cw")}Riallinea ai default correnti</button></div>
-      <p class="hint" style="margin-top:0">Copia dei parametri congelata in questa stima. Il pallino <span class="st-diff-i"></span> segna i valori diversi dal catalogo corrente; ${icona("undo-2")} li riporta al default. I parametri AM sono nel passo AM.</p>
-      <h3 class="st-h3">Costi e parametri generali</h3><div class="st-campi">
-        ${snap.team.map(t => P(`Costo ${E(t.nome)}`, `team|${t.codice}|costo|`, {suf: "€/gg"})).join("")}
-        ${P("Giornate lavorative al mese", "generali||gg_mese|")}${P("Arrotondamento", "generali||passo|", {suf: "gg"})}
-        <div class="st-campo st-l4"><label for="st-note">Note</label><textarea id="st-note" rows="2">${E(s.note)}</textarea></div></div>
+      <p class="hint" style="margin-top:0">Copia dei parametri congelata in questa stima. Il pallino <span class="st-diff-i"></span> segna i valori diversi dal catalogo corrente; ${icona("undo-2")} li riporta al default. Costi, giornate al mese e arrotondamento sono nelle impostazioni; i parametri AM nel passo AM.</p>
       <h3 class="st-h3">Fasi, PM e contingency</h3><table class="st-righe st-par"><thead><tr><th>Fase</th><th>Calcolata su</th><th class="r">%</th><th class="r">% BE / FE</th></tr></thead><tbody>
       ${snap.fasi.map(f => `<tr><td><b>${E(f.nome)}</b></td><td class="muted">${E(BASI[f.base] || f.base)}</td><td class="r">${campo(`p:fasi|${f.codice}|pct|`, f.pct, {pct: true, cls: "st-n3"})}${diffDot(`fasi|${f.codice}|pct|`)}</td>
         <td class="r ${errRip(f) ? "st-errc" : ""}">${f.codice === "PM" ? `<span class="muted">figura PM</span>` : rip("fasi", f.codice, f)}</td></tr>`).join("")}</tbody></table>
