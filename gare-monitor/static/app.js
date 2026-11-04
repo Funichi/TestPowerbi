@@ -212,7 +212,15 @@ async function caricaStimeGara(el, row) {
   const box = $("#f-stime", el); if (!box) return;
   const k = chiaveGara(row.SS, row["Data ins."]);
   const testa = extra => `<div class="fs-h">${ico("calculator")}<b>Stime</b>${extra || ""}</div>`;
-  if (!k) { box.innerHTML = testa() + `<div class="hint">Per collegare una stima servono il codice SS e la data di inserimento della gara.</div>`; return; }
+  if (!k) {                     // senza codice SS la stima non si collega (manca la chiave stabile), ma nasce già con cliente e nome
+    box.innerHTML = testa(`<span style="flex:1"></span><button type="button" id="fs-nuova">${ico("plus")}Nuova stima</button>`)
+      + `<div class="hint">La gara non ha ancora il codice SS: la stima nasce con cliente e nome compilati ma senza collegamento. La colleghi dalle impostazioni della stima quando l'SS c'è.</div>`;
+    $("#fs-nuova", box).onclick = () => {
+      const p = {cliente: row.Cliente || "", nome: row.Oggetto ? String(row.Oggetto).slice(0, 80) : "Nuova stima"};
+      closeModal(); goStime(R => R.nuovaDaOfferta(p));
+    };
+    return;
+  }
   let lista;
   try { lista = (await api("/api/stime?gara=" + encodeURIComponent(k))).stime; } catch (e) { box.innerHTML = testa() + `<div class="hint">${esc(e.message)}</div>`; return; }
   lista.sort((a, b) => (b.corrente - a.corrente) || (b.versione - a.versione));
