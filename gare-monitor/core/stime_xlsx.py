@@ -111,6 +111,9 @@ def _somma(refs):
 
 def esporta(stima, oggi=None):
     """Excel della stima: (bytes, nome file, celle chiave {nome: "'Foglio'!$C$5"} per i test). Solleva ValueError se ci sono errori."""
+    if stima.get("tipo") == "assessment":
+        from .stime_xlsx_assessment import esporta_assessment
+        return esporta_assessment(stima, nome_file(stima, oggi), oggi)
     res = calcola(stima)
     if res["export_bloccato"]:
         errori = [m["testo"] for m in res["messaggi"] if m["livello"] == "errore"]

@@ -422,7 +422,10 @@ def _am_driver(ctx, cfg, stima, progetto):
 # ------------------------------------------------------------------ ingresso
 
 def calcola(stima):
-    """Calcola l'intera stima con il suo snapshot. Non modifica l'ingresso."""
+    """Calcola l'intera stima con il suo snapshot. Non modifica l'ingresso. Le stime Assessment hanno un motore a parte."""
+    if stima.get("tipo") == "assessment":
+        from .stime_assessment import calcola_assessment
+        return calcola_assessment(stima)
     ctx = _Ctx(stima.get("snapshot") or {})
     if ctx.passo <= 0:
         ctx.m("errore", "passo", "Il passo di arrotondamento deve essere maggiore di zero", "passo")

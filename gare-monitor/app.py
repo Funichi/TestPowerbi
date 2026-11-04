@@ -531,7 +531,7 @@ def _corpo():
 @app.get("/api/stime")
 def stime_elenco():
     a = request.args
-    return jsonify({"stime": stimestore().elenco(a.get("cliente") or None, a.get("gara") or None, a.get("q") or None)})
+    return jsonify({"stime": stimestore().elenco(a.get("cliente") or None, a.get("gara") or None, a.get("q") or None, a.get("tipo") or None)})
 
 
 @app.post("/api/stime")
