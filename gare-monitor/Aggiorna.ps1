@@ -62,5 +62,5 @@ try {
     } catch { Log "ERRORE nel riavvio: $_"; $errore = "$errore $_" }
 }
 if ($errore) {
-    try { Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show("Aggiornamento non riuscito: $errore`nL'app e' stata riaperta nella versione precedente. Dettagli in aggiornamento.log nella cartella dell'app.", "Gare e Offerte") | Out-Null } catch {}
+    try { Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show("Aggiornamento non riuscito: $errore`nL'app e' stata riaperta nella versione precedente. Dettagli in aggiornamento.log nella cartella dell'app.", "BidDesk") | Out-Null } catch {}
 }

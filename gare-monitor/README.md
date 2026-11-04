@@ -1,4 +1,6 @@
-# Gare & Offerte
+# BidDesk (ex Gare & Offerte)
+
+BidDesk è il nuovo nome dell'app (prima "Gare & Offerte"): gare, offerte, referenze e stime in un posto solo. I file restano `GareOfferte.exe` e `GareOfferte-<n>.zip`, così l'aggiornamento automatico continua a funzionare.
 
 App locale (si apre nel browser) che usa il file Excel `HISTORY.xlsx` come archivio principale:
 inserimento e modifica righe, cruscotto con scadenze/punti di attenzione/pipeline per solution/trend mensili,
