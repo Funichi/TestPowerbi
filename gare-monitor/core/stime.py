@@ -249,7 +249,8 @@ def valida_workstream(lista, dove="Workstream"):
         att = []
         for j, x in enumerate(w.get("attivita") or []):
             nome = f"{dove} {i + 1}, attività {j + 1}"
-            att.append({"id": _testo(x.get("id"), 30), "attivita": str(x.get("attivita") or "").strip()[:1000],
+            # ID per posizione (workstream N → N.1, N.2…); il deliverable non è più usato ma, se c'è, si conserva
+            att.append({"id": f"{i}.{j + 1}", "attivita": str(x.get("attivita") or "").strip()[:1000],
                         "deliverable": str(x.get("deliverable") or "").strip()[:1000],
                         **{f"gg_{t}": _pct(x.get(f"gg_{t}"), f"{nome}: giornate {t.upper()}", 0) for t in ("pm", "be", "fe")}})
         out.append({"codice": _testo(w.get("codice"), 20) or f"WS{i}", "nome": _testo(w.get("nome"), 200), "attivita": att})

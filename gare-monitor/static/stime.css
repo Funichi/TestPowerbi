@@ -248,3 +248,60 @@ tr:hover .st-azr,.st-ws-h:hover .st-azr,.st-azr:focus-within{opacity:1}
 .st-azr .st-cestino{opacity:1}
 .st-ass td:nth-child(2) textarea.st-atxt{min-width:230px}.st-ass td:nth-child(3) textarea.st-atxt{min-width:150px}
 .st-ass td.st-azioni{width:1%;white-space:nowrap}
+
+/* ---------- Assessment: tabella "Workstream e attività" a griglia unica (table-layout fixed + colgroup) ---------- */
+.st-wst{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:13px;font-variant-numeric:tabular-nums}
+.st-wst col.c-id{width:48px}.st-wst col.c-n,.st-wst col.c-tot{width:72px}.st-wst col.c-az{width:84px}
+.st-wst th{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-3);text-align:left;padding:6px 6px;border-bottom:1px solid var(--border);white-space:nowrap}
+.st-wst td{padding:2px 6px;border-bottom:1px solid var(--row-line);vertical-align:top}
+.st-wst .st-num{text-align:right;white-space:nowrap}
+.st-wst td.st-num{padding-top:6px;padding-bottom:6px}
+.st-wst .st-tot{font-weight:600;border-left:1px solid var(--divider);color:var(--text)}
+.st-wst th.st-tot{color:var(--text-3)}
+.st-wst .st-zero{color:var(--text-empty);font-weight:400}
+/* riga del workstream: stesse colonne delle attività */
+.st-wst tr.st-wsrow td{background:var(--bg);color:var(--text-2);font-weight:600;border-top:8px solid var(--card);border-bottom:1px solid var(--border)}
+.st-wst tbody.st-wsg:first-of-type tr.st-wsrow td{border-top:0}
+.st-wst tr.st-wsrow td.st-num{padding-top:8px}
+.st-wsnc{display:flex;align-items:center;gap:2px;min-width:0}
+.st-wsnc .st-chev.st-ib{width:28px;height:28px;flex:none;color:var(--text-3)}
+.st-wst .st-wsnome{flex:1;min-width:0;max-width:none;font-weight:600;color:var(--text-2);border:1px solid transparent;background:transparent;padding:3px 6px;min-height:28px;border-radius:6px}
+.st-wst .st-wsnome:hover{border-color:var(--border)}.st-wst .st-wsnome:focus{background:var(--field);color:var(--text)}
+/* attività */
+.st-wst .st-idc{padding-top:7px}
+.st-idl{font-size:11.5px;color:var(--text-3);white-space:nowrap}
+.st-wst textarea.st-atxt{display:block;width:100%;min-width:0;min-height:28px;resize:none;overflow:hidden;font:inherit;font-size:13px;line-height:1.4;color:var(--text);
+  padding:4px 6px;border:1px solid transparent;border-radius:6px;background:transparent}
+.st-wst input.st-nin{width:100%;min-height:28px;padding:4px 6px;margin:0;border:1px solid transparent;border-radius:6px;background:transparent;text-align:right;font-size:13px;font-variant-numeric:tabular-nums;color:var(--text)}
+/* cella con input: il testo dell'input finisce 6px prima del bordo destro, come nelle celle di solo testo (0 + 1 bordo + 5 padding) */
+.st-wst td.st-numin{padding:2px 0 2px 2px}.st-wst td.st-numin input.st-nin{padding-right:5px}
+.st-wst textarea.st-atxt:hover,.st-wst input.st-nin:hover{border-color:var(--border)}
+.st-wst textarea.st-atxt:focus,.st-wst input.st-nin:focus{border-color:var(--border-hover);background:var(--field)}
+.st-wst input.st-nin::-webkit-outer-spin-button,.st-wst input.st-nin::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.st-wst input.st-nin.bad{border-color:var(--urg-late);background:var(--urg-late-bg)}
+.st-wst tr.st-arow:hover td{background:var(--row-hover)}
+.st-wst tr.st-err td{background:var(--urg-late-bg)}
+.st-wst td.st-azc{padding:2px 2px;text-align:right;white-space:nowrap}
+.st-wst .st-azr .st-ib{width:28px;height:28px}
+.st-wst tr.st-agg-r td{border-bottom:0;padding:2px 6px 8px}
+.st-wst tfoot td{position:sticky;bottom:0;background:var(--card);font-weight:650;border-top:2px solid var(--border);border-bottom:0;padding:8px 6px;z-index:1}
+.st-nota{font-size:12px;color:var(--text-3)}
+.st-wscard{overflow:visible !important}
+
+/* ---------- Assessment: pannello Totali ---------- */
+.st-tA{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+.st-tA th{font-weight:400;text-align:left;color:var(--text);padding:4px 8px 4px 0;white-space:normal;overflow-wrap:anywhere;vertical-align:top}
+.st-tA td{text-align:right;white-space:nowrap;padding:4px 0;vertical-align:top}
+.st-tA tr.ws th,.st-tA tr.ws td{border-bottom:1px solid var(--row-line)}
+.st-tA tr.sub th,.st-tA tr.sub td{font-weight:650;border-top:1px solid var(--border);padding-top:8px}
+.st-tA tr.big th,.st-tA tr.big td{font-weight:700;font-size:15.5px;border-top:2px solid var(--border);padding-top:8px}
+.st-ecoA{margin-top:14px;padding-top:12px;border-top:1px solid var(--divider)}
+.st-totA .st-obj{margin-top:12px}
+/* layout dell'Assessment: Totali a destra, sotto la tabella sotto i 1100px */
+@media(min-width:1101px){.st-corpo.st-corpoA{grid-template-columns:minmax(0,1fr) 320px}.st-corpo.st-corpoA .st-dx{position:sticky;top:12px}}
+@media(max-width:1100px){.st-corpo.st-corpoA{grid-template-columns:minmax(0,1fr)}.st-corpo.st-corpoA .st-dx{position:static}}
+@media(max-width:768px){.st-wst{min-width:560px}}
+.st-tA th{text-transform:none;letter-spacing:normal;font-size:13px}
+.st-tA tr.big th,.st-tA tr.big td{font-size:15.5px}
+.st-wst thead th:nth-child(2){padding-left:13px}                 /* allineato al testo della textarea (6 + 1 bordo + 6) */
+.st-tA td{color:var(--text)}
