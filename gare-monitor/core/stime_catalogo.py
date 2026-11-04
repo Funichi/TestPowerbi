@@ -77,6 +77,48 @@ CATALOGO = {
 }
 
 
+# ------------------------------------------------------------------ Assessment
+# Modello predefinito di workstream e attività (le giornate "Delivery" del foglio originale sono tutte BE).
+_A = lambda id_, attivita, deliverable, pm, be: {"id": id_, "attivita": attivita, "deliverable": deliverable, "gg_pm": pm, "gg_be": be, "gg_fe": 0}
+MODELLO_ASSESSMENT = [
+    {"codice": "WS0", "nome": "WS0 – Governo progetto", "attivita": [
+        _A("A.0.1", "Kick-off, setup team, piano di dettaglio e data request", "Piano di progetto, data request", 2, 2),
+        _A("A.0.2", "SAL bisettimanali (6) e Steering Committee mensili (3)", "Verbali SAL e SteCo", 20, 6)]},
+    {"codice": "WS1", "nome": "WS1 – Diagnostico", "attivita": [
+        _A("A.1.1", "Analisi documentazione del cliente (architetture, inventari, database, report eventuali)", "Base documentale strutturata", 0, 12),
+        _A("A.1.2", "Workshop con funzioni di business", "Verbali, requisiti informativi", 0, 15),
+        _A("A.1.3", "Interviste IT e referenti dei sistemi sorgente per mappature e analisi dei sistemi sorgenti", "Mappa sistemi e owner", 0, 6),
+        _A("A.1.4", "Catalogo delle sorgenti (owner, tecnologia, volumi, frequenze, dati personali)", "Catalogo sorgenti", 0, 10),
+        _A("A.1.5", "Focus di dettaglio su ambienti legacy: librerie, file, volumi, journaling, finestre batch", "Scheda tecnica ambiente", 0, 4),
+        _A("A.1.6", "Analisi del reporting attuale, a livello di strumenti e di indicatori", "Catalogo KPI e report", 0, 10),
+        _A("A.1.7", "Key findings, pain point e quick win – Milestone M1", "Key findings e pain point", 0, 4)]},
+    {"codice": "WS2", "nome": "WS2 – Modello target della Data Platform", "attivita": [
+        _A("A.2.1", "Data & AI Strategy: casi d'uso prioritari e requisiti sui dati (ML, DL, GenAI)", "Data & AI Strategy", 0, 16),
+        _A("A.2.2", "Matrice dei requisiti funzionali e non funzionali", "Matrice dei requisiti", 0, 8),
+        _A("A.2.3", "Analisi degli scenari tecnologici e framework di valutazione", "Analisi scenari", 0, 10),
+        _A("A.2.4", "Architettura target logica e tecnologica per layer, principi architetturali", "Architettura target", 0, 8),
+        _A("A.2.5", "Definizione del processo e delle regole di integrazione con le sorgenti", "Integration blueprint", 0, 8),
+        _A("A.2.6", "Modello di accesso ai dati per profilo utente e matrice di sicurezza", "Modello di accesso", 0, 4),
+        _A("A.2.7", "Vendor selection: long list, short list, matrice di valutazione pesata", "Matrice di valutazione", 0, 8),
+        _A("A.2.8", "Vendor selection report e raccomandazione – Milestone M2", "Vendor selection report", 0, 4)]},
+    {"codice": "WS3", "nome": "WS3 – Modello operativo e Data Governance", "attivita": [
+        _A("A.3.1", "Assessment di maturità della Data Governance", "Maturity assessment", 0, 10),
+        _A("A.3.2", "Mappa dei data domain, Data Owner e Data Steward", "Mappa domini e ownership", 0, 8),
+        _A("A.3.3", "Modello operativo: archetipo organizzativo, comitati, ruoli, RACI", "Modello operativo", 0, 10),
+        _A("A.3.4", "Processi di governance: governo iniziative Data & AI, DQ, lineage, retention, auditabilità", "Processi di governance", 0, 12),
+        _A("A.3.5", "Linee guida data dictionary (glossario, dizionario logico, metadati tecnici, naming)", "Linee guida data dictionary", 0, 10),
+        _A("A.3.6", "Linee guida modello semantico (dimensioni conformi, misure certificate, point-in-time)", "Linee guida modello semantico", 0, 8)]},
+    {"codice": "WS4", "nome": "WS4 – Roadmap", "attivita": [
+        _A("A.4.1", "Roadmap per wave, quick win, milestone e dipendenze", "Roadmap per wave", 0, 10),
+        _A("A.4.2", "Schede di dimensionamento per perimetro", "Schede di dimensionamento", 0, 8),
+        _A("A.4.3", "Piano di change management e modello di staffing (run & change)", "Piano change e staffing", 0, 2),
+        _A("A.4.4", "Stima del TCO della piattaforma per range", "TCO piattaforma", 0, 8),
+        _A("A.4.5", "Consegna finale e presentazione allo Steering Committee – Milestone M3", "Pacchetto finale deliverable", 0, 4)]},
+]
+ASSESSMENT_DEFAULT = {"costo_pm": 460, "costo_be": 380, "costo_fe": 380, "contingency": 0.05, "margine": 0.25}
+TIPI_STIMA = ("progetto", "assessment")
+
+
 FASI_ANALISI_DISEGNO = ("ANA", "DIS")
 
 
@@ -97,14 +139,36 @@ def migra_snapshot(snap):
 
 def catalogo_default():
     """Copia indipendente del catalogo di default: è anche lo snapshot di una stima nuova."""
-    return copy.deepcopy(CATALOGO)
+    k = copy.deepcopy(CATALOGO)
+    k["assessment"] = {**ASSESSMENT_DEFAULT, "modello": copy.deepcopy(MODELLO_ASSESSMENT)}
+    return k
 
 
-def stima_nuova(snapshot=None):
-    """Stima vuota con i default del catalogo (training e voci a corpo predefinite)."""
-    snap = copy.deepcopy(snapshot) if snapshot is not None else catalogo_default()
+def snapshot_per_tipo(catalogo, tipo):
+    """Copia dei parametri congelata in una stima: il progetto non porta i parametri dell'Assessment; l'Assessment li porta
+    senza il modello di workstream (il modello si copia nelle righe della stima quando la si crea)."""
+    snap = copy.deepcopy(catalogo)
+    ass = snap.pop("assessment", None)
+    if tipo == "assessment":
+        ass = {k: v for k, v in (ass or ASSESSMENT_DEFAULT).items() if k != "modello"}
+        snap["assessment"] = {**ASSESSMENT_DEFAULT, **ass}
+    return snap
+
+
+def stima_nuova(snapshot=None, tipo="progetto"):
+    """Stima nuova con i default del catalogo. Progetto: training e voci a corpo predefinite. Assessment: il modello
+    predefinito di workstream e attività, nessuna attività accessoria."""
+    catalogo = copy.deepcopy(snapshot) if snapshot is not None else catalogo_default()
+    snap = snapshot_per_tipo(catalogo, tipo)
+    if tipo == "assessment":
+        modello = (catalogo.get("assessment") or {}).get("modello")
+        return {"tipo": "assessment", "snapshot": snap,
+                "workstream": copy.deepcopy(MODELLO_ASSESSMENT if modello is None else modello),
+                "righe": [], "voci_corpo": [], "training_be": 0, "training_fe": 0,
+                "durata_mesi": None, "prezzo_obiettivo": None, "am": {"modalita": None}}
     g = snap["generali"]
     return {
+        "tipo": "progetto",
         "snapshot": snap,
         "righe": [],
         "voci_corpo": [dict(v) for v in g.get("voci_corpo", [])],

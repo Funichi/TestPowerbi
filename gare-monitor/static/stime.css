@@ -222,3 +222,29 @@ tr:hover>td>.st-cestino,.st-cestino:focus-visible{opacity:1}
 @media(max-width:1200px){.st-corpo{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:768px){.st-card-mod{overflow-x:auto !important}.st-moduli tfoot td{position:static}.st-moduli input.st-et{min-width:120px}.st-cat-vuota{flex-basis:100%;padding-left:28px}}
 .st-riep-grid>.card,.st-riep-grid>.card+.card{margin:0}
+
+/* ---------- Assessment ---------- */
+.st-sceltatipo{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
+.st-tipocard{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:18px;min-height:110px;border:1px solid var(--border);border-radius:14px;background:var(--card);text-align:left;font-weight:400;white-space:normal}
+.st-tipocard b{font-size:16px}.st-tipocard span{color:var(--text-2);font-size:13px;line-height:1.4}
+.st-tipocard:hover,.st-tipocard:focus-visible{border-color:var(--text-2);background:var(--row-hover)}
+@media(max-width:560px){.st-sceltatipo{grid-template-columns:1fr}}
+.st-ass{table-layout:auto}
+.st-ass th:nth-child(1){width:74px}.st-ass th:nth-child(4),.st-ass th:nth-child(5),.st-ass th:nth-child(6){width:72px}.st-ass th:nth-child(7){width:70px}
+.st-ass td{vertical-align:top}
+.st-ass input.st-aid{width:66px;min-height:32px;font-size:12.5px;padding:5px 6px}
+.st-ass textarea.st-atxt{width:100%;min-width:180px;min-height:32px;resize:none;overflow:hidden;font:inherit;font-size:13px;line-height:1.35;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--field)}
+.st-ass input.st-n3{width:60px;min-height:32px;margin-left:0}
+.st-ass td.r.b{padding-top:10px}
+.st-ws-h{gap:6px}
+.st-wsnome{flex:1 1 260px;max-width:520px;font-weight:650;border:1px solid transparent;background:transparent;padding:4px 6px;min-height:32px}
+.st-wsnome:hover{border-color:var(--border)}.st-wsnome:focus{background:var(--field)}
+.st-ws-h .st-chev.st-ib{width:32px;height:32px}
+.st-azr{display:inline-flex;gap:2px;opacity:0;transition:opacity .12s}
+tr:hover .st-azr,.st-ws-h:hover .st-azr,.st-azr:focus-within{opacity:1}
+@media(hover:none){.st-azr{opacity:.8}}
+.st-azr .st-ib{width:32px;height:32px}
+.st-riep-a .st-riep-t td,.st-riep-a .st-riep-t th{white-space:nowrap}
+.st-azr .st-cestino{opacity:1}
+.st-ass td:nth-child(2) textarea.st-atxt{min-width:230px}.st-ass td:nth-child(3) textarea.st-atxt{min-width:150px}
+.st-ass td.st-azioni{width:1%;white-space:nowrap}

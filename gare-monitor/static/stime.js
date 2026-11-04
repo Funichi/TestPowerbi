@@ -47,11 +47,11 @@
     return [...vist.values()].sort((a, b) => b.anno - a.anno || a.ss.localeCompare(b.ss));
   }
 
-  const ST = {vista: "elenco", cat: null, gare: [], elenco: [], filtri: {cliente: "", gara: "", q: ""}, s: null, res: null, sporco: false,
+  const ST = {vista: "elenco", cat: null, gare: [], elenco: [], filtri: {cliente: "", gara: "", q: "", tipo: ""}, s: null, res: null, sporco: false,
     tab: "moduli", aperti: {}, root: null, timer: null, seq: 0, catEdit: null, catErr: ""};
 
   // ---------------------------------------------------------------- percorsi dei parametri: "sezione|codice|campo|indice"
-  const contenitore = (obj, sez, cod) => (sez === "generali" || sez === "am") ? obj[sez] : (obj[sez] || []).find(x => x.codice === cod);
+  const contenitore = (obj, sez, cod) => (sez === "generali" || sez === "am" || sez === "assessment") ? obj[sez] : (obj[sez] || []).find(x => x.codice === cod);
   function pget(obj, p) {
     const [sez, cod, campo, idx] = p.split("|"), c = contenitore(obj, sez, cod);
     if (!c) return undefined;
@@ -69,7 +69,7 @@
   async function caricaCatalogo() { ST.cat = await api("/api/stime/catalogo"); }
   async function caricaElenco() {
     const f = ST.filtri, q = new URLSearchParams();
-    if (f.cliente) q.set("cliente", f.cliente); if (f.gara) q.set("gara", f.gara); if (f.q) q.set("q", f.q);
+    if (f.cliente) q.set("cliente", f.cliente); if (f.gara) q.set("gara", f.gara); if (f.q) q.set("q", f.q); if (f.tipo) q.set("tipo", f.tipo);
     ST.elenco = (await api("/api/stime?" + q)).stime;
   }
 
@@ -99,19 +99,20 @@
     m.innerHTML = `<div class="st-wrap">${schede()}
       <div class="st-bar"><input id="st-fq" placeholder="Cerca per nome, cliente, codice SS…" value="${E(f.q)}" autocomplete="off">
         <input id="st-fcl" placeholder="Cliente" value="${E(f.cliente)}" autocomplete="off">
+        <select id="st-fti" aria-label="Tipo di stima"><option value="">Tutti i tipi</option><option value="progetto" ${f.tipo === "progetto" ? "selected" : ""}>Progetto</option><option value="assessment" ${f.tipo === "assessment" ? "selected" : ""}>Assessment</option></select>
         <select id="st-fga"><option value="">Tutte le gare</option>${tutte ? `<option selected value="${E(f.gara)}">${E(f.gara.replace("|", " · "))}</option>` : ""}${gareUsate.map(g => `<option value="${E(g.chiave)}" ${g.chiave === f.gara ? "selected" : ""}>${E(etichettaGara(g))}</option>`).join("")}</select>
         <span class="st-sp"></span><button class="primary" id="st-nuova">${icona("plus")}Nuova stima</button></div>
       ${ST.elenco.length ? `<div class="card tablecard st-elenco"><table><thead><tr><th>Nome</th><th>Cliente</th><th>Gara</th><th>Versione</th><th class="r">Giornate</th><th class="r">Prezzo</th><th class="r">Margine</th><th class="r">AM</th><th>Modificata</th><th></th></tr></thead><tbody>
-        ${ST.elenco.map(x => `<tr data-apri="${x.id}"><td><b>${E(x.nome)}</b></td><td>${E(x.cliente)}</td><td>${x.gara ? `<span title="${E(x.gara.oggetto || "")}">${E(x.gara.ss)} · ${x.gara.anno}</span>` : `<span class="muted">—</span>`}</td>
+        ${ST.elenco.map(x => `<tr data-apri="${x.id}"><td><b>${E(x.nome)}</b> ${badgeTipo(x.tipo)}</td><td>${E(x.cliente)}</td><td>${x.gara ? `<span title="${E(x.gara.oggetto || "")}">${E(x.gara.ss)} · ${x.gara.anno}</span>` : `<span class="muted">—</span>`}</td>
           <td>v${x.versione}${x.corrente ? ` <span class="st-badge ok">corrente</span>` : ""}</td><td class="r">${F.gg(x.gg)}</td><td class="r">${F.eur0(x.prezzo)}</td><td class="r">${F.pct(x.margine)}</td>
           <td class="r">${x.am_prezzo == null ? `<span class="muted">—</span>` : F.eur0(x.am_prezzo)}</td><td>${E((x.modificata_il || "").replace("T", " ").slice(0, 16))}</td>
           <td class="st-azioni"><button class="st-ib" data-az="versione" data-id="${x.id}" title="Nuova versione">${icona("plus")}</button><button class="st-ib" data-az="clona" data-id="${x.id}" title="Clona">${icona("copy")}</button>
             <button class="st-ib" data-az="esporta" data-id="${x.id}" title="Esporta Excel">${icona("download")}</button><button class="st-ib" data-az="elimina" data-id="${x.id}" title="Elimina">${icona("trash-2")}</button></td></tr>`).join("")}
-        </tbody></table></div>` : `<div class="card st-vuoto"><h3>${f.q || f.cliente || f.gara ? "Nessuna stima con questi filtri" : "Ancora nessuna stima"}</h3><p class="muted">Una stima nasce con una copia dei parametri del catalogo: le modifiche al catalogo valgono per le stime create dopo.</p></div>`}</div>`;
+        </tbody></table></div>` : `<div class="card st-vuoto"><h3>${f.q || f.cliente || f.gara || f.tipo ? "Nessuna stima con questi filtri" : "Ancora nessuna stima"}</h3><p class="muted">Una stima nasce con una copia dei parametri del catalogo: le modifiche al catalogo valgono per le stime create dopo.</p></div>`}</div>`;
     bindSchede(m);
     let t;
-    const filtra = () => { clearTimeout(t); t = setTimeout(() => { ST.filtri = {q: qs("#st-fq", m).value.trim(), cliente: qs("#st-fcl", m).value.trim(), gara: qs("#st-fga", m).value}; ridisegnaElenco(m); }, 250); };
-    qs("#st-fq", m).oninput = filtra; qs("#st-fcl", m).oninput = filtra; qs("#st-fga", m).onchange = filtra;
+    const filtra = () => { clearTimeout(t); t = setTimeout(() => { ST.filtri = {q: qs("#st-fq", m).value.trim(), cliente: qs("#st-fcl", m).value.trim(), gara: qs("#st-fga", m).value, tipo: qs("#st-fti", m).value}; ridisegnaElenco(m); }, 250); };
+    qs("#st-fq", m).oninput = filtra; qs("#st-fcl", m).oninput = filtra; qs("#st-fga", m).onchange = filtra; qs("#st-fti", m).onchange = filtra;
     qs("#st-nuova", m).onclick = () => nuova();
     qsa("[data-apri]", m).forEach(tr => tr.onclick = e => { if (!e.target.closest("button")) vai("editor", +tr.dataset.apri); });
     qsa("[data-az]", m).forEach(b => b.onclick = () => azione(b.dataset.az, +b.dataset.id));
@@ -143,9 +144,22 @@
       toast("Excel esportato");
     } catch (e) { toast(e.message, true); }
   }
-  async function nuova(prefill = {}) {
+  const badgeTipo = t => `<span class="st-tipo ${t === "assessment" ? "ass" : ""}">${t === "assessment" ? "Assessment" : "Progetto"}</span>`;
+  // prima di tutto il tipo: Progetto (moduli, fasi e AM) o Assessment (workstream e attività con deliverable). Non si cambia dopo.
+  function nuova(prefill = {}) {
+    return new Promise(fatto => {
+      const el = modal(`<h2>Nuova stima</h2><p class="muted">Scegli il tipo di stima: non si potrà cambiare dopo la creazione.</p>
+        <div class="st-sceltatipo"><button type="button" class="st-tipocard" data-tipo="progetto"><b>Progetto</b><span>Implementazione con moduli, fasi e AM</span></button>
+          <button type="button" class="st-tipocard" data-tipo="assessment"><b>Assessment</b><span>Workstream e attività con deliverable</span></button></div>
+        <div class="foot"><button id="nt-x">Annulla</button></div>`);
+      qs("#nt-x", el).onclick = () => { closeModal(); fatto(); };
+      qsa("[data-tipo]", el).forEach(b => b.onclick = async () => { closeModal(); await creaStima({...prefill, tipo: b.dataset.tipo}); fatto(); });
+      qs("[data-tipo]", el).focus();
+    });
+  }
+  async function creaStima(prefill) {
     try {
-      const corpo = {nome: prefill.nome || "Nuova stima", cliente: prefill.cliente || "", gara: prefill.gara || null};
+      const corpo = {nome: prefill.nome || (prefill.tipo === "assessment" ? "Nuovo assessment" : "Nuova stima"), cliente: prefill.cliente || "", gara: prefill.gara || null, tipo: prefill.tipo};
       const s = await api("/api/stime", {method: "POST", body: corpo});
       ST.vista = "editor"; await apri(s.id, "impostazioni");
       const n = qs("#st-nome", ST.root); if (n) { n.focus(); n.select(); }
@@ -182,14 +196,18 @@
   // ================================================================ EDITOR (percorso a passi)
   // 1 Impostazioni · 2 Moduli · 3 Attività · 4 Fasi · 5 AM · 6 Riepilogo, più "Parametri avanzati". A destra solo i totali, sempre
   // visibili. Le giornate si mostrano totali: BE e FE restano separati nel calcolo (e negli input che li richiedono).
-  const PASSI = [["impostazioni", "Impostazioni"], ["moduli", "Moduli"], ["attivita", "Attività"], ["fasi", "Fasi"], ["am", "AM"], ["riepilogo", "Riepilogo"]];
+  const PASSI_P = [["impostazioni", "Impostazioni"], ["moduli", "Moduli"], ["attivita", "Attività"], ["fasi", "Fasi"], ["am", "AM"], ["riepilogo", "Riepilogo"]];
+  const PASSI_A = [["impostazioni", "Impostazioni"], ["workstream", "Workstream"], ["accessorie", "Attività accessorie"], ["riepilogo", "Riepilogo"]];
+  const isA = () => !!(ST.s && ST.s.tipo === "assessment");
+  const passi = () => isA() ? PASSI_A : PASSI_P;
   const nfIt = new Intl.NumberFormat("it-IT", {maximumFractionDigits: 4});
   async function apri(id, passo) {
     try {
       const precedente = ST.s && ST.s.id, r = await api(`/api/stime/${id}`);
       ST.s = r.stima; ST.res = r.risultati; ST.sporco = false; ST.vista = "editor";
       if (precedente !== id) ST.aperti = {};
-      ST.passo = passo || (precedente === id && ST.passo ? ST.passo : "moduli");          // una stima esistente si apre sui moduli
+      const primo = ST.s.tipo === "assessment" ? "workstream" : "moduli";
+      ST.passo = passo || (precedente === id && ST.passo && (passi().some(x => x[0] === ST.passo) || ST.passo === "parametri") ? ST.passo : primo);   // una stima esistente si apre sui moduli (o sui workstream)
       disegna();
     } catch (e) { toast(e.message, true); ST.vista = "elenco"; disegna(); }
   }
@@ -202,13 +220,13 @@
     const s = ST.s, passo = ST.passo, conTotali = passo !== "riepilogo";
     m.innerHTML = `<div class="st-wrap st-ed">${schede()}
       <div class="card st-testa"><div class="st-testa-r"><input id="st-nome" class="st-nome" value="${E(s.nome)}" aria-label="Nome della stima">
-          <span class="st-ver">v${s.versione}${s.corrente ? ` <span class="st-badge ok">corrente</span>` : ` <button class="linkbtn" id="st-corr">Rendi corrente</button>`}</span>
+          ${badgeTipo(s.tipo)}<span class="st-ver">v${s.versione}${s.corrente ? ` <span class="st-badge ok">corrente</span>` : ` <button class="linkbtn" id="st-corr">Rendi corrente</button>`}</span>
           <span class="st-sp"></span><span class="st-stato" id="st-stato"></span>
           <button id="st-indietro">${icona("arrow-left")}Elenco</button>
           <button class="st-more" id="st-more" aria-label="Altre azioni">${icona("ellipsis")}</button>
           <div class="st-menu" id="st-menu" hidden><button data-m="versione">Nuova versione</button><button data-m="clona">Clona…</button>
             <button data-m="esporta">Esporta Excel</button><hr><button data-m="elimina" class="danger">Elimina…</button></div></div>
-        <div class="st-passi">${PASSI.map(([k, l], i) => `<button class="st-passo ${passo === k ? "on" : ""} ${PASSI.findIndex(x => x[0] === passo) > i ? "fatto" : ""}" data-passo="${k}"><span>${i + 1}</span>${l}</button>`).join(`<i class="st-freccia"></i>`)}
+        <div class="st-passi">${passi().map(([k, l], i) => `<button class="st-passo ${passo === k ? "on" : ""} ${passi().findIndex(x => x[0] === passo) > i ? "fatto" : ""}" data-passo="${k}"><span>${i + 1}</span>${l}</button>`).join(`<i class="st-freccia"></i>`)}
           <span class="st-sp"></span><button class="linkbtn ${passo === "parametri" ? "on" : ""}" data-passo="parametri">${icona("sliders-horizontal")}Parametri avanzati</button></div></div>
       <div class="st-corpo ${conTotali ? "" : "st-pieno"}"><div class="st-sx"><div id="st-passoc"></div>${navHtml()}</div>${conTotali ? `<aside class="st-dx" id="st-riep"></aside>` : ""}</div></div>`;
     bindSchede(m);
@@ -230,8 +248,8 @@
     disegnaPasso(); disegnaRiepilogo(); stato();
   }
   function navHtml() {
-    const i = PASSI.findIndex(x => x[0] === ST.passo);
-    if (i < 0) return `<div class="st-nav"><button data-passo="moduli">${icona("arrow-left")}Torna al percorso</button></div>`;
+    const PASSI = passi(), i = PASSI.findIndex(x => x[0] === ST.passo);
+    if (i < 0) return `<div class="st-nav"><button data-passo="${PASSI[1][0]}">${icona("arrow-left")}Torna al percorso</button></div>`;
     return `<div class="st-nav">${i > 0 ? `<button data-passo="${PASSI[i - 1][0]}">${icona("arrow-left")}${PASSI[i - 1][1]}</button>` : ""}<span class="st-sp"></span>
       ${i < PASSI.length - 1 ? `<button class="primary" data-passo="${PASSI[i + 1][0]}">${PASSI[i + 1][1]}${icona("arrow-right")}</button>` : ""}</div>`;
   }
@@ -299,6 +317,7 @@
     else if (t === "p") pset(s.snapshot, r.join(":"), v);
     else if (t === "r") s.righe[+r[0]][r[1]] = v;
     else if (t === "v") s.voci_corpo[+r[0]][r[1]] = v;
+    else if (t === "w") s.workstream[+r[0]].attivita[+r[1]][r[2]] = v;
     else if (t === "a") { const [modo, ...p] = r[0].split("."); s.am[modo] = s.am[modo] || {}; let o = s.am[modo]; p.slice(0, -1).forEach(x => o = o[x] = o[x] || {}); o[p[p.length - 1]] = v; }
     if (t === "p") segnaDiff(ST.root);
     modificato(false);
@@ -372,7 +391,9 @@
   function disegnaPasso() {
     const box = qs("#st-passoc", ST.root); if (!box) return;
     const s = ST.s, p = ST.passo;
-    box.innerHTML = p === "impostazioni" ? passoImpostazioni(s) : p === "moduli" ? passoModuli(s) : p === "attivita" ? passoAttivita(s)
+    box.innerHTML = isA() ? (p === "impostazioni" ? passoImpostazioniA(s) : p === "workstream" ? passoWorkstream(s) : p === "accessorie" ? passoAccessorie(s)
+      : p === "riepilogo" ? `<div data-blocco="riep-full"></div>` : passoParametriA(s))
+      : p === "impostazioni" ? passoImpostazioni(s) : p === "moduli" ? passoModuli(s) : p === "attivita" ? passoAttivita(s)
       : p === "fasi" ? passoFasi(s) : p === "am" ? passoAm(s) : p === "riepilogo" ? `<div data-blocco="riep-full"></div>` : passoParametri(s);
     bindComuni(box); bindAiuto(box);
     qsa("[data-passo]", box).forEach(b => b.onclick = () => vaiPasso(b.dataset.passo));
@@ -389,7 +410,8 @@
       const i = +el.dataset.k.split(":")[1], r = s.righe[i];
       aggiungiRiga(r.tipo, r.contesto || "progetto", i);
     });
-    qsa("[data-voce]", box).forEach(b => b.onclick = () => { if (b.dataset.voce === "del") s.voci_corpo.splice(+b.dataset.i, 1); else s.voci_corpo.push({nome: "", gg_be: 0, gg_fe: 0}); modificato(true);
+    if (isA()) bindWorkstream(box);
+    qsa("[data-voce]", box).forEach(b => b.onclick = () => { if (b.dataset.voce === "del") s.voci_corpo.splice(+b.dataset.i, 1); else s.voci_corpo.push(isA() ? {nome: "", gg_pm: 0, gg_be: 0, gg_fe: 0} : {nome: "", gg_be: 0, gg_fe: 0}); modificato(true);
       if (b.dataset.voce === "add") { const el = qsa("[data-vn]", ST.root).pop(); if (el) el.focus(); } });
     qsa("[data-fisso-off]", box).forEach(b => b.onclick = () => { const f = s.snapshot.fasi.find(x => x.codice === b.dataset.fissoOff); if (f) f.gg_fissi = null; modificato(true); });
     qsa("input[data-k$='|gg_fissi|']", box).forEach(el => el.addEventListener("change", () => {     // badge "fisse" e ↺ aggiornati senza perdere il fuoco
@@ -586,7 +608,7 @@
     try {
       const r = await api(`/api/stime/${ST.s.id}/riallinea`, {method: "POST", body: {}});
       if (!r.differenze.length) { toast("I parametri sono già allineati al catalogo"); return; }
-      const nomeSez = {team: "Figure", moduli: "Moduli", tipi: "Tipi oggetto", fasi: "Fasi", generali: "Generali", am: "AM"};
+      const nomeSez = {team: "Figure", moduli: "Moduli", tipi: "Tipi oggetto", fasi: "Fasi", generali: "Generali", am: "AM", assessment: "Assessment"};
       const val = v => v == null ? "—" : typeof v === "object" ? E(JSON.stringify(v)) : typeof v === "number" ? inNum(v) : E(v);
       const el = modal(`<h2>Riallinea ai default correnti</h2><p class="muted">Questi valori della stima verranno sostituiti con quelli del catalogo. Le giornate fisse delle fasi restano; i tipi oggetto disattivati ancora usati dalle righe restano con i parametri attuali.</p>
         <div class="st-scroll" style="max-height:50vh"><table class="st-righe"><thead><tr><th>Sezione</th><th>Voce</th><th>Campo</th><th class="r">Stima</th><th class="r">Catalogo</th></tr></thead><tbody>
@@ -613,6 +635,7 @@
   }
   function aggiornaCalcolati() {
     const res = ST.res, root = ST.root; if (!res || !root) return;
+    if (res.tipo === "assessment") return aggiornaCalcolatiA();
     const p = res.progetto, out = {};
     p.righe.forEach(r => { out[`riga:${r.indice}`] = F.gg(r.tot); });
     p.moduli.forEach(m => { out[`mod:${m.codice}:progetto`] = F.gg(tot(m.impl)) + " gg"; });
@@ -686,6 +709,7 @@
   // a destra: i totali, sempre visibili e semplificati (fino al prezzo)
   function disegnaRiepilogo() {
     const el = ST.root && qs("#st-riep", ST.root), res = ST.res; if (!el || !res) return;
+    if (res.tipo === "assessment") return totaliA(el, res);
     const p = res.progetto;
     el.innerHTML = `${messaggiHtml({...res, messaggi: res.messaggi.filter(x => x.livello === "errore")}, true)}<div class="card st-riep"><div class="st-rh"><h3>Totali</h3><span class="st-sp"></span><span class="muted">giornate</span></div>
       <table class="st-riep-t"><tbody>${righeTotali(p)}</tbody></table>
@@ -711,6 +735,152 @@
           <div><span>Costo medio al giorno</span><b>${F.eur(p.costo_medio)}</b></div><div><span>Prezzo medio al giorno</span><b>${F.eur(p.prezzo_medio)}</b></div></div>`)}</div>`;
   }
 
+  // ================================================================ ASSESSMENT (workstream e attività con deliverable)
+  // 1 Impostazioni · 2 Workstream · 3 Attività accessorie · 4 Riepilogo. Niente fasi in percentuale né AM. Le giornate sono PM, BE, FE.
+  const TEAM_A = ["PM", "BE", "FE"];
+  const PA = (lab, p, opz = {}) => `<div class="st-campo"><label>${lab}</label><div class="st-cv">${campo("p:" + p, pget(ST.s.snapshot, p), opz)}${opz.suf ? `<span class="muted">${opz.suf}</span>` : ""}${diffDot(p)}</div></div>`;
+  function passoImpostazioniA(s) {
+    const g = s.gara, gEsiste = !g || ST.gare.some(x => x.chiave === g.chiave);
+    return `<div class="card"><div class="st-rh"><h3>Impostazioni dell'assessment</h3></div><div class="st-campi st-imp">
+      <div class="st-campo st-l2"><label for="st-cli">Cliente</label><input id="st-cli" list="st-cli-dl" value="${E(s.cliente)}" autocomplete="off">
+        <datalist id="st-cli-dl">${[...new Set(ST.gare.map(x => x.cliente).filter(Boolean))].sort().map(c => `<option value="${E(c)}">`).join("")}</datalist></div>
+      <div class="st-campo st-l2"><label for="st-gara">Gara collegata</label>${campoGara("st-gara", g && gEsiste ? ST.gare.find(x => x.chiave === g.chiave) : null)}
+        ${g && !gEsiste ? `<div class="hint warn">Gara ${E(g.ss)} · ${g.anno} (${E(g.cliente || "")}) non trovata tra le gare attuali: il collegamento resta.</div>` : ""}</div>
+      <div class="st-campo"><label>Durata</label><div class="st-cv">${campo("s:durata_mesi", s.durata_mesi, {it: true})}<span class="muted">mesi</span></div></div>
+      <div class="st-campo"><label>Prezzo obiettivo (facoltativo)</label><div class="st-cv">${campo("s:prezzo_obiettivo", s.prezzo_obiettivo, {it: true})}<span class="muted">€</span></div></div></div>
+      <h3 class="st-h3">Costi e parametri</h3><div class="st-campi st-imp">
+        ${PA("Costo PM", "assessment||costo_pm|", {suf: "€/gg"})}${PA("Costo BE", "assessment||costo_be|", {suf: "€/gg"})}${PA("Costo FE", "assessment||costo_fe|", {suf: "€/gg"})}
+        ${PA("Contingency", "assessment||contingency|", {pct: true, suf: "%"})}${PA("Margine", "assessment||margine|", {pct: true, max1: true, suf: "%"})}
+        <div class="st-campo st-l4"><label for="st-note">Note</label><textarea id="st-note" rows="2">${E(s.note)}</textarea></div></div></div>`;
+  }
+  function passoParametriA(s) {
+    return `<div class="card"><div class="st-rh"><h3>Parametri avanzati dell'assessment</h3><span class="st-sp"></span><button type="button" id="st-riall">${icona("refresh-cw")}Riallinea ai default correnti</button></div>
+      <p class="hint" style="margin-top:0">Copia dei parametri congelata in questa stima. Il pallino <span class="st-diff-i"></span> segna i valori diversi dal catalogo corrente. Costi, contingency e margine sono nelle impostazioni.</p>
+      <div class="st-campi st-imp">${PA("Arrotondamento", "generali||passo|", {suf: "gg"})}${PA("Giornate lavorative al mese", "generali||gg_mese|")}</div></div>`;
+  }
+  const numWs = w => { const m = /(\d+)\s*$/.exec(w.codice || ""); return m ? +m[1] : 0; };
+  function nuovoIdAttivita(w) {
+    const n = numWs(w), re = new RegExp(`^A\\.${n}\\.(\\d+)$`), usati = w.attivita.map(x => (re.exec(x.id || "") || [])[1]).filter(Boolean).map(Number);
+    return `A.${n}.${(usati.length ? Math.max(...usati) : 0) + 1}`;
+  }
+  const attivitaNuova = w => ({id: nuovoIdAttivita(w), attivita: "", deliverable: "", gg_pm: 0, gg_be: 0, gg_fe: 0});
+  function passoWorkstream(s) {
+    const ws = s.workstream || [];
+    const az = (tipo, chiave, n, i) => `<span class="st-azr">${i > 0 ? `<button type="button" class="st-ib" data-${tipo}="su:${chiave}" title="Sposta su" aria-label="Sposta su">${icona("arrow-up")}</button>` : ""}${i < n - 1 ? `<button type="button" class="st-ib" data-${tipo}="giu:${chiave}" title="Sposta giù" aria-label="Sposta giù">${icona("arrow-down")}</button>` : ""}<button type="button" class="st-ib" data-${tipo}="dup:${chiave}" title="Duplica" aria-label="Duplica">${icona("copy")}</button><button type="button" class="st-ib st-cestino" data-${tipo}="del:${chiave}" title="Elimina" aria-label="Elimina">${icona("trash-2")}</button></span>`;
+    const corpo = ws.map((w, i) => {
+      const aperto = ST.aperti["ws:" + i] !== false;
+      const testa = `<tbody class="st-cat-h"><tr><td colspan="8"><div class="st-cat st-ws-h"><button type="button" class="st-chev st-ib" data-wsapri="${i}" aria-expanded="${aperto}" aria-label="Apri o chiudi">${icona(aperto ? "chevron-down" : "chevron-right")}</button>
+          <input class="st-wsnome" data-wsn="${i}" value="${E(w.nome)}" aria-label="Nome del workstream"><span class="st-sp"></span>
+          <span class="st-cat-tot" data-out="ws:${i}"></span>${az("ws", i, ws.length, i)}</div></td></tr></tbody>`;
+      if (!aperto) return testa;
+      return testa + `<tbody class="st-cat-b">${w.attivita.map((x, j) => `<tr data-a="${i}:${j}">
+          <td><input class="st-aid" data-at="${i}:${j}:id" value="${E(x.id)}" aria-label="ID"></td>
+          <td><textarea class="st-atxt" rows="1" data-at="${i}:${j}:attivita" aria-label="Attività" placeholder="Attività">${E(x.attivita)}</textarea></td>
+          <td><textarea class="st-atxt" rows="1" data-at="${i}:${j}:deliverable" aria-label="Deliverable" placeholder="Deliverable / output">${E(x.deliverable)}</textarea></td>
+          ${TEAM_A.map(t => `<td class="r">${campo(`w:${i}:${j}:gg_${t.toLowerCase()}`, x["gg_" + t.toLowerCase()], {cls: "st-n3", it: true, label: `Giornate ${t}`})}</td>`).join("")}
+          <td class="r b" data-out="att:${i}:${j}"></td>
+          <td class="st-azioni">${az("ata", `${i}:${j}`, w.attivita.length, j)}</td></tr>`).join("")}
+        <tr class="st-agg-r"><td colspan="8"><button type="button" class="linkbtn" data-ws="add:${i}">+ Aggiungi attività</button></td></tr></tbody>`;
+    }).join("");
+    return `<div class="card st-card-mod"><div class="st-rh"><h3>Workstream e attività</h3><span class="muted st-riga1">Giornate inserite a mano per PM, BE e FE.</span>${aiuto("Ogni workstream ha le sue attività, con il deliverable e le giornate PM, BE e FE (arrotondate al passo). L'ID si assegna da solo (A.<n° workstream>.<progressivo>) e si può cambiare; eliminando un'attività gli altri ID non si rinumerano. Con le frecce si riordina, con la copia si duplica. Invio sulle giornate FE aggiunge un'attività nello stesso workstream.")}
+        <span class="st-sp"></span><button type="button" id="st-ws-svuota">${icona("x")}Svuota</button></div>
+      <div class="st-scroll"><table class="st-righe st-moduli st-ass"><thead><tr><th>ID</th><th>Attività</th><th>Deliverable / output</th><th class="r">PM</th><th class="r">BE</th><th class="r">FE</th><th class="r">Totale</th><th></th></tr></thead>${corpo}
+        <tfoot><tr><td colspan="3">Totale workstream</td>${TEAM_A.map(t => `<td class="r" data-out="tws:${t}"></td>`).join("")}<td class="r" data-out="tws:tot"></td><td></td></tr></tfoot></table></div>
+      ${ws.length ? "" : `<p class="muted">Nessun workstream: aggiungine uno.</p>`}
+      <div class="st-add"><button type="button" class="linkbtn" id="st-ws-add">+ Aggiungi workstream</button></div></div>`;
+  }
+  function passoAccessorie(s) {
+    return `<div class="card"><div class="st-rh"><h3>Attività accessorie</h3><span class="muted st-riga1">Facoltative, fuori dai workstream.</span></div>
+      <table class="st-righe st-attivita"><thead><tr><th>Descrizione</th><th class="r">PM</th><th class="r">BE</th><th class="r">FE</th><th class="r">Totale</th><th></th></tr></thead><tbody>
+      ${(s.voci_corpo || []).map((v, i) => `<tr><td><input data-vn="${i}" value="${E(v.nome)}" placeholder="Descrizione" aria-label="Descrizione"></td>
+        ${TEAM_A.map(t => `<td class="r">${campo(`v:${i}:gg_${t.toLowerCase()}`, v["gg_" + t.toLowerCase()], {cls: "st-n2", it: true, label: `Giornate ${t}`})}</td>`).join("")}
+        <td class="r b" data-out="acc:${i}"></td><td class="st-azioni"><button type="button" class="st-ib st-cestino" data-voce="del" data-i="${i}" title="Elimina" aria-label="Elimina">${icona("trash-2")}</button></td></tr>`).join("")}
+      </tbody><tfoot><tr><td>Totale attività accessorie</td><td></td><td></td><td></td><td class="r" data-out="tot-acc"></td><td></td></tr></tfoot></table>
+      <div class="st-add"><button type="button" class="linkbtn" data-voce="add">+ Aggiungi attività</button></div></div>`;
+  }
+  function bindWorkstream(box) {
+    const s = ST.s, ws = s.workstream = s.workstream || [];
+    const sposta = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; };
+    qsa("[data-wsn]", box).forEach(el => { el.oninput = () => { ws[+el.dataset.wsn].nome = el.value; modificato(false); }; el.onclick = e => e.stopPropagation(); });
+    qsa("[data-at]", box).forEach(el => {
+      const [i, j, f] = el.dataset.at.split(":");
+      el.oninput = () => { ws[+i].attivita[+j][f] = el.value; if (el.tagName === "TEXTAREA") cresci(el); modificato(false); };
+      if (el.tagName === "TEXTAREA") cresci(el);
+    });
+    qsa("[data-wsapri]", box).forEach(b => b.onclick = () => { const k = "ws:" + b.dataset.wsapri; ST.aperti[k] = ST.aperti[k] === false; disegnaPasso(); });
+    qsa("[data-ws]", box).forEach(b => b.onclick = () => {
+      const [op, i] = b.dataset.ws.split(":").map((x, k) => k ? +x : x), w = ws[i];
+      if (op === "su") sposta(ws, i, -1);
+      else if (op === "giu") sposta(ws, i, 1);
+      else if (op === "dup") { const n = Math.max(-1, ...ws.map(numWs)) + 1, c = copia(w); c.codice = `WS${n}`; c.nome = `${w.nome} (copia)`; c.attivita.forEach((x, k) => x.id = `A.${n}.${k + 1}`); ws.splice(i + 1, 0, c); }
+      else if (op === "del") { if (w.attivita.length && !confirm(`Eliminare il workstream “${w.nome}” e le sue ${w.attivita.length} attività?`)) return; ws.splice(i, 1); }
+      else if (op === "add") { w.attivita.push(attivitaNuova(w)); ST.aperti["ws:" + i] = true; modificato(true); const t = qsa(`[data-at^="${i}:"][data-at$=":attivita"]`, ST.root).pop(); if (t) t.focus(); return; }
+      ST.aperti = {}; modificato(true);
+    });
+    qsa("[data-ata]", box).forEach(b => b.onclick = () => {
+      const [op, i, j] = b.dataset.ata.split(":").map((x, k) => k ? +x : x), w = ws[i], x = w.attivita[j];
+      if (op === "su") sposta(w.attivita, j, -1);
+      else if (op === "giu") sposta(w.attivita, j, 1);
+      else if (op === "dup") { const c = copia(x); c.id = nuovoIdAttivita(w); w.attivita.splice(j + 1, 0, c); }
+      else if (op === "del") { if ((x.attivita || x.deliverable) && !confirm(`Eliminare l'attività ${x.id || ""}?`)) return; w.attivita.splice(j, 1); }
+      modificato(true);
+    });
+    qsa("input[data-k$=':gg_fe'][data-k^='w:']", box).forEach(el => el.onkeydown = e => {          // Invio sulle giornate FE: nuova attività
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const [, i, j] = el.dataset.k.split(":").map(Number), w = ws[i];
+      w.attivita.splice(j + 1, 0, attivitaNuova(w)); modificato(true);
+      const t = qs(`[data-at="${i}:${j + 1}:attivita"]`, ST.root); if (t) t.focus();
+    });
+    const add = qs("#st-ws-add", box); if (add) add.onclick = () => {
+      const n = Math.max(-1, ...ws.map(numWs)) + 1; ws.push({codice: `WS${n}`, nome: `WS${n} – Nuovo workstream`, attivita: []});
+      modificato(true); const el = qsa("[data-wsn]", ST.root).pop(); if (el) { el.focus(); el.select(); }
+    };
+    const sv = qs("#st-ws-svuota", box); if (sv) sv.onclick = () => { if (!ws.length || !confirm("Togliere tutti i workstream e le attività? Si parte da zero (finché non salvi, puoi ancora uscire senza salvare).")) return; s.workstream = []; modificato(true); };
+  }
+  function cresci(el) { el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px"; }
+  function aggiornaCalcolatiA() {
+    const res = ST.res, root = ST.root, a = res.assessment, out = {};
+    a.workstream.forEach((w, i) => { out[`ws:${i}`] = `PM ${F.gg(w.PM)} · BE ${F.gg(w.BE)} · FE ${F.gg(w.FE)} = ${F.gg(w.tot)} gg`; w.attivita.forEach((x, j) => { out[`att:${i}:${j}`] = F.gg(x.tot); }); });
+    const tws = {PM: 0, BE: 0, FE: 0, tot: 0}; a.workstream.forEach(w => ["PM", "BE", "FE", "tot"].forEach(t => tws[t] += w[t]));
+    ["PM", "BE", "FE", "tot"].forEach(t => out[`tws:${t}`] = F.gg(tws[t]));
+    a.accessorie.forEach((v, i) => { out[`acc:${i}`] = F.gg(v.tot); });
+    out["tot-acc"] = F.gg(a.acc.tot) + " gg";
+    qsa("[data-out]", root).forEach(el => { el.textContent = out[el.dataset.out] ?? ""; });
+    const err = new Set(res.messaggi.filter(x => x.livello === "errore" && /^attivita:/.test(x.dove || "")).map(x => x.dove.split(":").slice(1).join(":")));
+    qsa("tr[data-a]", root).forEach(tr => tr.classList.toggle("st-err", err.has(tr.dataset.a)));
+    const full = qs("[data-blocco='riep-full']", root); if (full) full.innerHTML = riepilogoA();
+    disegnaRiepilogo();
+  }
+  function totaliA(el, res) {
+    const a = res.assessment, r = (lab, v, cls = "") => `<tr class="${cls}"><td>${lab}</td><td class="r">${F.gg(v)}</td></tr>`;
+    el.innerHTML = `${messaggiHtml({...res, messaggi: res.messaggi.filter(x => x.livello === "errore")}, true)}<div class="card st-riep"><div class="st-rh"><h3>Totali</h3><span class="st-sp"></span><span class="muted">giornate</span></div>
+      <table class="st-riep-t"><tbody>${a.workstream.map(w => r(E(w.nome || w.codice), w.tot)).join("")}
+        ${a.accessorie.length ? r("Attività accessorie", a.acc.tot) : ""}${r("Totale attività", a.totale.tot, "tot")}
+        ${r(`Contingency ${nf(0).format(a.pct_contingency * 100)}%`, a.contingency.tot)}${r("Totale con contingency", a.totale_cont.tot, "tot big")}</tbody></table>
+      <div class="st-eco"><div><span>Costo</span><b>${F.eur0(a.costi.tot)}</b></div><div class="prezzo"><span>Prezzo</span><b>${F.eur0(a.prezzo)}</b></div></div>
+      ${obiettivoHtml(a, true)}</div>`;
+  }
+  function riepilogoA() {
+    const res = ST.res, a = res.assessment, f = a.fte;
+    const sez = (titolo, corpo) => `<div class="card st-sez"><div class="st-rh"><h3>${titolo}</h3></div>${corpo}</div>`;
+    const riga = (lab, x, peso, cls = "") => `<tr class="${cls}"><td>${lab}</td>${TEAM_A.map(t => `<td class="r">${F.gg(x[t])}</td>`).join("")}<td class="r">${F.gg(x.tot)}</td><td class="r">${peso === undefined ? "" : F.pct(peso)}</td></tr>`;
+    return messaggiHtml(res, false) + `<div class="st-riep-grid st-riep-a">
+      ${sez("Workstream", `<div class="st-scroll"><table class="st-riep-t"><thead><tr><th>Voce</th><th class="r">PM</th><th class="r">BE</th><th class="r">FE</th><th class="r">Totale</th><th class="r">Peso</th></tr></thead><tbody>
+        ${a.workstream.map(w => riga(E(w.nome || w.codice), w, w.peso)).join("")}
+        ${a.accessorie.length ? riga("Attività accessorie", a.acc, a.acc.peso) : ""}
+        ${riga("Totale", a.totale, a.totale.tot ? 1 : null, "tot")}
+        ${riga(`Contingency ${nf(0).format(a.pct_contingency * 100)}%`, a.contingency)}
+        ${riga("Totale con contingency", a.totale_cont, undefined, "tot big")}</tbody></table></div>`)}
+      ${sez("Economia", `<div class="st-eco">${TEAM_A.map(t => `<div><span>Costo ${t} (${F.eur0(a.costo_unitario[t])}/gg)</span><b>${F.eur(a.costi[t])}</b></div>`).join("")}
+        <div><span>Costo totale</span><b>${F.eur(a.costi.tot)}</b></div><div><span>Margine</span><b>${F.pct(a.margine)}</b></div><div class="prezzo"><span>Prezzo</span><b>${F.eur(a.prezzo)}</b></div></div>`)}
+      ${sez("Rispetto all'obiettivo", obiettivoHtml(a, false))}
+      ${sez("Indicatori", `<div class="st-eco">
+          <div><span>Durata</span><b>${a.durata_mesi ? nf(1).format(a.durata_mesi) + " mesi" : "non indicata"}</b></div>
+          <div><span>FTE</span><b>${f ? `${nf(2).format(f.tot)} (PM ${nf(2).format(f.PM)} · BE ${nf(2).format(f.BE)} · FE ${nf(2).format(f.FE)})` : "inserisci la durata"}</b></div>
+          <div><span>Costo medio al giorno</span><b>${F.eur(a.costo_medio)}</b></div><div><span>Prezzo medio al giorno</span><b>${F.eur(a.prezzo_medio)}</b></div></div>`)}</div>`;
+  }
+
   // ================================================================ CATALOGO
   function disegnaCatalogo(m) {
     if (!ST.catEdit) ST.catEdit = copia(ST.cat);
@@ -725,6 +895,7 @@
     bindCampi(m, (key, v) => {
       if (key.startsWith("c:")) pset(k, key.slice(2), v);
       else if (key.startsWith("cv:")) { const [, i, f] = key.split(":"); k.generali.voci_corpo[+i][f] = v; }
+      else if (key.startsWith("cm:")) { const [, i, j, f] = key.split(":"); k.assessment.modello[+i].attivita[+j][f] = v; }
       segnaModifiche(m);
     });
     qsa("[data-txt]", m).forEach(el => {
@@ -732,6 +903,7 @@
       el[evento] = () => { pset(k, el.dataset.txt, el.value); segnaModifiche(m); };
     });
     qsa("[data-att]", m).forEach(el => el.onchange = () => { const [sez, cod] = el.dataset.att.split("|"); k[sez].find(x => x.codice === cod).attivo = el.checked; ridisegna(); });
+    if (k.assessment) bindCatalogoAssessment(m, k, ridisegna);
     qsa("[data-vcn]", m).forEach(el => el.oninput = () => { k.generali.voci_corpo[+el.dataset.vcn].nome = el.value; segnaModifiche(m); });
     qsa("[data-vcdel]", m).forEach(b => b.onclick = () => { k.generali.voci_corpo.splice(+b.dataset.vcdel, 1); ridisegna(); });
     const cva = qs("#cv-add", m); if (cva) cva.onclick = () => { (k.generali.voci_corpo = k.generali.voci_corpo || []).push({nome: "Nuova attività", gg_be: 0, gg_fe: 0}); ridisegna(); };
@@ -802,7 +974,34 @@
         ${["H8", "H12", "H24"].map(x => `<tr><td>Coefficiente di servizio ${x}</td>${C(`am||coeff|${x}`)}</tr>`).join("")}
         <tr><td>% presa in carico (solo anno 1)</td>${C("am||pct_presa|", {pct: true})}</tr>
         <tr><td>Decalage annuo dal secondo anno (composto)</td>${C("am||decalage|", {pct: true})}</tr>
-        <tr><td>Numero massimo di anni</td>${C("am||anni_max|")}</tr></tbody></table>`;
+        <tr><td>Numero massimo di anni</td>${C("am||anni_max|")}</tr></tbody></table>
+      ${catalogoAssessment(k)}`;
+  }
+  // Assessment: parametri predefiniti e modello di workstream e attività copiato in ogni nuova stima Assessment
+  function catalogoAssessment(k) {
+    const a = k.assessment || {}, mod = a.modello || [];
+    const C = (p, opz = {}) => `<td class="r">${campo("c:" + p, pget(k, p), opz)}</td>`;
+    return `<h3 class="st-h3">Assessment</h3><table class="st-righe st-par"><tbody>
+        <tr><td>Costo PM (€/gg)</td>${C("assessment||costo_pm|")}</tr><tr><td>Costo BE (€/gg)</td>${C("assessment||costo_be|")}</tr><tr><td>Costo FE (€/gg)</td>${C("assessment||costo_fe|")}</tr>
+        <tr><td>Contingency (%)</td>${C("assessment||contingency|", {pct: true})}</tr><tr><td>Margine (%)</td>${C("assessment||margine|", {pct: true, max1: true})}</tr></tbody></table>
+      <p class="hint">Modello predefinito: si copia in ogni nuova stima Assessment, dove si può cambiare liberamente.</p>
+      <div class="st-scroll"><table class="st-righe st-par st-ass"><thead><tr><th>ID</th><th>Attività</th><th>Deliverable / output</th><th class="r">PM</th><th class="r">BE</th><th class="r">FE</th><th></th></tr></thead>
+      ${mod.map((w, i) => `<tbody><tr class="st-modrow"><td colspan="6"><input class="st-modnome" data-cmw="${i}" value="${E(w.nome)}" aria-label="Nome del workstream"></td><td><button class="st-ib" data-cmwdel="${i}" title="Elimina il workstream" aria-label="Elimina il workstream">${icona("trash-2")}</button></td></tr>
+        ${(w.attivita || []).map((x, j) => `<tr><td><input class="st-aid" data-cmt="${i}:${j}:id" value="${E(x.id)}"></td><td><textarea class="st-atxt" rows="1" data-cmt="${i}:${j}:attivita">${E(x.attivita)}</textarea></td>
+          <td><textarea class="st-atxt" rows="1" data-cmt="${i}:${j}:deliverable">${E(x.deliverable)}</textarea></td>
+          ${["pm", "be", "fe"].map(t => `<td class="r">${campo(`cm:${i}:${j}:gg_${t}`, x["gg_" + t], {cls: "st-n3"})}</td>`).join("")}
+          <td><button class="st-ib" data-cmdel="${i}:${j}" title="Elimina l'attività" aria-label="Elimina l'attività">${icona("trash-2")}</button></td></tr>`).join("")}
+        <tr class="st-agg-r"><td colspan="7"><button type="button" class="linkbtn" data-cmadd="${i}">+ Aggiungi attività</button></td></tr></tbody>`).join("")}</table></div>
+      <div class="st-add"><button id="cm-addws">${icona("plus")}Aggiungi workstream</button></div>`;
+  }
+  function bindCatalogoAssessment(m, k, ridisegna) {
+    const mod = () => (k.assessment.modello = k.assessment.modello || []);
+    qsa("[data-cmw]", m).forEach(el => el.oninput = () => { mod()[+el.dataset.cmw].nome = el.value; segnaModifiche(m); });
+    qsa("[data-cmt]", m).forEach(el => { const [i, j, f] = el.dataset.cmt.split(":"); el.oninput = () => { mod()[+i].attivita[+j][f] = el.value; if (el.tagName === "TEXTAREA") cresci(el); segnaModifiche(m); }; if (el.tagName === "TEXTAREA") cresci(el); });
+    qsa("[data-cmdel]", m).forEach(b => b.onclick = () => { const [i, j] = b.dataset.cmdel.split(":").map(Number); mod()[i].attivita.splice(j, 1); ridisegna(); });
+    qsa("[data-cmwdel]", m).forEach(b => b.onclick = () => { const i = +b.dataset.cmwdel; if (confirm(`Eliminare il workstream “${mod()[i].nome}” dal modello?`)) { mod().splice(i, 1); ridisegna(); } });
+    qsa("[data-cmadd]", m).forEach(b => b.onclick = () => { const w = mod()[+b.dataset.cmadd]; w.attivita = w.attivita || []; w.attivita.push(attivitaNuova(w)); ridisegna(); });
+    const add = qs("#cm-addws", m); if (add) add.onclick = () => { const n = Math.max(-1, ...mod().map(numWs)) + 1; mod().push({codice: `WS${n}`, nome: `WS${n} – Nuovo workstream`, attivita: []}); ridisegna(); };
   }
   function segnaModifiche(m) {
     const b = qs("#cat-salva", m); if (b) b.disabled = false;

@@ -37,14 +37,23 @@ CREATE TABLE IF NOT EXISTS fasi (codice TEXT PRIMARY KEY, nome TEXT, blocco TEXT
 CREATE TABLE IF NOT EXISTS stime (id INTEGER PRIMARY KEY AUTOINCREMENT, famiglia INTEGER, versione INTEGER, corrente INTEGER DEFAULT 0,
   nome TEXT, cliente TEXT, gara_chiave TEXT, gara_info TEXT, durata_mesi REAL, prezzo_obiettivo REAL, training_be REAL, training_fe REAL,
   note TEXT, snapshot TEXT, am TEXT, tot_gg REAL, tot_costo REAL, tot_prezzo REAL, tot_margine REAL, tot_am_prezzo REAL,
-  creata_il TEXT, modificata_il TEXT);
+  creata_il TEXT, modificata_il TEXT, tipo TEXT DEFAULT 'progetto');
 CREATE INDEX IF NOT EXISTS ix_stime_gara ON stime(gara_chiave);
 CREATE INDEX IF NOT EXISTS ix_stime_famiglia ON stime(famiglia);
 CREATE TABLE IF NOT EXISTS righe_stima (id INTEGER PRIMARY KEY AUTOINCREMENT, stima_id INTEGER, contesto TEXT, codice_tipo TEXT, etichetta TEXT,
   quantita REAL, mix_s REAL, mix_m REAL, mix_d REAL, gg_be REAL, gg_fe REAL, ordine INTEGER);
 CREATE INDEX IF NOT EXISTS ix_righe_stima ON righe_stima(stima_id);
-CREATE TABLE IF NOT EXISTS voci_corpo (id INTEGER PRIMARY KEY AUTOINCREMENT, stima_id INTEGER, nome TEXT, gg_be REAL, gg_fe REAL, ordine INTEGER);
+CREATE TABLE IF NOT EXISTS voci_corpo (id INTEGER PRIMARY KEY AUTOINCREMENT, stima_id INTEGER, nome TEXT, gg_be REAL, gg_fe REAL, ordine INTEGER,
+  gg_pm REAL);
 CREATE INDEX IF NOT EXISTS ix_voci_stima ON voci_corpo(stima_id);
+CREATE TABLE IF NOT EXISTS workstream (id INTEGER PRIMARY KEY AUTOINCREMENT, stima_id INTEGER, codice TEXT, nome TEXT, ordine INTEGER);
+CREATE INDEX IF NOT EXISTS ix_ws_stima ON workstream(stima_id);
+CREATE TABLE IF NOT EXISTS attivita_assessment (id INTEGER PRIMARY KEY AUTOINCREMENT, stima_id INTEGER, workstream_id INTEGER, id_attivita TEXT,
+  attivita TEXT, deliverable TEXT, gg_pm REAL, gg_be REAL, gg_fe REAL, ordine INTEGER);
+CREATE INDEX IF NOT EXISTS ix_att_stima ON attivita_assessment(stima_id);
+CREATE TABLE IF NOT EXISTS ass_modello_ws (codice TEXT, nome TEXT, ordine INTEGER);
+CREATE TABLE IF NOT EXISTS ass_modello_attivita (ws_ordine INTEGER, id_attivita TEXT, attivita TEXT, deliverable TEXT, gg_pm REAL, gg_be REAL,
+  gg_fe REAL, ordine INTEGER);
 """
 CODICE_RE = re.compile(r"^[A-Z0-9][A-Z0-9_]*(\.[A-Z0-9_]+)?$")
 
@@ -105,7 +114,14 @@ def _catalogo_da_tabelle(c):
                      "pct_be": r["pct_be"], "pct_fe": r["pct_fe"], "corpo_be": r["corpo_be"], "corpo_fe": r["corpo_fe"], "attivo": bool(r["attivo"])})
     fasi = [{"codice": r["codice"], "nome": r["nome"], "blocco": r["blocco"], "base": r["base"], "pct": r["pct"], "pct_be": r["pct_be"],
              "pct_fe": r["pct_fe"], "min": r["min"], "max": r["max"]} for r in c.execute("SELECT * FROM fasi ORDER BY ordine")]
-    return {"team": team, "generali": generali, "moduli": moduli, "tipi": tipi, "fasi": fasi, "am": am}
+    ass = {**cat.ASSESSMENT_DEFAULT, **{k[4:]: v for k, v in par.items() if k.startswith("ass.")}}
+    ws = [{"codice": r["codice"], "nome": r["nome"], "attivita": []} for r in c.execute("SELECT * FROM ass_modello_ws ORDER BY ordine")]
+    for r in c.execute("SELECT * FROM ass_modello_attivita ORDER BY ws_ordine, ordine"):
+        if 0 <= r["ws_ordine"] < len(ws):
+            ws[r["ws_ordine"]]["attivita"].append({"id": r["id_attivita"], "attivita": r["attivita"], "deliverable": r["deliverable"],
+                                                  "gg_pm": r["gg_pm"], "gg_be": r["gg_be"], "gg_fe": r["gg_fe"]})
+    ass["modello"] = ws
+    return {"team": team, "generali": generali, "moduli": moduli, "tipi": tipi, "fasi": fasi, "am": am, "assessment": ass}
 
 
 def _scrivi_catalogo(c, k):
@@ -113,7 +129,16 @@ def _scrivi_catalogo(c, k):
     c.executemany("INSERT INTO team VALUES (?,?,?,?,?)", [(t["codice"], t.get("nome"), t.get("contenuto"), t.get("costo"), i) for i, t in enumerate(k["team"])])
     c.execute("DELETE FROM parametri")
     c.executemany("INSERT INTO parametri VALUES (?,?)", [("gen." + a, json.dumps(v, ensure_ascii=False)) for a, v in k["generali"].items()]
-                  + [("am." + a, json.dumps(v, ensure_ascii=False)) for a, v in k["am"].items()])
+                  + [("am." + a, json.dumps(v, ensure_ascii=False)) for a, v in k["am"].items()]
+                  + [("ass." + a, json.dumps(v, ensure_ascii=False)) for a, v in (k.get("assessment") or {}).items() if a != "modello"])
+    if k.get("assessment") is not None:
+        c.execute("DELETE FROM ass_modello_ws")
+        c.execute("DELETE FROM ass_modello_attivita")
+        for i, w in enumerate(k["assessment"].get("modello") or []):
+            c.execute("INSERT INTO ass_modello_ws VALUES (?,?,?)", (w.get("codice"), w.get("nome"), i))
+            c.executemany("INSERT INTO ass_modello_attivita VALUES (?,?,?,?,?,?,?,?)",
+                          [(i, x.get("id"), x.get("attivita"), x.get("deliverable"), x.get("gg_pm"), x.get("gg_be"), x.get("gg_fe"), j)
+                           for j, x in enumerate(w.get("attivita") or [])])
     c.execute("DELETE FROM moduli")
     c.executemany("INSERT INTO moduli VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                   [(m["codice"], m.get("nome"), m.get("blocco"), m.get("pct_analisi"), m.get("pct_disegno"), m.get("min_analisi"), m.get("max_analisi"),
@@ -208,12 +233,37 @@ def valida_catalogo(nuovo, attuale):
         g[a] = _pct(g.get(a), a, 0)
     g["voci_corpo"] = [{"nome": _testo(v.get("nome"), 120), "gg_be": _pct(v.get("gg_be"), "voce a corpo", 0), "gg_fe": _pct(v.get("gg_fe"), "voce a corpo", 0)}
                        for v in g.get("voci_corpo") or [] if _testo(v.get("nome"))]
+    k["assessment"] = valida_assessment(k.get("assessment") or attuale.get("assessment") or {})
     a = k["am"]
     for x in ("pct_correttiva", "pct_presa", "decalage"):
         a[x] = _pct(a.get(x), x, 0)
     a["coeff"] = {s: _pct((a.get("coeff") or {}).get(s), f"coefficiente {s}", 1) for s in cat.SERVIZI_AM}
     a["anni_max"] = int(_pct(a.get("anni_max"), "anni massimi", 5))
     return k
+
+
+def valida_workstream(lista, dove="Workstream"):
+    """Workstream e attività dell'Assessment (della stima o del modello del catalogo), puliti e controllati."""
+    out = []
+    for i, w in enumerate(lista or []):
+        att = []
+        for j, x in enumerate(w.get("attivita") or []):
+            nome = f"{dove} {i + 1}, attività {j + 1}"
+            att.append({"id": _testo(x.get("id"), 30), "attivita": str(x.get("attivita") or "").strip()[:1000],
+                        "deliverable": str(x.get("deliverable") or "").strip()[:1000],
+                        **{f"gg_{t}": _pct(x.get(f"gg_{t}"), f"{nome}: giornate {t.upper()}", 0) for t in ("pm", "be", "fe")}})
+        out.append({"codice": _testo(w.get("codice"), 20) or f"WS{i}", "nome": _testo(w.get("nome"), 200), "attivita": att})
+    return out
+
+
+def valida_assessment(a):
+    out = {**cat.ASSESSMENT_DEFAULT, **{k: v for k, v in a.items() if k != "modello"}}
+    for x in ("costo_pm", "costo_be", "costo_fe", "contingency", "margine"):
+        out[x] = _pct(out.get(x), f"Assessment: {x}", 0)
+    if out["margine"] >= 1:
+        raise StimaError("Il margine deve essere inferiore al 100%")
+    out["modello"] = valida_workstream(a.get("modello") if "modello" in a else cat.MODELLO_ASSESSMENT, "Modello")
+    return out
 
 
 # ------------------------------------------------------------------ differenze tra snapshot e catalogo corrente
@@ -248,8 +298,9 @@ def differenze(snap, catalogo):
             for campo in sorted(set(x) | set(d)):
                 if campo not in ("codice", "ordine", "gg_fissi"):
                     conf(sez, x["codice"], campo, x.get(campo), d.get(campo))
-    for sez in ("generali", "am"):
-        a, b = snap.get(sez, {}), catalogo.get(sez, {})
+    sezioni = ("generali", "am", "assessment") if "assessment" in snap else ("generali", "am")
+    for sez in sezioni:
+        a, b = ({k: v for k, v in x.get(sez, {}).items() if k != "modello"} for x in (snap, catalogo))
         for campo in sorted(set(a) | set(b)):
             conf(sez, None, campo, a.get(campo), b.get(campo))
     return out
@@ -317,9 +368,10 @@ class StimeStore:
                 if not c.execute("SELECT 1 FROM meta WHERE k='seed'").fetchone():
                     _scrivi_catalogo(c, cat.catalogo_default())
                     c.execute("INSERT INTO meta VALUES ('seed', ?)", (_ora(),))
-                    c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '3')")
+                    c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '4')")
                 self._migra(c)
                 self._migra3(c)
+                self._migra4(c)
                 c.commit()
             finally:
                 c.close()
@@ -363,6 +415,26 @@ class StimeStore:
         _scrivi_catalogo(c, k)
         c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '3')")
 
+    @staticmethod
+    def _migra4(c):
+        """Schema 4: stime di tipo Assessment. Le stime esistenti diventano di tipo "progetto" senza altre modifiche; le voci a
+        corpo prendono le giornate PM (usate dalle attività accessorie dell'Assessment); il catalogo riceve i parametri e il
+        modello predefinito dell'Assessment."""
+        r = c.execute("SELECT v FROM meta WHERE k='schema'").fetchone()
+        colonne = lambda t: {x[1] for x in c.execute(f"PRAGMA table_info({t})")}
+        if "tipo" not in colonne("stime"):
+            c.execute("ALTER TABLE stime ADD COLUMN tipo TEXT DEFAULT 'progetto'")
+        if "gg_pm" not in colonne("voci_corpo"):
+            c.execute("ALTER TABLE voci_corpo ADD COLUMN gg_pm REAL")
+        c.execute("UPDATE stime SET tipo='progetto' WHERE tipo IS NULL OR tipo=''")
+        if r and r[0] >= "4":
+            return
+        if not c.execute("SELECT 1 FROM parametri WHERE chiave LIKE 'ass.%'").fetchone():
+            k = _catalogo_da_tabelle(c)
+            k["assessment"] = cat.catalogo_default()["assessment"]
+            _scrivi_catalogo(c, k)
+        c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '4')")
+
     def backup(self, ora=None):
         """Copia coerente in backup_stime/stime_AAAAMMGG_HHMM.db; tiene le ultime 20."""
         if not os.path.isfile(self.path):
@@ -402,14 +474,23 @@ class StimeStore:
             mix = [x["mix_s"], x["mix_m"], x["mix_d"]]
             righe.append({"id": x["id"], "contesto": x["contesto"], "tipo": x["codice_tipo"], "etichetta": x["etichetta"] or "", "quantita": x["quantita"],
                           "mix": mix if all(v is not None for v in mix) else None, "gg_be": x["gg_be"], "gg_fe": x["gg_fe"]})
-        voci = [{"id": x["id"], "nome": x["nome"], "gg_be": x["gg_be"], "gg_fe": x["gg_fe"]}
+        tipo = r["tipo"] or "progetto"
+        voci = [{"id": x["id"], "nome": x["nome"], "gg_be": x["gg_be"], "gg_fe": x["gg_fe"], **({"gg_pm": x["gg_pm"]} if tipo == "assessment" else {})}
                 for x in c.execute("SELECT * FROM voci_corpo WHERE stima_id=? ORDER BY ordine, id", (r["id"],))]
+        workstream = []
+        if tipo == "assessment":
+            per_ws = {}
+            for x in c.execute("SELECT * FROM attivita_assessment WHERE stima_id=? ORDER BY ordine, id", (r["id"],)):
+                per_ws.setdefault(x["workstream_id"], []).append({"id": x["id_attivita"] or "", "attivita": x["attivita"] or "", "deliverable": x["deliverable"] or "",
+                                                                  "gg_pm": x["gg_pm"], "gg_be": x["gg_be"], "gg_fe": x["gg_fe"]})
+            workstream = [{"codice": w["codice"], "nome": w["nome"] or "", "attivita": per_ws.get(w["id"], [])}
+                          for w in c.execute("SELECT * FROM workstream WHERE stima_id=? ORDER BY ordine, id", (r["id"],))]
         info = json.loads(r["gara_info"]) if r["gara_info"] else None
-        return {"id": r["id"], "famiglia": r["famiglia"], "versione": r["versione"], "corrente": bool(r["corrente"]), "nome": r["nome"] or "",
+        return {"id": r["id"], "tipo": tipo, "famiglia": r["famiglia"], "versione": r["versione"], "corrente": bool(r["corrente"]), "nome": r["nome"] or "",
                 "cliente": r["cliente"] or "", "gara": ({**info, "chiave": r["gara_chiave"]} if r["gara_chiave"] else None),
                 "durata_mesi": r["durata_mesi"], "prezzo_obiettivo": r["prezzo_obiettivo"], "training_be": r["training_be"], "training_fe": r["training_fe"],
                 "note": r["note"] or "", "snapshot": StimeStore._snapshot(r["snapshot"]), "am": json.loads(r["am"]) if r["am"] else {"modalita": None},
-                "righe": righe, "voci_corpo": voci, "creata_il": r["creata_il"], "modificata_il": r["modificata_il"],
+                "righe": righe, "voci_corpo": voci, "workstream": workstream, "creata_il": r["creata_il"], "modificata_il": r["modificata_il"],
                 "totali": {"gg": r["tot_gg"], "costo": r["tot_costo"], "prezzo": r["tot_prezzo"], "margine": r["tot_margine"], "am_prezzo": r["tot_am_prezzo"]}}
 
     @staticmethod
@@ -429,9 +510,12 @@ class StimeStore:
         with self.conn() as c:
             return self._stima(c, self._riga_stima(c, sid))
 
-    def elenco(self, cliente=None, gara=None, q=None):
-        """Righe dell'elenco stime (§6.2), dalla più recente. Filtri: cliente, chiave gara, testo libero."""
+    def elenco(self, cliente=None, gara=None, q=None, tipo=None):
+        """Righe dell'elenco stime (§6.2), dalla più recente. Filtri: cliente, chiave gara, testo libero, tipo."""
         sql, par = "SELECT * FROM stime WHERE 1=1", []
+        if tipo:
+            sql += " AND tipo=?"
+            par.append(tipo)
         if cliente:
             sql += " AND lower(cliente) LIKE ?"
             par.append(f"%{cliente.strip().lower()}%")
@@ -442,7 +526,7 @@ class StimeStore:
         with self.conn() as c:
             for r in c.execute(sql + " ORDER BY modificata_il DESC, id DESC", par):
                 info = json.loads(r["gara_info"]) if r["gara_info"] else None
-                x = {"id": r["id"], "famiglia": r["famiglia"], "nome": r["nome"], "cliente": r["cliente"], "versione": r["versione"],
+                x = {"id": r["id"], "tipo": r["tipo"] or "progetto", "famiglia": r["famiglia"], "nome": r["nome"], "cliente": r["cliente"], "versione": r["versione"],
                      "corrente": bool(r["corrente"]), "gara": ({**info, "chiave": r["gara_chiave"]} if r["gara_chiave"] else None),
                      "gg": r["tot_gg"], "costo": r["tot_costo"], "prezzo": r["tot_prezzo"], "margine": r["tot_margine"], "am_prezzo": r["tot_am_prezzo"],
                      "modificata_il": r["modificata_il"]}
@@ -504,17 +588,32 @@ class StimeStore:
         c.executemany("INSERT INTO righe_stima (stima_id, contesto, codice_tipo, etichetta, quantita, mix_s, mix_m, mix_d, gg_be, gg_fe, ordine) "
                       "VALUES (?,?,?,?,?,?,?,?,?,?,?)", [(sid, *r) for r in self._righe_pulite(s.get("righe"))])
         c.execute("DELETE FROM voci_corpo WHERE stima_id=?", (sid,))
-        c.executemany("INSERT INTO voci_corpo (stima_id, nome, gg_be, gg_fe, ordine) VALUES (?,?,?,?,?)",
-                      [(sid, _testo(v.get("nome"), 120), _num(v.get("gg_be"), "Voce a corpo", 0), _num(v.get("gg_fe"), "Voce a corpo", 0), i)
+        ass = s.get("tipo") == "assessment"
+        c.executemany("INSERT INTO voci_corpo (stima_id, nome, gg_be, gg_fe, ordine, gg_pm) VALUES (?,?,?,?,?,?)",
+                      [(sid, _testo(v.get("nome"), 120), _num(v.get("gg_be"), "Voce a corpo", 0), _num(v.get("gg_fe"), "Voce a corpo", 0), i,
+                        _num(v.get("gg_pm"), "Voce a corpo", 0) if ass else None)
                        for i, v in enumerate(s.get("voci_corpo") or [])])
+        c.execute("DELETE FROM attivita_assessment WHERE stima_id=?", (sid,))
+        c.execute("DELETE FROM workstream WHERE stima_id=?", (sid,))
+        if ass:
+            for i, w in enumerate(valida_workstream(s.get("workstream"))):
+                wid = c.execute("INSERT INTO workstream (stima_id, codice, nome, ordine) VALUES (?,?,?,?)", (sid, w["codice"], w["nome"], i)).lastrowid
+                c.executemany("INSERT INTO attivita_assessment (stima_id, workstream_id, id_attivita, attivita, deliverable, gg_pm, gg_be, gg_fe, ordine) "
+                              "VALUES (?,?,?,?,?,?,?,?,?)",
+                              [(sid, wid, x["id"], x["attivita"], x["deliverable"], x["gg_pm"], x["gg_be"], x["gg_fe"], j) for j, x in enumerate(w["attivita"])])
         self._totali(c, sid)
 
     def _totali(self, c, sid):
         """Totali memorizzati per l'elenco e la scheda gara (solo progetto; l'AM a parte)."""
         s = self._stima(c, self._riga_stima(c, sid))
         res = calcola(s)
-        p, am = res["progetto"], res["am"]
         f = lambda x: None if x is None else float(x)
+        if res.get("tipo") == "assessment":
+            a = res["assessment"]
+            c.execute("UPDATE stime SET tot_gg=?, tot_costo=?, tot_prezzo=?, tot_margine=?, tot_am_prezzo=NULL WHERE id=?",
+                      (f(a["totale_cont"]["tot"]), f(a["costi"]["tot"]), f(a["prezzo"]), f(a["margine"]), sid))
+            return
+        p, am = res["progetto"], res["am"]
         c.execute("UPDATE stime SET tot_gg=?, tot_costo=?, tot_prezzo=?, tot_margine=?, tot_am_prezzo=? WHERE id=?",
                   (f(p["totale"]), f(p["costi"]["tot"]), f(p["prezzo"]), f(p["margine"]), f(am["prezzo"]) if am else None, sid))
 
@@ -533,9 +632,9 @@ class StimeStore:
             return not c.execute("SELECT 1 FROM stime WHERE gara_chiave=? AND corrente=1 AND id<>?", (r["gara_chiave"], sid)).fetchone()
         return not c.execute("SELECT 1 FROM stime WHERE famiglia=? AND gara_chiave IS NULL AND corrente=1 AND id<>?", (r["famiglia"], sid)).fetchone()
 
-    def _inserisci(self, c, famiglia, versione, ora):
-        sid = c.execute("INSERT INTO stime (famiglia, versione, corrente, creata_il, modificata_il, snapshot) VALUES (?,?,0,?,?,'{}')",
-                        (famiglia, versione, ora, ora)).lastrowid
+    def _inserisci(self, c, famiglia, versione, ora, tipo="progetto"):
+        sid = c.execute("INSERT INTO stime (famiglia, versione, corrente, creata_il, modificata_il, snapshot, tipo) VALUES (?,?,0,?,?,'{}',?)",
+                        (famiglia, versione, ora, ora, tipo)).lastrowid
         if famiglia is None:
             c.execute("UPDATE stime SET famiglia=? WHERE id=?", (sid, sid))
         return sid
@@ -545,12 +644,16 @@ class StimeStore:
         Diventa la corrente se la sua gara (o la sua famiglia) non ne ha già una."""
         ora = ora or _ora()
         dati = dati or {}
+        tipo = dati.get("tipo") or "progetto"
+        if tipo not in cat.TIPI_STIMA:
+            raise StimaError("Tipo di stima non valido: progetto o assessment")
         with self._lock, self.conn() as c:
-            s = cat.stima_nuova(_catalogo_da_tabelle(c))
-            for k in ("nome", "cliente", "gara", "durata_mesi", "prezzo_obiettivo", "note", "am", "righe", "voci_corpo", "training_be", "training_fe"):
+            s = cat.stima_nuova(_catalogo_da_tabelle(c), tipo)
+            for k in ("nome", "cliente", "gara", "durata_mesi", "prezzo_obiettivo", "note", "am", "righe", "voci_corpo", "training_be", "training_fe",
+                      "workstream"):
                 if k in dati:
                     s[k] = dati[k]
-            sid = self._inserisci(c, None, 1, ora)
+            sid = self._inserisci(c, None, 1, ora, tipo)
             self._scrivi(c, sid, s, ora)
             if self._nessuna_corrente(c, sid):
                 self._rendi_corrente(c, sid)
@@ -562,7 +665,7 @@ class StimeStore:
         with self._lock, self.conn() as c:
             prima = self._stima(c, self._riga_stima(c, sid))
             s = {**prima, **{k: v for k, v in dati.items() if k in ("nome", "cliente", "gara", "durata_mesi", "prezzo_obiettivo", "note", "am", "righe",
-                                                                       "voci_corpo", "training_be", "training_fe", "snapshot")}}
+                                                                       "voci_corpo", "training_be", "training_fe", "snapshot", "workstream")}}
             if not isinstance(s.get("snapshot"), dict) or not s["snapshot"].get("tipi"):
                 raise StimaError("Parametri della stima mancanti")
             gara_prima = prima["gara"]["chiave"] if prima["gara"] else None
@@ -575,7 +678,7 @@ class StimeStore:
             return self._stima(c, self._riga_stima(c, sid))
 
     def _copia(self, c, sorgente, famiglia, versione, ora, **cambi):
-        sid = self._inserisci(c, famiglia, versione, ora)
+        sid = self._inserisci(c, famiglia, versione, ora, sorgente.get("tipo") or "progetto")
         s = {**sorgente, **cambi}
         self._scrivi(c, sid, s, ora)
         return sid
@@ -613,6 +716,8 @@ class StimeStore:
             self._riga_stima(c, sid)
             c.execute("DELETE FROM righe_stima WHERE stima_id=?", (sid,))
             c.execute("DELETE FROM voci_corpo WHERE stima_id=?", (sid,))
+            c.execute("DELETE FROM attivita_assessment WHERE stima_id=?", (sid,))
+            c.execute("DELETE FROM workstream WHERE stima_id=?", (sid,))
             c.execute("DELETE FROM stime WHERE id=?", (sid,))
 
     def riallinea(self, sid, conferma=False, ora=None):
@@ -625,7 +730,7 @@ class StimeStore:
             if not conferma:
                 return {"differenze": diff}
             usati = {r["tipo"] for r in s["righe"]}
-            s["snapshot"] = snapshot_riallineato(s["snapshot"], catalogo, usati)
+            s["snapshot"] = cat.snapshot_per_tipo(snapshot_riallineato(s["snapshot"], catalogo, usati), s["tipo"])
             self._scrivi(c, sid, s, ora or _ora())
             return {"differenze": diff, "stima": self._stima(c, self._riga_stima(c, sid))}
 
