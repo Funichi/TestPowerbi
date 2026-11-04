@@ -1029,6 +1029,11 @@
       ST.sporco = false;
       return nuova({gara: g, cliente: g.cliente, nome: `Stima ${g.ss}${g.oggetto ? " · " + String(g.oggetto).slice(0, 40) : ""}`});
     },
+    async nuovaDaOfferta(p) {
+      if (ST.vista === "editor" && ST.sporco && !confirm("Ci sono modifiche non salvate alla stima aperta. Continuare senza salvarle?")) return;
+      ST.sporco = false;
+      return nuova(p);
+    },
     apri: id => vai("editor", id),
   };
   window.Stime = R;
