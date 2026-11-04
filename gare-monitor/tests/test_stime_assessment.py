@@ -79,7 +79,7 @@ def test_creazione_versione_clona_ed_elenco(st):
     assert p["tipo"] == "progetto" and p["workstream"] == [] and "assessment" not in p["snapshot"]
     assert a["tipo"] == "assessment" and a["snapshot"]["assessment"]["costo_be"] == 380 and "modello" not in a["snapshot"]["assessment"]
     assert [w["codice"] for w in a["workstream"]] == ["WS0", "WS1", "WS2", "WS3", "WS4"]
-    assert sum(len(w["attivita"]) for w in a["workstream"]) == 28 and a["workstream"][1]["attivita"][2]["id"] == "A.1.3"
+    assert sum(len(w["attivita"]) for w in a["workstream"]) == 28 and a["workstream"][1]["attivita"][2]["id"] == "1.3"        # ID per posizione
     assert a["voci_corpo"] == []
     assert st.leggi(a["id"])["workstream"] == a["workstream"]
     el = {x["nome"]: x for x in st.elenco()}
@@ -91,6 +91,12 @@ def test_creazione_versione_clona_ed_elenco(st):
     s = st.salva(a["id"], {"workstream": ws, "voci_corpo": [{"nome": "Extra", "gg_pm": 2, "gg_be": 1, "gg_fe": 0}], "tipo": "progetto"})
     assert s["tipo"] == "assessment"                                                  # il tipo non si cambia
     assert len(s["workstream"]) == 2 and s["voci_corpo"][0]["gg_pm"] == 2
+    assert [x["id"] for x in s["workstream"][1]["attivita"]] == ["1.1"]
+    ws2 = s["workstream"]
+    ws2[0]["attivita"].reverse()                                                      # sposto le attività: gli ID seguono la posizione
+    s = st.salva(a["id"], {"workstream": ws2})
+    assert [x["id"] for x in s["workstream"][0]["attivita"]] == ["0.1", "0.2"] and s["workstream"][0]["attivita"][0]["attivita"].startswith("SAL")
+    assert s["workstream"][0]["attivita"][0]["deliverable"] == "Verbali SAL e SteCo"   # il deliverable non è più usato ma resta
     v2 = st.nuova_versione(a["id"])
     cl = st.clona(a["id"])
     for x in (v2, cl):
@@ -205,7 +211,8 @@ def test_export_ricalcolato_uguale_al_motore(variante, tmp_path):
         else:
             assert got is not None and abs(got - v) <= 0.01, f"{chiave}: Excel {got} · motore {v}"
     testi = {str(c.value) for r in wb["Stima"].iter_rows() for c in r if isinstance(c.value, str)}
-    for etichetta in ("Stima Assessment", "ID", "Workstream", "Attività", "Deliverable / output", "Giornate PM", "Giornate BE", "Giornate FE",
+    assert "Deliverable / output" not in testi
+    for etichetta in ("Stima Assessment", "ID", "Workstream", "Attività", "Giornate PM", "Giornate BE", "Giornate FE",
                       "Subtotale", "Totale Progetto", "Contingency", "Costo Unitario", "Costi totale", "Margine", "Ricavi", "Prezzo obiettivo",
                       "Margine risultante", "Stima mesi progetto", "FTE", "WS1 – Diagnostico"):
         assert etichetta in testi, etichetta
@@ -218,10 +225,11 @@ def test_export_formule_vive(tmp_path):
     contenuto, _, celle = esporta(s)
     wb = openpyxl.load_workbook(io.BytesIO(contenuto))
     ws = wb["Stima"]
-    riga = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 1).value == "A.1.2")
-    ws.cell(riga, 6).value = 20.2
+    riga = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 1).value == "1.2")
+    assert ws.cell(4, 2).value == "WS0 – Governo progetto" and ws.cell(5, 1).value == "0.1"
+    ws.cell(riga, 5).value = 20.2                                                     # Giornate BE
     riga = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 1).value == "Contingency")
-    ws.cell(riga, 3).value = 0.1
+    ws.cell(riga, 2).value = 0.1
     buf = io.BytesIO()
     wb.save(buf)
     wb2 = ricalcola(buf.getvalue(), tmp_path)

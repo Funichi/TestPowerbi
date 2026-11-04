@@ -145,12 +145,12 @@
     } catch (e) { toast(e.message, true); }
   }
   const badgeTipo = t => `<span class="st-tipo ${t === "assessment" ? "ass" : ""}">${t === "assessment" ? "Assessment" : "Progetto"}</span>`;
-  // prima di tutto il tipo: Progetto (moduli, fasi e AM) o Assessment (workstream e attività con deliverable). Non si cambia dopo.
+  // prima di tutto il tipo: Progetto (moduli, fasi e AM) o Assessment (workstream e attività). Non si cambia dopo.
   function nuova(prefill = {}) {
     return new Promise(fatto => {
       const el = modal(`<h2>Nuova stima</h2><p class="muted">Scegli il tipo di stima: non si potrà cambiare dopo la creazione.</p>
         <div class="st-sceltatipo"><button type="button" class="st-tipocard" data-tipo="progetto"><b>Progetto</b><span>Implementazione con moduli, fasi e AM</span></button>
-          <button type="button" class="st-tipocard" data-tipo="assessment"><b>Assessment</b><span>Workstream e attività con deliverable</span></button></div>
+          <button type="button" class="st-tipocard" data-tipo="assessment"><b>Assessment</b><span>Workstream e attività a giornate</span></button></div>
         <div class="foot"><button id="nt-x">Annulla</button></div>`);
       qs("#nt-x", el).onclick = () => { closeModal(); fatto(); };
       qsa("[data-tipo]", el).forEach(b => b.onclick = async () => { closeModal(); await creaStima({...prefill, tipo: b.dataset.tipo}); fatto(); });
@@ -228,7 +228,7 @@
             <button data-m="esporta">Esporta Excel</button><hr><button data-m="elimina" class="danger">Elimina…</button></div></div>
         <div class="st-passi">${passi().map(([k, l], i) => `<button class="st-passo ${passo === k ? "on" : ""} ${passi().findIndex(x => x[0] === passo) > i ? "fatto" : ""}" data-passo="${k}"><span>${i + 1}</span>${l}</button>`).join(`<i class="st-freccia"></i>`)}
           <span class="st-sp"></span><button class="linkbtn ${passo === "parametri" ? "on" : ""}" data-passo="parametri">${icona("sliders-horizontal")}Parametri avanzati</button></div></div>
-      <div class="st-corpo ${conTotali ? "" : "st-pieno"}"><div class="st-sx"><div id="st-passoc"></div>${navHtml()}</div>${conTotali ? `<aside class="st-dx" id="st-riep"></aside>` : ""}</div></div>`;
+      <div class="st-corpo ${conTotali ? "" : "st-pieno"} ${isA() ? "st-corpoA" : ""}"><div class="st-sx"><div id="st-passoc"></div>${navHtml()}</div>${conTotali ? `<aside class="st-dx" id="st-riep"></aside>` : ""}</div></div>`;
     bindSchede(m);
     qs("#st-indietro", m).onclick = () => vai("elenco");
     qs("#st-nome", m).oninput = e => { s.nome = e.target.value; modificato(false); };
@@ -291,8 +291,8 @@
   // ---------------------------------------------------------------- campo numerico generico
   // data-k: "s:campo" (stima), "p:sez|cod|campo|idx" (snapshot), "r:i:campo" (riga), "v:i:campo" (attività a corpo), "a:percorso" (AM)
   function campo(k, valore, opz = {}) {
-    const pct = opz.pct, v = pct ? inPct(valore) : (opz.it && valore != null && valore !== "" ? nfIt.format(valore) : inNum(valore));
-    return `<input class="st-n ${opz.cls || ""}" data-k="${E(k)}" data-f="${pct ? "pct" : "num"}" ${opz.max1 ? "data-max1" : ""} ${opz.it ? "data-it" : ""}
+    const pct = opz.pct, v = pct ? inPct(valore) : (opz.d1 && valore != null && valore !== "" ? nf(1).format(valore) : opz.it && valore != null && valore !== "" ? nfIt.format(valore) : inNum(valore));
+    return `<input class="st-n ${opz.cls || ""}" data-k="${E(k)}" data-f="${pct ? "pct" : "num"}" ${opz.max1 ? "data-max1" : ""} ${opz.it ? "data-it" : ""} ${opz.d1 ? "data-d1" : ""}
       value="${E(v)}" inputmode="decimal" placeholder="${E(opz.ph == null ? "" : opz.ph)}" ${opz.title ? `title="${E(opz.title)}"` : ""} ${opz.label ? `aria-label="${E(opz.label)}"` : ""} autocomplete="off">`;
   }
   function leggiCampo(el) {
@@ -307,7 +307,7 @@
     qsa("input.st-n[data-k]", root).forEach(el => {
       el.oninput = () => { const r = leggiCampo(el); if (r.ok) applica(el.dataset.k, r.v, el); };
       el.onfocus = () => el.select();                         // il contenuto si seleziona: si riscrive senza cancellare
-      if (el.hasAttribute("data-it")) el.onblur = () => { const n = leggiNum(el.value); if (n != null && !Number.isNaN(n)) el.value = nfIt.format(n); };
+      if (el.hasAttribute("data-it") || el.hasAttribute("data-d1")) el.onblur = () => { const n = leggiNum(el.value); if (n != null && !Number.isNaN(n)) el.value = (el.hasAttribute("data-d1") ? nf(1) : nfIt).format(n); };
     });
     qsa("input:not(.st-n)", root).forEach(el => { if (!el.onfocus && el.type !== "checkbox") el.onfocus = () => el.select(); });
   }
@@ -735,7 +735,7 @@
           <div><span>Costo medio al giorno</span><b>${F.eur(p.costo_medio)}</b></div><div><span>Prezzo medio al giorno</span><b>${F.eur(p.prezzo_medio)}</b></div></div>`)}</div>`;
   }
 
-  // ================================================================ ASSESSMENT (workstream e attività con deliverable)
+  // ================================================================ ASSESSMENT (workstream e attività)
   // 1 Impostazioni · 2 Workstream · 3 Attività accessorie · 4 Riepilogo. Niente fasi in percentuale né AM. Le giornate sono PM, BE, FE.
   const TEAM_A = ["PM", "BE", "FE"];
   const PA = (lab, p, opz = {}) => `<div class="st-campo"><label>${lab}</label><div class="st-cv">${campo("p:" + p, pget(ST.s.snapshot, p), opz)}${opz.suf ? `<span class="muted">${opz.suf}</span>` : ""}${diffDot(p)}</div></div>`;
@@ -759,33 +759,37 @@
       <div class="st-campi st-imp">${PA("Arrotondamento", "generali||passo|", {suf: "gg"})}${PA("Giornate lavorative al mese", "generali||gg_mese|")}</div></div>`;
   }
   const numWs = w => { const m = /(\d+)\s*$/.exec(w.codice || ""); return m ? +m[1] : 0; };
-  function nuovoIdAttivita(w) {
-    const n = numWs(w), re = new RegExp(`^A\\.${n}\\.(\\d+)$`), usati = w.attivita.map(x => (re.exec(x.id || "") || [])[1]).filter(Boolean).map(Number);
-    return `A.${n}.${(usati.length ? Math.max(...usati) : 0) + 1}`;
-  }
-  const attivitaNuova = w => ({id: nuovoIdAttivita(w), attivita: "", deliverable: "", gg_pm: 0, gg_be: 0, gg_fe: 0});
+  // ID per posizione: workstream N (0, 1, 2…) → attività N.1, N.2… Si rinumera da solo quando si aggiunge, elimina o sposta.
+  const idAtt = (i, j) => `${i}.${j + 1}`;
+  function rinumera(ws) { (ws || []).forEach((w, i) => (w.attivita || []).forEach((x, j) => { x.id = idAtt(i, j); })); }
+  const attivitaNuova = () => ({id: "", attivita: "", gg_pm: 0, gg_be: 0, gg_fe: 0});
+  const COLGROUP_WS = `<colgroup><col class="c-id"><col class="c-att"><col class="c-n"><col class="c-n"><col class="c-n"><col class="c-tot"><col class="c-az"></colgroup>`;
   function passoWorkstream(s) {
-    const ws = s.workstream || [];
-    const az = (tipo, chiave, n, i) => `<span class="st-azr">${i > 0 ? `<button type="button" class="st-ib" data-${tipo}="su:${chiave}" title="Sposta su" aria-label="Sposta su">${icona("arrow-up")}</button>` : ""}${i < n - 1 ? `<button type="button" class="st-ib" data-${tipo}="giu:${chiave}" title="Sposta giù" aria-label="Sposta giù">${icona("arrow-down")}</button>` : ""}<button type="button" class="st-ib" data-${tipo}="dup:${chiave}" title="Duplica" aria-label="Duplica">${icona("copy")}</button><button type="button" class="st-ib st-cestino" data-${tipo}="del:${chiave}" title="Elimina" aria-label="Elimina">${icona("trash-2")}</button></span>`;
+    const ws = s.workstream = s.workstream || [];
+    rinumera(ws);
+    const btn = (tipo, op, chiave, ic, tit, cls = "") => `<button type="button" class="st-ib ${cls}" data-${tipo}="${op}:${chiave}" title="${tit}" aria-label="${tit}" tabindex="-1">${icona(ic)}</button>`;
+    const az = (tipo, chiave, n, i) => `<span class="st-azr">${i > 0 ? btn(tipo, "su", chiave, "arrow-up", "Sposta su") : ""}${i < n - 1 ? btn(tipo, "giu", chiave, "arrow-down", "Sposta giù") : ""}${btn(tipo, "dup", chiave, "copy", "Duplica")}${btn(tipo, "del", chiave, "trash-2", "Elimina", "st-cestino")}</span>`;
     const corpo = ws.map((w, i) => {
       const aperto = ST.aperti["ws:" + i] !== false;
-      const testa = `<tbody class="st-cat-h"><tr><td colspan="8"><div class="st-cat st-ws-h"><button type="button" class="st-chev st-ib" data-wsapri="${i}" aria-expanded="${aperto}" aria-label="Apri o chiudi">${icona(aperto ? "chevron-down" : "chevron-right")}</button>
-          <input class="st-wsnome" data-wsn="${i}" value="${E(w.nome)}" aria-label="Nome del workstream"><span class="st-sp"></span>
-          <span class="st-cat-tot" data-out="ws:${i}"></span>${az("ws", i, ws.length, i)}</div></td></tr></tbody>`;
-      if (!aperto) return testa;
-      return testa + `<tbody class="st-cat-b">${w.attivita.map((x, j) => `<tr data-a="${i}:${j}">
-          <td><input class="st-aid" data-at="${i}:${j}:id" value="${E(x.id)}" aria-label="ID"></td>
-          <td><textarea class="st-atxt" rows="1" data-at="${i}:${j}:attivita" aria-label="Attività" placeholder="Attività">${E(x.attivita)}</textarea></td>
-          <td><textarea class="st-atxt" rows="1" data-at="${i}:${j}:deliverable" aria-label="Deliverable" placeholder="Deliverable / output">${E(x.deliverable)}</textarea></td>
-          ${TEAM_A.map(t => `<td class="r">${campo(`w:${i}:${j}:gg_${t.toLowerCase()}`, x["gg_" + t.toLowerCase()], {cls: "st-n3", it: true, label: `Giornate ${t}`})}</td>`).join("")}
-          <td class="r b" data-out="att:${i}:${j}"></td>
-          <td class="st-azioni">${az("ata", `${i}:${j}`, w.attivita.length, j)}</td></tr>`).join("")}
-        <tr class="st-agg-r"><td colspan="8"><button type="button" class="linkbtn" data-ws="add:${i}">+ Aggiungi attività</button></td></tr></tbody>`;
+      const testa = `<tbody class="st-wsg"><tr class="st-wsrow" data-wsr="${i}">
+          <td colspan="2"><div class="st-wsnc"><button type="button" class="st-chev st-ib" data-wsapri="${i}" aria-expanded="${aperto}" aria-label="${aperto ? "Chiudi" : "Apri"} il workstream" tabindex="-1">${icona(aperto ? "chevron-down" : "chevron-right")}</button>
+            <input class="st-wsnome" data-wsn="${i}" value="${E(w.nome)}" aria-label="Nome del workstream" title="${E(w.nome)}"></div></td>
+          ${TEAM_A.map(t => `<td class="st-num" data-out="ws:${i}:${t}"></td>`).join("")}<td class="st-num st-tot" data-out="ws:${i}:tot"></td>
+          <td class="st-azc">${az("ws", i, ws.length, i)}</td></tr>`;
+      if (!aperto) return testa + `</tbody>`;
+      return testa + w.attivita.map((x, j) => `<tr class="st-arow" data-a="${i}:${j}">
+          <td class="st-idc"><span class="st-idl">${idAtt(i, j)}</span></td>
+          <td><textarea class="st-atxt" rows="1" data-at="${i}:${j}:attivita" aria-label="Attività ${idAtt(i, j)}" placeholder="Descrizione dell'attività">${E(x.attivita)}</textarea></td>
+          ${TEAM_A.map(t => `<td class="st-num st-numin">${campo(`w:${i}:${j}:gg_${t.toLowerCase()}`, x["gg_" + t.toLowerCase()], {cls: "st-nin", d1: true, label: `Giornate ${t} ${idAtt(i, j)}`})}</td>`).join("")}
+          <td class="st-num st-tot" data-out="att:${i}:${j}"></td>
+          <td class="st-azc">${az("ata", `${i}:${j}`, w.attivita.length, j)}</td></tr>`).join("")
+        + `<tr class="st-agg-r"><td></td><td colspan="6"><button type="button" class="linkbtn" data-ws="add:${i}">+ Aggiungi attività</button></td></tr></tbody>`;
     }).join("");
-    return `<div class="card st-card-mod"><div class="st-rh"><h3>Workstream e attività</h3><span class="muted st-riga1">Giornate inserite a mano per PM, BE e FE.</span>${aiuto("Ogni workstream ha le sue attività, con il deliverable e le giornate PM, BE e FE (arrotondate al passo). L'ID si assegna da solo (A.<n° workstream>.<progressivo>) e si può cambiare; eliminando un'attività gli altri ID non si rinumerano. Con le frecce si riordina, con la copia si duplica. Invio sulle giornate FE aggiunge un'attività nello stesso workstream.")}
+    return `<div class="card st-card-mod st-wscard"><div class="st-rh"><h3>Workstream e attività</h3><span class="st-nota">Giornate inserite a mano per PM, BE e FE.</span>${aiuto("Ogni workstream ha le sue attività con le giornate PM, BE e FE (arrotondate al passo). L'ID è automatico: workstream N → attività N.1, N.2…, e si rinumera da solo quando aggiungi, elimini o sposti. Le azioni di riga compaiono passando sopra la riga. Invio sulle giornate FE aggiunge un'attività nello stesso workstream.")}
         <span class="st-sp"></span><button type="button" id="st-ws-svuota">${icona("x")}Svuota</button></div>
-      <div class="st-scroll"><table class="st-righe st-moduli st-ass"><thead><tr><th>ID</th><th>Attività</th><th>Deliverable / output</th><th class="r">PM</th><th class="r">BE</th><th class="r">FE</th><th class="r">Totale</th><th></th></tr></thead>${corpo}
-        <tfoot><tr><td colspan="3">Totale workstream</td>${TEAM_A.map(t => `<td class="r" data-out="tws:${t}"></td>`).join("")}<td class="r" data-out="tws:tot"></td><td></td></tr></tfoot></table></div>
+      <div class="st-scroll"><table class="st-wst">${COLGROUP_WS}
+        <thead><tr><th>ID</th><th>Attività</th><th class="st-num">PM</th><th class="st-num">BE</th><th class="st-num">FE</th><th class="st-num st-tot">Totale</th><th></th></tr></thead>${corpo}
+        <tfoot><tr><td></td><td>Totale workstream</td>${TEAM_A.map(t => `<td class="st-num" data-out="tws:${t}"></td>`).join("")}<td class="st-num st-tot" data-out="tws:tot"></td><td></td></tr></tfoot></table></div>
       ${ws.length ? "" : `<p class="muted">Nessun workstream: aggiungine uno.</p>`}
       <div class="st-add"><button type="button" class="linkbtn" id="st-ws-add">+ Aggiungi workstream</button></div></div>`;
   }
@@ -812,24 +816,24 @@
       const [op, i] = b.dataset.ws.split(":").map((x, k) => k ? +x : x), w = ws[i];
       if (op === "su") sposta(ws, i, -1);
       else if (op === "giu") sposta(ws, i, 1);
-      else if (op === "dup") { const n = Math.max(-1, ...ws.map(numWs)) + 1, c = copia(w); c.codice = `WS${n}`; c.nome = `${w.nome} (copia)`; c.attivita.forEach((x, k) => x.id = `A.${n}.${k + 1}`); ws.splice(i + 1, 0, c); }
+      else if (op === "dup") { const n = Math.max(-1, ...ws.map(numWs)) + 1, c = copia(w); c.codice = `WS${n}`; c.nome = `${w.nome} (copia)`; ws.splice(i + 1, 0, c); }
       else if (op === "del") { if (w.attivita.length && !confirm(`Eliminare il workstream “${w.nome}” e le sue ${w.attivita.length} attività?`)) return; ws.splice(i, 1); }
-      else if (op === "add") { w.attivita.push(attivitaNuova(w)); ST.aperti["ws:" + i] = true; modificato(true); const t = qsa(`[data-at^="${i}:"][data-at$=":attivita"]`, ST.root).pop(); if (t) t.focus(); return; }
+      else if (op === "add") { w.attivita.push(attivitaNuova()); ST.aperti["ws:" + i] = true; modificato(true); const t = qsa(`[data-at^="${i}:"][data-at$=":attivita"]`, ST.root).pop(); if (t) t.focus(); return; }
       ST.aperti = {}; modificato(true);
     });
     qsa("[data-ata]", box).forEach(b => b.onclick = () => {
       const [op, i, j] = b.dataset.ata.split(":").map((x, k) => k ? +x : x), w = ws[i], x = w.attivita[j];
       if (op === "su") sposta(w.attivita, j, -1);
       else if (op === "giu") sposta(w.attivita, j, 1);
-      else if (op === "dup") { const c = copia(x); c.id = nuovoIdAttivita(w); w.attivita.splice(j + 1, 0, c); }
-      else if (op === "del") { if ((x.attivita || x.deliverable) && !confirm(`Eliminare l'attività ${x.id || ""}?`)) return; w.attivita.splice(j, 1); }
+      else if (op === "dup") w.attivita.splice(j + 1, 0, copia(x));
+      else if (op === "del") { if (x.attivita && !confirm(`Eliminare l'attività ${idAtt(i, j)}?`)) return; w.attivita.splice(j, 1); }
       modificato(true);
     });
     qsa("input[data-k$=':gg_fe'][data-k^='w:']", box).forEach(el => el.onkeydown = e => {          // Invio sulle giornate FE: nuova attività
       if (e.key !== "Enter") return;
       e.preventDefault();
       const [, i, j] = el.dataset.k.split(":").map(Number), w = ws[i];
-      w.attivita.splice(j + 1, 0, attivitaNuova(w)); modificato(true);
+      w.attivita.splice(j + 1, 0, attivitaNuova()); modificato(true);
       const t = qs(`[data-at="${i}:${j + 1}:attivita"]`, ST.root); if (t) t.focus();
     });
     const add = qs("#st-ws-add", box); if (add) add.onclick = () => {
@@ -841,24 +845,24 @@
   function cresci(el) { el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px"; }
   function aggiornaCalcolatiA() {
     const res = ST.res, root = ST.root, a = res.assessment, out = {};
-    a.workstream.forEach((w, i) => { out[`ws:${i}`] = `PM ${F.gg(w.PM)} · BE ${F.gg(w.BE)} · FE ${F.gg(w.FE)} = ${F.gg(w.tot)} gg`; w.attivita.forEach((x, j) => { out[`att:${i}:${j}`] = F.gg(x.tot); }); });
+    a.workstream.forEach((w, i) => { ["PM", "BE", "FE", "tot"].forEach(t => { out[`ws:${i}:${t}`] = w[t] ? F.gg(w[t]) : "–"; }); w.attivita.forEach((x, j) => { out[`att:${i}:${j}`] = F.gg(x.tot); }); });
     const tws = {PM: 0, BE: 0, FE: 0, tot: 0}; a.workstream.forEach(w => ["PM", "BE", "FE", "tot"].forEach(t => tws[t] += w[t]));
     ["PM", "BE", "FE", "tot"].forEach(t => out[`tws:${t}`] = F.gg(tws[t]));
     a.accessorie.forEach((v, i) => { out[`acc:${i}`] = F.gg(v.tot); });
     out["tot-acc"] = F.gg(a.acc.tot) + " gg";
-    qsa("[data-out]", root).forEach(el => { el.textContent = out[el.dataset.out] ?? ""; });
+    qsa("[data-out]", root).forEach(el => { const v = out[el.dataset.out] ?? ""; el.textContent = v; el.classList.toggle("st-zero", v === "–"); });
     const err = new Set(res.messaggi.filter(x => x.livello === "errore" && /^attivita:/.test(x.dove || "")).map(x => x.dove.split(":").slice(1).join(":")));
     qsa("tr[data-a]", root).forEach(tr => tr.classList.toggle("st-err", err.has(tr.dataset.a)));
     const full = qs("[data-blocco='riep-full']", root); if (full) full.innerHTML = riepilogoA();
     disegnaRiepilogo();
   }
   function totaliA(el, res) {
-    const a = res.assessment, r = (lab, v, cls = "") => `<tr class="${cls}"><td>${lab}</td><td class="r">${F.gg(v)}</td></tr>`;
-    el.innerHTML = `${messaggiHtml({...res, messaggi: res.messaggi.filter(x => x.livello === "errore")}, true)}<div class="card st-riep"><div class="st-rh"><h3>Totali</h3><span class="st-sp"></span><span class="muted">giornate</span></div>
-      <table class="st-riep-t"><tbody>${a.workstream.map(w => r(E(w.nome || w.codice), w.tot)).join("")}
-        ${a.accessorie.length ? r("Attività accessorie", a.acc.tot) : ""}${r("Totale attività", a.totale.tot, "tot")}
-        ${r(`Contingency ${nf(0).format(a.pct_contingency * 100)}%`, a.contingency.tot)}${r("Totale con contingency", a.totale_cont.tot, "tot big")}</tbody></table>
-      <div class="st-eco"><div><span>Costo</span><b>${F.eur0(a.costi.tot)}</b></div><div class="prezzo"><span>Prezzo</span><b>${F.eur0(a.prezzo)}</b></div></div>
+    const a = res.assessment, r = (lab, v, cls = "") => `<tr class="${cls}"><th scope="row">${lab}</th><td>${F.gg(v)}</td></tr>`;
+    el.innerHTML = `${messaggiHtml({...res, messaggi: res.messaggi.filter(x => x.livello === "errore")}, true)}<div class="card st-riep st-totA"><div class="st-rh"><h3>Totali</h3><span class="st-sp"></span><span class="st-nota">giornate</span></div>
+      <table class="st-tA"><tbody>${a.workstream.map(w => r(E(w.nome || w.codice), w.tot, "ws")).join("")}
+        ${a.accessorie.length ? r("Attività accessorie", a.acc.tot, "ws") : ""}${r("Totale attività", a.totale.tot, "sub")}
+        ${r(`Contingency ${nf(0).format(a.pct_contingency * 100)}%`, a.contingency.tot)}${r("Totale complessivo", a.totale_cont.tot, "big")}</tbody></table>
+      <div class="st-eco st-ecoA"><div><span>Costo</span><b>${F.eur0(a.costi.tot)}</b></div><div class="prezzo"><span>Prezzo</span><b>${F.eur0(a.prezzo)}</b></div></div>
       ${obiettivoHtml(a, true)}</div>`;
   }
   function riepilogoA() {
@@ -985,13 +989,12 @@
         <tr><td>Costo PM (€/gg)</td>${C("assessment||costo_pm|")}</tr><tr><td>Costo BE (€/gg)</td>${C("assessment||costo_be|")}</tr><tr><td>Costo FE (€/gg)</td>${C("assessment||costo_fe|")}</tr>
         <tr><td>Contingency (%)</td>${C("assessment||contingency|", {pct: true})}</tr><tr><td>Margine (%)</td>${C("assessment||margine|", {pct: true, max1: true})}</tr></tbody></table>
       <p class="hint">Modello predefinito: si copia in ogni nuova stima Assessment, dove si può cambiare liberamente.</p>
-      <div class="st-scroll"><table class="st-righe st-par st-ass"><thead><tr><th>ID</th><th>Attività</th><th>Deliverable / output</th><th class="r">PM</th><th class="r">BE</th><th class="r">FE</th><th></th></tr></thead>
-      ${mod.map((w, i) => `<tbody><tr class="st-modrow"><td colspan="6"><input class="st-modnome" data-cmw="${i}" value="${E(w.nome)}" aria-label="Nome del workstream"></td><td><button class="st-ib" data-cmwdel="${i}" title="Elimina il workstream" aria-label="Elimina il workstream">${icona("trash-2")}</button></td></tr>
-        ${(w.attivita || []).map((x, j) => `<tr><td><input class="st-aid" data-cmt="${i}:${j}:id" value="${E(x.id)}"></td><td><textarea class="st-atxt" rows="1" data-cmt="${i}:${j}:attivita">${E(x.attivita)}</textarea></td>
-          <td><textarea class="st-atxt" rows="1" data-cmt="${i}:${j}:deliverable">${E(x.deliverable)}</textarea></td>
+      <div class="st-scroll"><table class="st-righe st-par st-ass"><thead><tr><th>ID</th><th>Attività</th><th class="r">PM</th><th class="r">BE</th><th class="r">FE</th><th></th></tr></thead>
+      ${mod.map((w, i) => `<tbody><tr class="st-modrow"><td colspan="5"><input class="st-modnome" data-cmw="${i}" value="${E(w.nome)}" aria-label="Nome del workstream"></td><td><button class="st-ib" data-cmwdel="${i}" title="Elimina il workstream" aria-label="Elimina il workstream">${icona("trash-2")}</button></td></tr>
+        ${(w.attivita || []).map((x, j) => `<tr><td><span class="st-idl">${idAtt(i, j)}</span></td><td><textarea class="st-atxt" rows="1" data-cmt="${i}:${j}:attivita">${E(x.attivita)}</textarea></td>
           ${["pm", "be", "fe"].map(t => `<td class="r">${campo(`cm:${i}:${j}:gg_${t}`, x["gg_" + t], {cls: "st-n3"})}</td>`).join("")}
           <td><button class="st-ib" data-cmdel="${i}:${j}" title="Elimina l'attività" aria-label="Elimina l'attività">${icona("trash-2")}</button></td></tr>`).join("")}
-        <tr class="st-agg-r"><td colspan="7"><button type="button" class="linkbtn" data-cmadd="${i}">+ Aggiungi attività</button></td></tr></tbody>`).join("")}</table></div>
+        <tr class="st-agg-r"><td colspan="6"><button type="button" class="linkbtn" data-cmadd="${i}">+ Aggiungi attività</button></td></tr></tbody>`).join("")}</table></div>
       <div class="st-add"><button id="cm-addws">${icona("plus")}Aggiungi workstream</button></div>`;
   }
   function bindCatalogoAssessment(m, k, ridisegna) {
@@ -1000,7 +1003,7 @@
     qsa("[data-cmt]", m).forEach(el => { const [i, j, f] = el.dataset.cmt.split(":"); el.oninput = () => { mod()[+i].attivita[+j][f] = el.value; if (el.tagName === "TEXTAREA") cresci(el); segnaModifiche(m); }; if (el.tagName === "TEXTAREA") cresci(el); });
     qsa("[data-cmdel]", m).forEach(b => b.onclick = () => { const [i, j] = b.dataset.cmdel.split(":").map(Number); mod()[i].attivita.splice(j, 1); ridisegna(); });
     qsa("[data-cmwdel]", m).forEach(b => b.onclick = () => { const i = +b.dataset.cmwdel; if (confirm(`Eliminare il workstream “${mod()[i].nome}” dal modello?`)) { mod().splice(i, 1); ridisegna(); } });
-    qsa("[data-cmadd]", m).forEach(b => b.onclick = () => { const w = mod()[+b.dataset.cmadd]; w.attivita = w.attivita || []; w.attivita.push(attivitaNuova(w)); ridisegna(); });
+    qsa("[data-cmadd]", m).forEach(b => b.onclick = () => { const w = mod()[+b.dataset.cmadd]; w.attivita = w.attivita || []; w.attivita.push(attivitaNuova()); ridisegna(); });
     const add = qs("#cm-addws", m); if (add) add.onclick = () => { const n = Math.max(-1, ...mod().map(numWs)) + 1; mod().push({codice: `WS${n}`, nome: `WS${n} – Nuovo workstream`, attivita: []}); ridisegna(); };
   }
   function segnaModifiche(m) {
