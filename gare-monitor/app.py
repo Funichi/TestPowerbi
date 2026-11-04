@@ -1,4 +1,4 @@
-"""Gare & Offerte — app locale.
+"""BidDesk (gare, offerte, referenze e stime) — app locale.
 
 Archivio di lavoro: database SQLite locale (monitoraggio.db), caricato dal file Excel con "Aggiorna dall'Excel".
 L'Excel viene scritto SOLO quando si preme "Esporta in Excel" (righe nuove accodate, righe modificate aggiornate).
@@ -216,9 +216,9 @@ def _login_page(msg="", form="pw"):
     else:
         corpo = ""
     testo = msg or ("Secondo passaggio di verifica." if form == "codice" else "Inserisci la password.")
-    return f"""<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Accesso — Gare e Offerte</title>
+    return f"""<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Accesso — BidDesk</title><link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css"></head><body style="display:grid;place-items:center;min-height:100vh;background:var(--bg)">
-<main class="card" style="width:min(380px,92vw)"><h2>Gare &amp; Offerte</h2><p class="muted">{testo}</p>{corpo}</main></body></html>"""
+<main class="card" style="width:min(380px,92vw)"><h2>Bid<span style="color:var(--accent)">Desk</span></h2><p class="muted">{testo}</p>{corpo}</main></body></html>"""
 
 
 def _in_attesa_codice():
@@ -667,7 +667,7 @@ def index():
 
 @app.get("/favicon.ico")
 def favicon():
-    return "", 204
+    return send_from_directory(app.static_folder, "biddesk.ico", mimetype="image/x-icon")
 
 
 def excel_newer():
@@ -1014,7 +1014,7 @@ def main():
     port = int(os.environ.get("GARE_PORT", "8765"))
     url = f"http://127.0.0.1:{port}"
     print("=" * 60)
-    print(" Gare & Offerte — app avviata")
+    print(" BidDesk — app avviata")
     print(f" Apri il browser su {url}")
     print(f" Database locale: {db_path()}")
     print(" Per chiudere l'app chiudi questa finestra.")

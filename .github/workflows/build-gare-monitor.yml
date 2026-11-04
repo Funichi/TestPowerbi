@@ -40,7 +40,7 @@ jobs:
         run: pip install --no-binary pyinstaller pyinstaller || pip install pyinstaller
       - run: python -m pytest -q tests
       # cartella (non --onefile): gli exe "autoestraenti" sono molto più spesso scambiati per virus
-      - run: pyinstaller --onedir --noupx --name GareOfferte --add-data "static;static" --hidden-import win32timezone --hidden-import pythoncom --hidden-import win32com.client app.py
+      - run: pyinstaller --onedir --noupx --name GareOfferte --icon static/biddesk.ico --add-data "static;static" --hidden-import win32timezone --hidden-import pythoncom --hidden-import win32com.client app.py
       - run: copy Avvio-automatico.bat, Disattiva-avvio-automatico.bat, Aggiorna.bat, Aggiorna.ps1 dist\GareOfferte\
       - run: Set-Content -Path dist\GareOfferte\version.txt -Value "${{ github.run_number }}" -NoNewline
       - run: Compress-Archive -Path dist\GareOfferte\* -DestinationPath GareOfferte-${{ github.run_number }}.zip

@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
-EMITTENTE = "Gare e Offerte"
+EMITTENTE = "BidDesk"
 PASSO = 30                                         # secondi di validità di un codice
 ALFABETO_RECUPERO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"        # senza caratteri ambigui (0/O, 1/I)
 # blocco globale dopo errori consecutivi (qualsiasi indirizzo: l'app ha un solo utente): (errori, secondi)
