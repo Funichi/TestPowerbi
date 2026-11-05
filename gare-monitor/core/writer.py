@@ -15,7 +15,7 @@ import threading
 import time
 import warnings
 
-from .reader import DATE_FIELDS, SHEET_MAIN, clean_text, row_sig, to_date
+from .reader import DATE_FIELDS, NUM_FIELDS, SHEET_MAIN, clean_text, row_sig, to_date, to_number
 
 TABLE_NAME = "Tabella4"
 KEEP_BACKUPS = 40
@@ -91,6 +91,11 @@ def _value_for(field, value):
         if d is None:
             raise WriteError(f"Data non valida per '{field}': {value!r}")
         return dt.datetime(d.year, d.month, d.day)
+    if field in NUM_FIELDS:                                   # numeri veri (il TCV), non testo
+        n = to_number(value)
+        if n is None:
+            raise WriteError(f"Numero non valido per '{field}': {value!r}")
+        return n
     return str(value)
 
 

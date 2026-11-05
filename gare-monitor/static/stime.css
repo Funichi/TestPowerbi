@@ -305,3 +305,14 @@ tr:hover .st-azr,.st-ws-h:hover .st-azr,.st-azr:focus-within{opacity:1}
 .st-tA tr.big th,.st-tA tr.big td{font-size:15.5px}
 .st-wst thead th:nth-child(2){padding-left:13px}                 /* allineato al testo della textarea (6 + 1 bordo + 6) */
 .st-tA td{color:var(--text)}
+
+/* ---------- stima ufficiale ---------- */
+.st-uffbar{display:flex;gap:8px;align-items:flex-start;margin-top:10px;padding:9px 12px;border-radius:10px;background:var(--st-won-bg);color:var(--st-won-fg);font-size:13px}
+.st-uffbar svg{width:16px;height:16px;flex:none;margin-top:2px}
+.st-ro input:disabled,.st-ro textarea:disabled,.st-ro select:disabled{background:transparent;border-color:transparent;color:var(--text);opacity:1;-webkit-text-fill-color:var(--text);cursor:default}
+.st-ro button:disabled{display:none}
+.st-ro .st-chip-mix:disabled{display:inline-flex;cursor:default}
+.st-uffval{display:flex;flex-direction:column;gap:2px;padding:12px 14px;margin:12px 0;border:1px solid var(--border);border-radius:12px}
+.st-uffval span{font-size:12px;color:var(--text-3)}.st-uffval b{font-size:22px;color:var(--accent)}.st-uffval small{color:var(--text-2)}
+.st-uffl{margin:0 0 6px;padding-left:18px;color:var(--text-2);font-size:13px;line-height:1.5}
+.st-uffdiff{padding:8px 12px;border-radius:8px;background:var(--att-1-bg);color:var(--att-1-fg);font-size:13px}

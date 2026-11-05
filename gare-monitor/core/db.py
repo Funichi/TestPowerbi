@@ -18,7 +18,9 @@ import threading
 import datetime as dt
 
 from .normalize import normalize_rows
-from .reader import DATE_FIELDS, FIELDS, build_row, clean_text, optional_columns, row_sig, to_iso
+from .reader import DATE_FIELDS, FIELDS, NUM_FIELDS, build_row, clean_text, optional_columns, row_sig, to_iso, to_number
+
+EXPORT_FIELDS = FIELDS + NUM_FIELDS      # campi che l'app può modificare ed esportare (i numerici solo se la colonna c'è nell'Excel)
 
 KEEP_DB_BACKUPS = 20
 
@@ -29,6 +31,8 @@ def _q(name):
 
 def _cmp(field, v):
     """Valore normalizzato per confrontare 'prima' e 'dopo' ignorando spazi e formati di data."""
+    if field in NUM_FIELDS:
+        return to_number(v)
     return to_iso(v) if field in DATE_FIELDS else clean_text(v)
 
 
@@ -114,7 +118,9 @@ class Store:
     def _clean_values(self, values, headers):
         out = {}
         for f, v in values.items():
-            if f in headers and f in FIELDS:
+            if f in headers and f in NUM_FIELDS:
+                out[f] = to_number(v)
+            elif f in headers and f in FIELDS:
                 out[f] = to_iso(v) if f in DATE_FIELDS else clean_text(v) if f not in ("Oggetto", "Note") else (str(v).strip() or None if v else None)
         return out
 
@@ -174,7 +180,7 @@ class Store:
     # ------------------------------------------------------------ cosa esportare
     @staticmethod
     def _diff(cells, orig, att=0):
-        d = {f: _cmp(f, cells.get(f)) for f in FIELDS if f in cells and _cmp(f, cells.get(f)) != _cmp(f, orig.get(f))}
+        d = {f: _cmp(f, cells.get(f)) for f in EXPORT_FIELDS if f in cells and _cmp(f, cells.get(f)) != _cmp(f, orig.get(f))}
         if int(att or 0) != int(orig.get("__att") or 0):
             d["Attenzione"] = int(att or 0)
         return d
@@ -185,7 +191,7 @@ class Store:
         with self.conn() as c:
             for r, cells, orig in self._rows(c):
                 if r["__state"] == "new":
-                    vals = {f: _cmp(f, cells.get(f)) for f in FIELDS if f in cells and _cmp(f, cells.get(f)) is not None}
+                    vals = {f: _cmp(f, cells.get(f)) for f in EXPORT_FIELDS if f in cells and _cmp(f, cells.get(f)) is not None}
                     if r["__att"]:
                         vals["Attenzione"] = r["__att"]
                     new.append({"id": r["__id"], "values": vals})

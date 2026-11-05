@@ -585,6 +585,51 @@ def stime_corrente(sid):
     return jsonify(stimestore().imposta_corrente(sid))
 
 
+TCV_COL = "TCV Offerta Economica"
+
+
+@app.post("/api/stime/<int:sid>/ufficiale")
+def stime_ufficiale(sid):
+    """Segna la stima come ufficiale e scrive il suo valore totale (progetto + AM, o prezzo dell'Assessment) nella colonna
+    "TCV Offerta Economica" della riga della gara, come modifica da esportare. Se la cella ha già un valore diverso,
+    risponde 409 con prima/dopo e serve la conferma."""
+    b = request.json or {}
+    ss = stimestore()
+    s = ss.leggi(sid)
+    if not s["gara"]:
+        raise stime.StimaError("Per renderla ufficiale la stima deve essere collegata a una gara (con codice SS e data di inserimento)")
+    if stime_motore.calcola(s)["export_bloccato"]:
+        raise stime.StimaError("La stima ha errori: correggili prima di renderla ufficiale")
+    tcv = ss.tcv(s)
+    if tcv is None:
+        raise stime.StimaError("Il valore totale della stima non è calcolabile (controlla margini e AM)")
+    st = store()
+    if TCV_COL not in (st.meta("headers") or []):
+        raise stime.StimaError(f"Nell'Excel non c'è la colonna \"{TCV_COL}\": aggiungila nel foglio delle gare e premi \"Aggiorna dall'Excel\"")
+    chiave = s["gara"]["chiave"]
+    righe = [r for r in get_data()["rows"] if stime.chiave_gara(r.get("SS"), r.get("Data ins.")) == chiave]
+    if not righe:
+        raise stime.StimaError(f"La gara {chiave.replace('|', ' · ')} non è nella tabella delle offerte (codice SS o data di inserimento cambiati?)")
+    if len(righe) > 1:
+        raise stime.StimaError(f"Ci sono {len(righe)} righe con il codice {chiave.replace('|', ' · ')}: correggi il duplicato prima di scrivere il TCV")
+    riga = righe[0]
+    prima = riga.get(TCV_COL)
+    cambia = prima is None or abs(float(prima) - tcv) > 0.005
+    if cambia and prima not in (None, 0) and not b.get("conferma"):
+        return jsonify({"error": "La colonna TCV della gara ha già un valore diverso", "conferma": True, "prima": prima, "dopo": tcv,
+                        "cliente": riga.get("Cliente"), "oggetto": riga.get("Oggetto")}), 409
+    if cambia:
+        st.update(riga["_row"], {TCV_COL: tcv})
+    out = ss.imposta_ufficiale(sid, tcv)
+    return jsonify({"stima": out, "tcv": tcv, "prima": prima, "scritto": cambia})
+
+
+@app.delete("/api/stime/<int:sid>/ufficiale")
+def stime_revoca_ufficiale(sid):
+    """Toglie il flag: la stima torna modificabile. Il TCV già scritto nella riga della gara resta com'è."""
+    return jsonify(stimestore().revoca_ufficiale(sid))
+
+
 @app.post("/api/stime/<int:sid>/riallinea")
 def stime_riallinea(sid):
     return jsonify(stimestore().riallinea(sid, conferma=bool(_corpo().get("conferma"))))

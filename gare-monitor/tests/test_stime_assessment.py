@@ -149,7 +149,7 @@ def test_schema_3_diventa_4_e_le_stime_restano_progetto(tmp_path):
     k = st.catalogo()
     assert k["assessment"]["costo_pm"] == 460 and [w["codice"] for w in k["assessment"]["modello"]] == [w["codice"] for w in MODELLO_ASSESSMENT]
     with sqlite3.connect(path) as c:
-        assert c.execute("SELECT v FROM meta WHERE k='schema'").fetchone()[0] == "4"
+        assert c.execute("SELECT v FROM meta WHERE k='schema'").fetchone()[0] == "5"         # sempre allo schema più recente
     assert st.crea({"tipo": "assessment"})["tipo"] == "assessment"
 
 
