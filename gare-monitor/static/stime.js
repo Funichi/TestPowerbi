@@ -104,7 +104,7 @@
         <span class="st-sp"></span><button class="primary" id="st-nuova">${icona("plus")}Nuova stima</button></div>
       ${ST.elenco.length ? `<div class="card tablecard st-elenco"><table><thead><tr><th>Nome</th><th>Cliente</th><th>Gara</th><th>Versione</th><th class="r">Giornate</th><th class="r">Prezzo</th><th class="r">Margine</th><th class="r">AM</th><th>Modificata</th><th></th></tr></thead><tbody>
         ${ST.elenco.map(x => `<tr data-apri="${x.id}"><td><b>${E(x.nome)}</b> ${badgeTipo(x.tipo)}</td><td>${E(x.cliente)}</td><td>${x.gara ? `<span title="${E(x.gara.oggetto || "")}">${E(x.gara.ss)} · ${x.gara.anno}</span>` : `<span class="muted">—</span>`}</td>
-          <td>v${x.versione}${x.corrente ? ` <span class="st-badge ok">corrente</span>` : ""}</td><td class="r">${F.gg(x.gg)}</td><td class="r">${F.eur0(x.prezzo)}</td><td class="r">${F.pct(x.margine)}</td>
+          <td>v${x.versione}${x.ufficiale ? ` <span class="st-uff" title="Stima ufficiale: TCV ${F.eur0(x.ufficiale_tcv)}">${icona("check")}ufficiale</span>` : x.corrente ? ` <span class="st-badge ok">corrente</span>` : ""}</td><td class="r">${F.gg(x.gg)}</td><td class="r">${F.eur0(x.prezzo)}</td><td class="r">${F.pct(x.margine)}</td>
           <td class="r">${x.am_prezzo == null ? `<span class="muted">—</span>` : F.eur0(x.am_prezzo)}</td><td>${E((x.modificata_il || "").replace("T", " ").slice(0, 16))}</td>
           <td class="st-azioni"><button class="st-ib" data-az="versione" data-id="${x.id}" title="Nuova versione">${icona("plus")}</button><button class="st-ib" data-az="clona" data-id="${x.id}" title="Clona">${icona("copy")}</button>
             <button class="st-ib" data-az="esporta" data-id="${x.id}" title="Esporta Excel">${icona("download")}</button><button class="st-ib" data-az="elimina" data-id="${x.id}" title="Elimina">${icona("trash-2")}</button></td></tr>`).join("")}
@@ -220,12 +220,13 @@
     const s = ST.s, passo = ST.passo, conTotali = passo !== "riepilogo";
     m.innerHTML = `<div class="st-wrap st-ed">${schede()}
       <div class="card st-testa"><div class="st-testa-r"><input id="st-nome" class="st-nome" value="${E(s.nome)}" aria-label="Nome della stima">
-          ${badgeTipo(s.tipo)}<span class="st-ver">v${s.versione}${s.corrente ? ` <span class="st-badge ok">corrente</span>` : ` <button class="linkbtn" id="st-corr">Rendi corrente</button>`}</span>
+          ${badgeTipo(s.tipo)}<span class="st-ver">v${s.versione}${s.ufficiale ? ` <span class="st-uff">${icona("check")}ufficiale</span>` : s.corrente ? ` <span class="st-badge ok">corrente</span>` : ` <button class="linkbtn" id="st-corr">Rendi corrente</button>`}</span>
           <span class="st-sp"></span><span class="st-stato" id="st-stato"></span>
           <button id="st-indietro">${icona("arrow-left")}Elenco</button>
           <button class="st-more" id="st-more" aria-label="Altre azioni">${icona("ellipsis")}</button>
           <div class="st-menu" id="st-menu" hidden><button data-m="versione">Nuova versione</button><button data-m="clona">Clona…</button>
-            <button data-m="esporta">Esporta Excel</button><hr><button data-m="elimina" class="danger">Elimina…</button></div></div>
+            <button data-m="esporta">Esporta Excel</button><hr>${s.ufficiale ? `<button data-m="revoca">Togli “ufficiale”…</button>` : `<button data-m="ufficiale">Segna come ufficiale…</button>`}<hr><button data-m="elimina" class="danger">Elimina…</button></div></div>
+        ${s.ufficiale ? `<div class="st-uffbar">${icona("check")}<span><b>Stima ufficiale</b> dal ${E((s.ufficiale_il || "").slice(0, 10).split("-").reverse().join("/"))} · TCV ${F.eur(s.ufficiale_tcv)} scritto nella gara. È in sola lettura: per cambiarla togli il flag dal menu ⋯ o crea una nuova versione.</span></div>` : ""}
         <div class="st-passi">${passi().map(([k, l], i) => `<button class="st-passo ${passo === k ? "on" : ""} ${passi().findIndex(x => x[0] === passo) > i ? "fatto" : ""}" data-passo="${k}"><span>${i + 1}</span>${l}</button>`).join(`<i class="st-freccia"></i>`)}
           <span class="st-sp"></span><button class="linkbtn ${passo === "parametri" ? "on" : ""}" data-passo="parametri">${icona("sliders-horizontal")}Parametri avanzati</button></div></div>
       <div class="st-corpo ${conTotali ? "" : "st-pieno"} ${isA() ? "st-corpoA" : ""}"><div class="st-sx"><div id="st-passoc"></div>${navHtml()}</div>${conTotali ? `<aside class="st-dx" id="st-riep"></aside>` : ""}</div></div>`;
@@ -238,6 +239,12 @@
     qs(".st-ed", m).onclick = e => { if (!e.target.closest("#st-menu, #st-more")) menu.hidden = true; if (!e.target.closest(".st-pop, [data-mixpop], [data-aiuto]")) chiudiPopover(); };
     qsa("[data-m]", menu).forEach(b => b.onclick = async () => {
       menu.hidden = true;
+      if (b.dataset.m === "ufficiale") { if (await salvaSeServe()) segnaUfficiale(); return; }
+      if (b.dataset.m === "revoca") {
+        if (!confirm("Togliere il flag “ufficiale”? La stima torna modificabile. Il TCV già scritto nella riga della gara resta com'è.")) return;
+        try { await api(`/api/stime/${s.id}/ufficiale`, {method: "DELETE"}); toast("La stima non è più ufficiale"); apri(s.id); } catch (e) { toast(e.message, true); }
+        return;
+      }
       if (b.dataset.m === "elimina") { if (confirm(`Eliminare questa versione (v${s.versione}) di “${s.nome}”? Non si può annullare.`)) { await api(`/api/stime/${s.id}`, {method: "DELETE"}); ST.sporco = false; toast("Stima eliminata"); vai("elenco"); } return; }
       if (!(await salvaSeServe())) return;
       if (b.dataset.m === "versione") { const n = await api(`/api/stime/${s.id}/versione`, {method: "POST"}); toast(`Creata la versione ${n.versione}`); apri(n.id); }
@@ -245,7 +252,36 @@
       if (b.dataset.m === "esporta") esporta(s.id);
     });
     qsa("[data-passo]", m).forEach(b => b.onclick = () => vaiPasso(b.dataset.passo));
+    if (s.ufficiale) { const n = qs("#st-nome", m); n.readOnly = true; }
     disegnaPasso(); disegnaRiepilogo(); stato();
+  }
+  // stima ufficiale (chiusa e certificata): il suo valore totale va nel TCV della gara. Progetto + AM, sempre insieme.
+  async function segnaUfficiale() {
+    const s = ST.s, res = ST.res;
+    if (!s.gara) { toast("Collega prima la stima a una gara (Impostazioni → Gara collegata)", true); return; }
+    const a = res && res.tipo === "assessment" ? res.assessment : null, p = res && res.progetto, am = res && res.am;
+    const tcv = a ? a.prezzo : (p ? (p.prezzo || 0) + (am && am.prezzo ? am.prezzo : 0) : null);
+    const dett = a ? "prezzo dell'assessment" : (am && am.prezzo ? `progetto ${F.eur(p.prezzo)} + AM ${F.eur(am.prezzo)}` : "prezzo del progetto (nessuna AM)");
+    const el = modal(`<h2>Segna come ufficiale</h2>
+      <p>La stima <b>${E(s.nome)} · v${s.versione}</b> diventa quella ufficiale della gara <b>${E(s.gara.ss)} · ${s.gara.anno}</b>${s.gara.cliente ? ` (${E(s.gara.cliente)})` : ""}.</p>
+      <div class="st-uffval"><span>TCV Offerta Economica</span><b>${F.eur(tcv)}</b><small>${dett}</small></div>
+      <ul class="st-uffl"><li>Il valore va nella colonna <b>TCV Offerta Economica</b> della riga della gara, come modifica da esportare: lo porti nell'Excel con “Esporta in Excel”.</li>
+        <li>La stima diventa la corrente ed è in sola lettura; se un'altra versione della stessa gara era ufficiale, perde il flag.</li></ul>
+      <div class="err" id="uf-e"></div><div class="foot"><button id="uf-x">Annulla</button><button class="primary" id="uf-ok">Segna come ufficiale</button></div>`);
+    qs("#uf-x", el).onclick = closeModal;
+    const invia = async conferma => {
+      try {
+        const r = await api(`/api/stime/${s.id}/ufficiale`, {method: "POST", body: {conferma}});
+        closeModal(); toast(r.scritto ? `Stima ufficiale: TCV ${F.eur0(r.tcv)} da esportare nell'Excel` : "Stima ufficiale (il TCV della gara era già questo)");
+        apri(s.id);
+      } catch (e) {
+        if (e.status === 409 && e.body && e.body.conferma) {
+          qs("#uf-e", el).innerHTML = `<div class="st-uffdiff">La gara ha già un TCV diverso: <b>${F.eur(e.body.prima)}</b> → <b>${F.eur(e.body.dopo)}</b>. Lo sostituisco?</div>`;
+          const ok = qs("#uf-ok", el); ok.textContent = "Sostituisci e segna come ufficiale"; ok.onclick = () => invia(true);
+        } else qs("#uf-e", el).textContent = e.message;
+      }
+    };
+    qs("#uf-ok", el).onclick = () => invia(false);
   }
   function navHtml() {
     const PASSI = passi(), i = PASSI.findIndex(x => x[0] === ST.passo);
@@ -428,6 +464,10 @@
     const presa = qs("#st-presa", box); if (presa) presa.onchange = () => { s.am.driver.presa = presa.checked; modificato(false); };
     const ri = qs("#st-riall", box); if (ri) ri.onclick = riallinea;
     const note = qs("#st-note", box); if (note) note.oninput = () => { s.note = note.value; modificato(false); };
+    if (s.ufficiale) {                                       // stima ufficiale: si consulta, non si modifica
+      box.classList.add("st-ro");
+      qsa("input, textarea, select, button", box).forEach(el => { if (!el.matches("[data-passo], [data-aiuto], [data-wsapri], [data-cat]")) el.disabled = true; });
+    } else box.classList.remove("st-ro");
     aggiornaCalcolati();
   }
   function aggiungiRiga(codice, contesto, dopo) {

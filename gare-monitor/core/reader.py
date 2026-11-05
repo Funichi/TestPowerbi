@@ -21,6 +21,9 @@ FIELDS = [
     "Referenti vertical", "Tecnologie di riferimento D&A", "Note",
 ]
 
+# Colonne numeriche che l'app scrive (se ci sono nell'Excel): il TCV arriva dalla stima ufficiale dello Stimometro
+NUM_FIELDS = ["TCV Offerta Economica"]
+
 
 # Colonne facoltative: se nell'Excel ci sono (intestazioni qui sotto, maiuscole/minuscole indifferenti) l'app le usa, altrimenti
 # le sezioni che le richiedono non compaiono. "Valore" non è tra queste: nel file è già una colonna tecnica.
@@ -216,6 +219,9 @@ def build_row(rid, xl, cells, orig=None, state="orig", att=0, optional=None):
                 textdates.append(f)
         else:
             row[f] = clean_text(v)
+    for f in NUM_FIELDS:
+        if f in cells:
+            row[f] = to_number(cells.get(f))
     opt = {}
     for k, h in (optional or {}).items():
         v = cells.get(h)

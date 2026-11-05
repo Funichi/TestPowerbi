@@ -526,3 +526,6 @@ tr.row-old td{color:var(--text-3);background:var(--bg)}
 /* tipo di stima (Stimometro): Progetto neutro, Assessment viola tenue; usato anche nella scheda gara */
 .st-tipo{display:inline-flex;align-items:center;font-size:11.5px;font-weight:600;border-radius:999px;padding:1px 8px;white-space:nowrap;background:var(--bg);border:1px solid var(--border);color:var(--text-2);vertical-align:middle}
 .st-tipo.ass{background:var(--st-sospeso-bg);border-color:transparent;color:var(--st-sospeso-fg)}
+/* stima ufficiale (chiusa e certificata): verde, anche nella scheda gara */
+.st-uff{display:inline-flex;align-items:center;gap:3px;font-size:11.5px;font-weight:650;border-radius:999px;padding:1px 8px;white-space:nowrap;background:var(--st-won-bg);color:var(--st-won-fg);vertical-align:middle}
+.st-uff svg{width:12px;height:12px}

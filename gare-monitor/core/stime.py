@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS fasi (codice TEXT PRIMARY KEY, nome TEXT, blocco TEXT
 CREATE TABLE IF NOT EXISTS stime (id INTEGER PRIMARY KEY AUTOINCREMENT, famiglia INTEGER, versione INTEGER, corrente INTEGER DEFAULT 0,
   nome TEXT, cliente TEXT, gara_chiave TEXT, gara_info TEXT, durata_mesi REAL, prezzo_obiettivo REAL, training_be REAL, training_fe REAL,
   note TEXT, snapshot TEXT, am TEXT, tot_gg REAL, tot_costo REAL, tot_prezzo REAL, tot_margine REAL, tot_am_prezzo REAL,
-  creata_il TEXT, modificata_il TEXT, tipo TEXT DEFAULT 'progetto');
+  creata_il TEXT, modificata_il TEXT, tipo TEXT DEFAULT 'progetto', ufficiale INTEGER DEFAULT 0, ufficiale_il TEXT, ufficiale_tcv REAL);
 CREATE INDEX IF NOT EXISTS ix_stime_gara ON stime(gara_chiave);
 CREATE INDEX IF NOT EXISTS ix_stime_famiglia ON stime(famiglia);
 CREATE TABLE IF NOT EXISTS righe_stima (id INTEGER PRIMARY KEY AUTOINCREMENT, stima_id INTEGER, contesto TEXT, codice_tipo TEXT, etichetta TEXT,
@@ -373,6 +373,7 @@ class StimeStore:
                 self._migra(c)
                 self._migra3(c)
                 self._migra4(c)
+                self._migra5(c)
                 c.commit()
             finally:
                 c.close()
@@ -436,6 +437,18 @@ class StimeStore:
             _scrivi_catalogo(c, k)
         c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '4')")
 
+    @staticmethod
+    def _migra5(c):
+        """Schema 5: stima ufficiale (chiusa e certificata), con la data e il TCV scritto nella riga della gara."""
+        colonne = {x[1] for x in c.execute("PRAGMA table_info(stime)")}
+        for col, tipo in (("ufficiale", "INTEGER DEFAULT 0"), ("ufficiale_il", "TEXT"), ("ufficiale_tcv", "REAL")):
+            if col not in colonne:
+                c.execute(f"ALTER TABLE stime ADD COLUMN {col} {tipo}")
+        c.execute("UPDATE stime SET ufficiale=0 WHERE ufficiale IS NULL")
+        r = c.execute("SELECT v FROM meta WHERE k='schema'").fetchone()
+        if not r or r[0] < "5":
+            c.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '5')")
+
     def backup(self, ora=None):
         """Copia coerente in backup_stime/stime_AAAAMMGG_HHMM.db; tiene le ultime 20."""
         if not os.path.isfile(self.path):
@@ -487,7 +500,8 @@ class StimeStore:
             workstream = [{"codice": w["codice"], "nome": w["nome"] or "", "attivita": per_ws.get(w["id"], [])}
                           for w in c.execute("SELECT * FROM workstream WHERE stima_id=? ORDER BY ordine, id", (r["id"],))]
         info = json.loads(r["gara_info"]) if r["gara_info"] else None
-        return {"id": r["id"], "tipo": tipo, "famiglia": r["famiglia"], "versione": r["versione"], "corrente": bool(r["corrente"]), "nome": r["nome"] or "",
+        return {"id": r["id"], "tipo": tipo, "famiglia": r["famiglia"], "versione": r["versione"], "corrente": bool(r["corrente"]),
+                "ufficiale": bool(r["ufficiale"]), "ufficiale_il": r["ufficiale_il"], "ufficiale_tcv": r["ufficiale_tcv"], "nome": r["nome"] or "",
                 "cliente": r["cliente"] or "", "gara": ({**info, "chiave": r["gara_chiave"]} if r["gara_chiave"] else None),
                 "durata_mesi": r["durata_mesi"], "prezzo_obiettivo": r["prezzo_obiettivo"], "training_be": r["training_be"], "training_fe": r["training_fe"],
                 "note": r["note"] or "", "snapshot": StimeStore._snapshot(r["snapshot"]), "am": json.loads(r["am"]) if r["am"] else {"modalita": None},
@@ -527,7 +541,8 @@ class StimeStore:
         with self.conn() as c:
             for r in c.execute(sql + " ORDER BY modificata_il DESC, id DESC", par):
                 info = json.loads(r["gara_info"]) if r["gara_info"] else None
-                x = {"id": r["id"], "tipo": r["tipo"] or "progetto", "famiglia": r["famiglia"], "nome": r["nome"], "cliente": r["cliente"], "versione": r["versione"],
+                x = {"id": r["id"], "tipo": r["tipo"] or "progetto", "ufficiale": bool(r["ufficiale"]), "ufficiale_tcv": r["ufficiale_tcv"],
+                     "famiglia": r["famiglia"], "nome": r["nome"], "cliente": r["cliente"], "versione": r["versione"],
                      "corrente": bool(r["corrente"]), "gara": ({**info, "chiave": r["gara_chiave"]} if r["gara_chiave"] else None),
                      "gg": r["tot_gg"], "costo": r["tot_costo"], "prezzo": r["tot_prezzo"], "margine": r["tot_margine"], "am_prezzo": r["tot_am_prezzo"],
                      "modificata_il": r["modificata_il"]}
@@ -665,6 +680,8 @@ class StimeStore:
         ora = ora or _ora()
         with self._lock, self.conn() as c:
             prima = self._stima(c, self._riga_stima(c, sid))
+            if prima["ufficiale"]:
+                raise StimaError("La stima è ufficiale: è in sola lettura. Per cambiarla togli il flag \"ufficiale\" o crea una nuova versione.")
             s = {**prima, **{k: v for k, v in dati.items() if k in ("nome", "cliente", "gara", "durata_mesi", "prezzo_obiettivo", "note", "am", "righe",
                                                                        "voci_corpo", "training_be", "training_fe", "snapshot", "workstream")}}
             if not isinstance(s.get("snapshot"), dict) or not s["snapshot"].get("tipi"):
@@ -706,6 +723,35 @@ class StimeStore:
             if self._nessuna_corrente(c, nid):
                 self._rendi_corrente(c, nid)
             return self._stima(c, self._riga_stima(c, nid))
+
+    @staticmethod
+    def tcv(s):
+        """Valore totale della stima per il TCV della gara: progetto + AM (sempre insieme), oppure il prezzo dell'Assessment."""
+        res = calcola(s)
+        if res.get("tipo") == "assessment":
+            p = res["assessment"]["prezzo"]
+            return None if p is None else round(float(p), 2)
+        p, am = res["progetto"]["prezzo"], res["am"]
+        if p is None or (am and am.get("prezzo") is None and am.get("calcolabile", True)):
+            return None
+        return round(float(p) + (float(am["prezzo"]) if am and am.get("prezzo") is not None else 0), 2)
+
+    def imposta_ufficiale(self, sid, tcv, ora=None):
+        """Segna la stima come ufficiale (chiusa e certificata): una sola per gara; diventa anche la corrente."""
+        with self._lock, self.conn() as c:
+            r = self._riga_stima(c, sid)
+            if not r["gara_chiave"]:
+                raise StimaError("Per renderla ufficiale la stima deve essere collegata a una gara (con codice SS)")
+            c.execute("UPDATE stime SET ufficiale=0, ufficiale_il=NULL, ufficiale_tcv=NULL WHERE gara_chiave=? AND id<>?", (r["gara_chiave"], sid))
+            c.execute("UPDATE stime SET ufficiale=1, ufficiale_il=?, ufficiale_tcv=? WHERE id=?", (ora or _ora(), tcv, sid))
+            self._rendi_corrente(c, sid)
+            return self._stima(c, self._riga_stima(c, sid))
+
+    def revoca_ufficiale(self, sid):
+        with self._lock, self.conn() as c:
+            self._riga_stima(c, sid)
+            c.execute("UPDATE stime SET ufficiale=0, ufficiale_il=NULL, ufficiale_tcv=NULL WHERE id=?", (sid,))
+            return self._stima(c, self._riga_stima(c, sid))
 
     def imposta_corrente(self, sid):
         with self._lock, self.conn() as c:
