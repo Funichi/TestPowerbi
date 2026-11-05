@@ -98,6 +98,14 @@ Vista "Referenze" nel menu: ricerca per argomento (con sinonimi), cliente, ambit
 - **Copia testo**: copia negli appunti titolo e cliente, racconto da 30 secondi e racconto esteso in testo semplice (sezioni con titolo, elenchi con «• »).
 - **Scheda Cliente**: riquadro «Referenze» con il numero di referenze del cliente (nome abbinato senza maiuscole, punteggiatura e S.p.A.) e il link «Vedi le referenze →» alla ricerca già filtrata. Compare solo se l'archivio delle referenze esiste.
 
+## Formule senza valori nell'Excel
+
+L'app legge i valori che Excel salva nel file accanto alle formule. Se il file è stato scritto senza Excel (per esempio da "Esporta in Excel" quando Excel non risponde e l'app scrive il file direttamente con openpyxl), le formule restano ma i loro valori no: all'apertura Excel li ricalcola (il file è marcato per il ricalcolo completo), ma chi legge il file prima li vede vuoti. All'import l'app ricostruisce allora le due colonne che le servono, con le stesse regole delle formule del file:
+- **SS**: prefisso del cliente dalla tabella `MappaSS` (Cliente → Prefisso SS, maiuscole indifferenti, vince la prima riga) + progressivo dell'anno della Data ins., contando le righe sopra con lo stesso prefisso nello stesso anno; "DA CENSIRE" se il cliente non è in MappaSS; vuoto se mancano cliente o data;
+- **Commessa**: codice di `Tabella1` in Domini per Vertical + anno (della colonna che usa la formula di quella riga, Data ins. o Data consegna), prima riga trovata come CERCA.VERT.
+
+Si ricalcolano solo le celle con una formula e senza valore; un avviso dice quante. Verificato sul file reale: 815 SS e 815 commesse uguali a quelle calcolate dalle formule.
+
 ## Stimometro
 
 Modulo di stima dei progetti Data (specifica: "Stimometro: specifica funzionale e tecnica", v1.0). Sviluppato per fasi: 1 motore di calcolo, 2 dati e persistenza, 3 interfaccia, 4 export Excel, 5 integrazione con le gare.
