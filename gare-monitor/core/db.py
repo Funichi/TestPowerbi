@@ -88,6 +88,7 @@ class Store:
                           [r["xl"], json.dumps({**r["cells"], "__att": att}, ensure_ascii=False), att] + vals)
             self._set_meta(c, "headers", headers)
             self._set_meta(c, "domini", data["domini"])
+            self._set_meta(c, "ricalcolati", data.get("ricalcolati") or {})
             self._set_meta(c, "imported_at", dt.datetime.now().isoformat(timespec="seconds"))
             self._set_meta(c, "source", source)
         self.version += 1

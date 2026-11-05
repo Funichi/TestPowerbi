@@ -7,6 +7,7 @@ import tempfile
 import warnings
 
 import openpyxl
+from openpyxl.utils import column_index_from_string
 
 from .normalize import normalize_rows
 
@@ -151,6 +152,87 @@ def _cell_value(v):
     return v
 
 
+def _is_formula(v):
+    return (isinstance(v, str) and v.startswith("=")) or type(v).__name__ in ("ArrayFormula", "DataTableFormula")
+
+
+def _formula_text(v):
+    return v.text if hasattr(v, "text") else str(v or "")
+
+
+def _tabella(wb, nome):
+    """Righe (dict per intestazione) di una tabella Excel cercata per nome in tutti i fogli; None se non c'è."""
+    for ws in wb.worksheets:
+        for t in ws.tables.values():
+            if t.name.casefold() == nome.casefold():
+                righe = list(ws[t.ref])
+                intest = [clean_text(c.value) for c in righe[0]]
+                return [{h: c.value for h, c in zip(intest, r) if h} for r in righe[1:]]
+    return None
+
+
+def _anno(v):
+    return v.year if isinstance(v, (dt.date, dt.datetime)) else None
+
+
+def ricalcola_formule(ws_val, ws_form, wb_val, cols, domini):
+    """Celle calcolate da formule ma salvate senza il valore (file scritto senza Excel, per esempio da openpyxl):
+    l'app le ricostruisce con le stesse regole delle formule dell'Excel. Ritorna {colonna: {n_riga: valore}}.
+    - SS: prefisso del cliente dalla tabella MappaSS (Cliente → Prefisso SS) + progressivo dell'anno della Data ins.,
+      contando le righe sopra con lo stesso prefisso nello stesso anno (come la formula LET/XLOOKUP del file);
+      "DA CENSIRE" se il cliente non è in MappaSS; vuoto se mancano cliente o data.
+    - Commessa: codice da Domini per Vertical + anno della Data ins."""
+    out = {}
+    c_cli, c_ins = cols.get("Cliente"), cols.get("Data ins.")
+    if "SS" in cols and c_cli and c_ins:
+        c = cols["SS"]
+        da_fare = [r for r in range(2, ws_val.max_row + 1) if ws_val.cell(r, c).value is None and _is_formula(ws_form.cell(r, c).value)
+                   and "MappaSS" in _formula_text(ws_form.cell(r, c).value)]
+        mappa_righe = _tabella(wb_val, "MappaSS") if da_fare else None
+        if da_fare and mappa_righe is not None:
+            mappa = {}
+            for m in mappa_righe:
+                k = m.get("Cliente")
+                if k is not None and str(k).casefold() not in mappa:          # XLOOKUP: prima corrispondenza, maiuscole indifferenti
+                    mappa[str(k).casefold()] = m.get("Prefisso SS")
+            pref = lambda v: "" if v in (None, "") else str(mappa.get(str(v).casefold()) or "")
+            fare, conta, ss = set(da_fare), {}, {}
+            for r in range(2, ws_val.max_row + 1):
+                cli, ins = ws_val.cell(r, c_cli).value, ws_val.cell(r, c_ins).value
+                p, anno = pref(cli), _anno(ins)
+                if r in fare:
+                    if cli in (None, "") or ins in (None, ""):
+                        ss[r] = None
+                    elif not p:
+                        ss[r] = "DA CENSIRE"
+                    else:
+                        ss[r] = p + str(1 if r == 2 else conta.get((anno, p), 0) + 1)
+                if p and anno:
+                    conta[(anno, p)] = conta.get((anno, p), 0) + 1
+            out["SS"] = ss
+    if "Commessa" in cols and cols.get("Vertical") and c_ins:
+        c = cols["Commessa"]
+        com = {}
+        # CERCA.VERT(Settore&Anno; Tabella1; 3; FALSO): vince la PRIMA riga di Domini con quel settore e quell'anno
+        codici = {}
+        for x in _tabella(wb_val, "Tabella1") or []:
+            if x.get("Settore") and x.get("Codice") and x.get("Anno"):
+                codici.setdefault(f"{str(x['Settore']).strip().casefold()}|{int(x['Anno'])}", str(x["Codice"]).strip())
+        codici = codici or (domini.get("commesse") or {})
+        rif = re.compile(r"CONCAT\(\$?([A-Z]{1,3})\$?\d+\s*,\s*YEAR\(\$?([A-Z]{1,3})\$?\d+\)", re.I)
+        for r in range(2, ws_val.max_row + 1):
+            f = ws_form.cell(r, c).value
+            if ws_val.cell(r, c).value is None and _is_formula(f):
+                m = rif.search(_formula_text(f))                     # le colonne che usa davvero la formula di questa riga
+                c_v = column_index_from_string(m.group(1)) if m else cols["Vertical"]
+                c_a = column_index_from_string(m.group(2)) if m else c_ins
+                vert, anno = ws_val.cell(r, c_v).value, _anno(ws_val.cell(r, c_a).value)
+                com[r] = codici.get(f"{str(vert or '').strip().casefold()}|{anno}") if anno else None
+        if com:
+            out["Commessa"] = com
+    return out
+
+
 def read_excel(path):
     """Legge TUTTE le colonne del foglio principale (+ le liste di Domini), su una copia temporanea del file.
     Ritorna {'headers': [...], 'rows': [{'xl': n_riga, 'cells': {colonna: valore}}], 'domini': {...}}."""
@@ -189,14 +271,25 @@ def read_excel(path):
         missing = [f for f in ("Cliente", "Stato", "Data ins.") if f not in cols]
         if missing:
             raise ValueError(f"Nel foglio '{SHEET_MAIN}' mancano le colonne: {', '.join(missing)}")
+        domini = _read_domini(wb[SHEET_DOMINI] if SHEET_DOMINI in wb.sheetnames else None)
+        # celle con formule salvate senza valore (file scritto senza Excel): ricalcolo SS e Commessa come le formule del file
+        ricalcolati = {}
+        if any(ws.cell(r, cols[h]).value is None for h in ("SS", "Commessa") if h in cols for r in range(2, min(ws.max_row, 60) + 1)):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                wf = openpyxl.load_workbook(copy, data_only=False)
+            ricalcolati = ricalcola_formule(ws, wf[SHEET_MAIN], wb, cols, domini)
         rows = []
         for r in range(2, ws.max_row + 1):
             cells = {h: _cell_value(ws.cell(r, cols[h]).value) for h in headers}
+            for h, valori in ricalcolati.items():
+                if r in valori:
+                    cells[h] = valori[r]
             if not (clean_text(cells.get("Cliente")) or clean_text(cells.get("Oggetto"))):
                 continue
             rows.append({"xl": r, "cells": cells, "att": fill_level(ws.cell(r, cols["Cliente"]))})
-        domini = _read_domini(wb[SHEET_DOMINI] if SHEET_DOMINI in wb.sheetnames else None)
-        return {"headers": headers, "rows": rows, "domini": domini}
+        n = {h: sum(1 for v in valori.values() if v not in (None, "")) for h, valori in ricalcolati.items()}
+        return {"headers": headers, "rows": rows, "domini": domini, "ricalcolati": {h: k for h, k in n.items() if k}}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

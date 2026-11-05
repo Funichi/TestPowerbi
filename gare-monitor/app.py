@@ -739,7 +739,7 @@ def state():
     return jsonify({"local": is_local(), "password_set": bool(cfg.get("password_hash")), "totp_on": bool(cfg.get("totp_secret")), "recuperi_rimasti": len(cfg.get("totp_recupero", [])), "sessione_giorni": _giorni_sessione(cfg), "listen_all": bool(cfg.get("listen_all")),
                     "excel_newer": newer, "auto_imported": auto, "version": updater.current_version(BASE_DIR), "update_token_set": bool(cfg.get("github_token")), "excel_com": excel_available() and cfg.get("writer", "auto") != "openpyxl",
                     "github_repo": cfg.get("github_repo") or updater.DEFAULT_REPO, "referenze_json": referenze_json_path(), "can_update": FROZEN and os.name == "nt","path": cfg.get("excel_path") or DEFAULT_EXCEL_PATH, "excel_ok": bool(excel_path()), "db_path": st.path,
-                    "exists": bool(excel_path()) or st.has_data(), "imported": st.has_data(), "imported_at": st.meta("imported_at"),
+                    "exists": bool(excel_path()) or st.has_data(), "imported": st.has_data(), "imported_at": st.meta("imported_at"), "ricalcolati": st.meta("ricalcolati") or {},
                     "pending": st.counts(), "oggi": dt.date.today().isoformat(), "clienti_dir": clienti_dir()})
 
 

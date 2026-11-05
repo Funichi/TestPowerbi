@@ -101,6 +101,16 @@ function applyState() {
   const d = $("#file-dot"); d.classList.toggle("warn", !!st.excel_newer); d.classList.toggle("ok", !st.excel_newer);
   const n = st.excel_newer ? "\nIl file Excel è più recente del database: premi “Aggiorna dall'Excel” (ci sono modifiche locali non esportate)." : "";
   $("#file-box").title = ($("#file-box").title || "").split("\n")[0] + n;
+  avvisoRicalcolati(st);
+}
+// il file aveva formule senza valori (salvato senza Excel): l'app ha ricalcolato SS e Commessa. Un avviso per ogni import.
+function avvisoRicalcolati(st) {
+  const r = (st || {}).ricalcolati || {}, parti = [];
+  if (r.SS) parti.push(`${r.SS} codici SS`);
+  if (r.Commessa) parti.push(`${r.Commessa} commesse`);
+  if (!parti.length || sessionStorage.getItem("ricalcolati") === st.imported_at) return;
+  try { sessionStorage.setItem("ricalcolati", st.imported_at); } catch (e) {}
+  toastAction(`Nell'Excel alcune formule non avevano il valore salvato (file scritto senza Excel): l'app ha ricalcolato ${parti.join(" e ")} con le stesse regole del file. Per sistemarlo apri l'Excel e salvalo una volta.`, "Ok", () => {});
 }
 // ogni minuto controlla se l'Excel è stato sostituito: se non ci sono modifiche locali l'app lo rilegge da sola
 setInterval(async () => {

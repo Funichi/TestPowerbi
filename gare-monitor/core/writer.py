@@ -335,6 +335,7 @@ class OpenpyxlWriter:
                 ws = wb[SHEET_MAIN]
                 cols = {str(c.value).strip(): c.column for c in ws[1] if c.value}
                 res = fn(ws, cols)
+                wb.calculation.fullCalcOnLoad = True          # openpyxl non salva i valori delle formule: Excel le ricalcola all'apertura
                 wb.save(self.path)
                 return res
             except WriteError:
